@@ -21,7 +21,9 @@
 //!
 //! pub struct Keyword { /* hierarchy path, e.g. ["Travel","Italy","Rome"] */ }
 //! impl Keyword {
-//!     pub fn new(path: Vec<String>) -> Self;       // non-empty path
+//!     /// Err(ModelError::EmptyKeyword) for an empty path or an empty /
+//!     /// whitespace-only part.
+//!     pub fn new(parts: Vec<String>) -> Result<Keyword, ModelError>;
 //!     pub fn name(&self) -> &str;                  // last part
 //!     pub fn path(&self) -> &[String];
 //!     pub fn depth(&self) -> usize;                // 1 for a root keyword
@@ -46,11 +48,11 @@
 //! `Report::skipped` with an empty or whitespace-only reason must still
 //! record a non-empty reason (e.g. "unspecified"), so nothing is lost silently.
 
-use model::{Folder, Keyword, Photo, Rating, Report};
+use model::{Folder, Keyword, ModelError, Photo, Rating, Report};
 use std::path::PathBuf;
 
 fn kw(parts: &[&str]) -> Keyword {
-    Keyword::new(parts.iter().map(|s| s.to_string()).collect())
+    Keyword::new(parts.iter().map(|s| s.to_string()).collect()).unwrap()
 }
 
 #[test]
@@ -127,7 +129,7 @@ fn keyword_supports_umlauts_and_emoji() {
 #[test]
 fn keyword_supports_deep_hierarchy() {
     let parts: Vec<String> = (0..50).map(|i| format!("level{i}")).collect();
-    let k = Keyword::new(parts);
+    let k = Keyword::new(parts).unwrap();
     assert_eq!(k.depth(), 50);
 }
 
@@ -186,4 +188,20 @@ fn every_skipped_item_has_non_empty_reason() {
         assert!(!s.reason.trim().is_empty());
     }
     assert!(r.is_balanced());
+}
+
+#[test]
+fn keyword_new_rejects_empty_path_and_empty_parts() {
+    assert!(matches!(
+        Keyword::new(vec![]),
+        Err(ModelError::EmptyKeyword)
+    ));
+    assert!(matches!(
+        Keyword::new(vec!["Travel".to_string(), String::new()]),
+        Err(ModelError::EmptyKeyword)
+    ));
+    assert!(matches!(
+        Keyword::new(vec!["  ".to_string()]),
+        Err(ModelError::EmptyKeyword)
+    ));
 }
