@@ -1,0 +1,13 @@
+[package]
+name = "lrcat-fixtures"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Generator for synthetic Lightroom Classic 15 test catalogs"
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"
