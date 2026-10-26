@@ -148,12 +148,20 @@ fn path_bytes(path: &Path) -> Result<Vec<u8>, rusqlite::Error> {
         .ok_or_else(|| rusqlite::Error::InvalidPath(path.to_path_buf()))
 }
 
-/// Percent-encodes everything except RFC 3986 unreserved characters and `/`.
-/// A path that starts with a drive letter (`C:/...`) gets a leading `/` so
-/// SQLite reads it as `file:///C:/...`; the drive colon stays unencoded.
+/// Percent-encodes a path for the current platform; see [`encode_path_for`].
 fn encode_path(raw: &[u8]) -> String {
+    encode_path_for(raw, cfg!(windows))
+}
+
+/// Percent-encodes everything except RFC 3986 unreserved characters and `/`.
+///
+/// With `windows` set, a path that starts with a drive letter (`C:/...`)
+/// gets a leading `/` so SQLite reads it as `file:///C:/...`; the drive
+/// colon stays unencoded. Elsewhere `a:x` is an ordinary relative name, so
+/// the colon is encoded and the path stays relative.
+fn encode_path_for(raw: &[u8], windows: bool) -> String {
     let mut out = String::with_capacity(raw.len() + 8);
-    let has_drive = raw.len() >= 2 && raw[0].is_ascii_alphabetic() && raw[1] == b':';
+    let has_drive = windows && raw.len() >= 2 && raw[0].is_ascii_alphabetic() && raw[1] == b':';
     if has_drive {
         out.push('/');
         out.push(raw[0] as char);
@@ -196,9 +204,32 @@ mod tests {
     #[test]
     fn encodes_windows_drive_path() {
         assert_eq!(
-            encode_path(b"C:/Users/x y.lrcat"),
-            "///C:/Users/x%20y.lrcat"
+            encode_path_for(b"C:/data/x y.lrcat", true),
+            "///C:/data/x%20y.lrcat"
         );
+    }
+
+    #[test]
+    fn drive_pattern_is_plain_relative_name_off_windows() {
+        assert_eq!(encode_path_for(b"a:x.lrcat", false), "a%3Ax.lrcat");
+        assert_eq!(
+            encode_path_for(b"C:/data/x y.lrcat", false),
+            "C%3A/data/x%20y.lrcat"
+        );
+    }
+
+    #[test]
+    fn both_variants_agree_on_paths_without_drive() {
+        for raw in [&b"/a/b.lrcat"[..], b"dir/cat.lrcat", b"/x y/a?b"] {
+            assert_eq!(encode_path_for(raw, true), encode_path_for(raw, false));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn uri_keeps_relative_path_with_colon_relative_on_unix() {
+        let uri = read_only_uri(Path::new("a:x.lrcat")).unwrap();
+        assert_eq!(uri, "file:a%3Ax.lrcat?mode=ro&immutable=1");
     }
 
     #[test]
