@@ -1,0 +1,11 @@
+[package]
+name = "lr2lc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lr2lc"
+path = "src/main.rs"
+
+[dependencies]
