@@ -1,7 +1,11 @@
 //! Acceptance tests for reading folders.
 //!
 //! Expected API:
-//! - `Catalog::folders(&self) -> Result<Vec<model::Folder>, ReadError>`.
+//! - `Catalog::folders(&self, report: &mut model::Report)
+//!   -> Result<Vec<model::Folder>, ReadError>`. Every folder row calls
+//!   `report.read()`; a folder without a valid root folder is reported via
+//!   `report.skipped(..)` (reason contains "root" and the folder id, no path)
+//!   instead of failing. The reader never calls `report.converted()`.
 //!   Each folder's path is the `absolutePath` of its root folder
 //!   (`AgLibraryRootFolder`) followed by `pathFromRoot` (`AgLibraryFolder`).
 //!   Root folders themselves appear as folders with an empty `pathFromRoot`
@@ -9,6 +13,7 @@
 //!   only, without any file system access.
 
 use lr_reader::{Catalog, checksum};
+use model::Report;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -21,8 +26,9 @@ fn small_fixture(dir: &Path) -> PathBuf {
 }
 
 fn folder_paths(catalog: &Catalog) -> Vec<String> {
+    let mut report = Report::new();
     catalog
-        .folders()
+        .folders(&mut report)
         .expect("read folders")
         .iter()
         .map(|f| f.path.to_string_lossy().into_owned())
@@ -92,7 +98,64 @@ fn reading_folders_does_not_change_the_catalog() {
     let before = checksum(&path).unwrap();
     {
         let catalog = Catalog::open(&path).unwrap();
-        let _ = catalog.folders().expect("read folders");
+        let mut report = Report::new();
+        let _ = catalog.folders(&mut report).expect("read folders");
     }
     assert_eq!(before, checksum(&path).unwrap());
+}
+
+#[test]
+fn every_folder_row_is_counted_as_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let catalog = Catalog::open(&small_fixture(dir.path())).unwrap();
+    let mut report = Report::new();
+    let folders = catalog.folders(&mut report).unwrap();
+    assert_eq!(report.read_count() as i64, lrcat_fixtures::small::FOLDERS);
+    assert_eq!(report.skipped_count(), 0);
+    assert_eq!(
+        report.converted_count(),
+        0,
+        "reader must not call converted()"
+    );
+    assert_eq!(folders.len(), report.read_count());
+}
+
+#[test]
+fn broken_root_folder_is_skipped_not_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = small_fixture(dir.path());
+    let broken_id: i64;
+    {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        broken_id = c
+            .query_row(
+                "SELECT id_local FROM AgLibraryFolder WHERE pathFromRoot <> '' ORDER BY id_local LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        c.execute(
+            "UPDATE AgLibraryFolder SET rootFolder = 987654 WHERE id_local = ?1",
+            [broken_id],
+        )
+        .unwrap();
+    }
+    let catalog = Catalog::open(&path).unwrap();
+    let mut report = Report::new();
+    let folders = catalog.folders(&mut report).expect("must not fail");
+    assert_eq!(report.read_count() as i64, lrcat_fixtures::small::FOLDERS);
+    assert_eq!(report.skipped_count(), 1);
+    assert_eq!(folders.len(), report.read_count() - 1);
+    let reason = &report.skipped_items()[0].reason;
+    assert!(reason.contains("root"), "reason: {reason}");
+    assert!(reason.contains(&broken_id.to_string()), "reason: {reason}");
+    assert!(
+        !reason.contains('/') && !reason.contains('\\'),
+        "no paths: {reason}"
+    );
+    // read = converted + skipped once the caller marks the rest converted.
+    for _ in &folders {
+        report.converted();
+    }
+    assert!(report.is_balanced());
 }
