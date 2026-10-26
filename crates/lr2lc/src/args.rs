@@ -51,7 +51,13 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
             Some("--map") => {
                 let value = args.next().ok_or("--map needs a value OLD=NEW")?;
                 let spec = value.to_str().ok_or("--map value is not valid UTF-8")?;
-                rules.push(PathMapping::parse(spec).map_err(|e| e.to_string())?);
+                let rule = PathMapping::parse(spec).map_err(|e| e.to_string())?;
+                // The library allows an empty target (relative result), but on
+                // the command line it is almost always a typo.
+                if rule.to().trim().is_empty() {
+                    return Err(format!("--map {spec}: the new prefix is empty"));
+                }
+                rules.push(rule);
             }
             Some("--report") => {
                 if report.is_some() {
@@ -138,6 +144,21 @@ mod tests {
         assert!(parse(&["cat.lrcat", "--report"]).is_err());
         assert!(parse(&["cat.lrcat", "--report", "a", "--report", "b"]).is_err());
         assert!(parse(&["a.lrcat", "b.lrcat"]).is_err());
+    }
+
+    #[test]
+    fn empty_or_blank_mapping_target_is_rejected() {
+        for spec in ["/x=", "/x=   ", "/x=\t", "C:\\data= "] {
+            let err = parse(&["cat.lrcat", "--map", spec]).unwrap_err();
+            assert!(err.contains("empty"), "{spec}: {err}");
+        }
+        assert!(parse(&["cat.lrcat", "--map", "/a=/b", "--map", "/x="]).is_err());
+    }
+
+    #[test]
+    fn mapping_target_with_content_is_kept_as_given() {
+        let o = run(&["cat.lrcat", "--map", "/x= /y"]);
+        assert_eq!(o.mappings.rules()[0].to(), " /y");
     }
 
     #[test]
