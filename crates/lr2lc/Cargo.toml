@@ -9,6 +9,11 @@ name = "lr2lc"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1"
+lr-reader = { path = "../lr-reader" }
+model = { path = "../model" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 lrcat-fixtures = { path = "../../tests/fixtures/generator" }
