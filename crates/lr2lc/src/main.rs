@@ -3,9 +3,11 @@
 mod args;
 mod dry_run;
 mod output;
+mod report_file;
 
 use anyhow::{Context, Result, bail};
 use args::{Command, RunOptions, USAGE, parse_args};
+use report_file::ReportTarget;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -18,13 +20,21 @@ fn main() -> ExitCode {
             println!("lr2lc {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Ok(Command::Run(options)) => match run(&options) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("error: {e:#}");
-                ExitCode::from(1)
-            }
-        },
+        Ok(Command::Run(options)) => {
+            // Check the report target before anything is read, so a wrong
+            // --report can never overwrite the catalog or another file.
+            let target = match &options.report {
+                Some(path) => match report_file::check(path, &options.catalog) {
+                    Ok(target) => Some(target),
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        return ExitCode::from(2);
+                    }
+                },
+                None => None,
+            };
+            run_and_report(&options, target.as_ref())
+        }
         Err(msg) => {
             eprintln!("error: {msg}\n\n{USAGE}");
             ExitCode::from(2)
@@ -32,8 +42,18 @@ fn main() -> ExitCode {
     }
 }
 
+fn run_and_report(options: &RunOptions, target: Option<&ReportTarget>) -> ExitCode {
+    match run(options, target) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e:#}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 /// Runs a conversion. Only the dry run exists so far.
-fn run(options: &RunOptions) -> Result<()> {
+fn run(options: &RunOptions, report: Option<&ReportTarget>) -> Result<()> {
     if options.apply {
         bail!(
             "--apply is not implemented yet: writing to LightCraft is not available; \
@@ -42,9 +62,9 @@ fn run(options: &RunOptions) -> Result<()> {
     }
     let outcome = dry_run::run(&options.catalog, &options.mappings)?;
     print!("{}", output::summary(&outcome));
-    if let Some(path) = &options.report {
-        std::fs::write(path, output::report_json(&outcome))
-            .with_context(|| format!("cannot write report to {}", path.display()))?;
+    if let (Some(target), Some(given)) = (report, &options.report) {
+        report_file::write(target, &output::report_json(&outcome))
+            .with_context(|| format!("cannot write report to {}", given.display()))?;
     }
     if !outcome.catalog_unchanged {
         bail!("the catalog changed during the run (checksum differs); is Lightroom running?");
