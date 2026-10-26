@@ -1,0 +1,13 @@
+/target/
+/.worktrees/
+
+# Lightroom catalogs never belong in this repository
+*.lrcat
+*.lrcat-data
+*.lrcat-data/
+*.lrdata/
+*.lrcat-wal
+*.lrcat-shm
+*.lrcat.lock
+
+.DS_Store
