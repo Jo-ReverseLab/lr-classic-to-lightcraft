@@ -5,3 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+
+[dev-dependencies]
+lrcat-fixtures = { path = "../../tests/fixtures/generator" }
+tempfile = "3"
