@@ -4,7 +4,7 @@
 //! Output is deterministic.
 
 use rusqlite::{Connection, Result, params};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Fixed counts of the small fixture; tests assert exactly these numbers.
 pub mod small {
@@ -20,6 +20,18 @@ pub mod small {
     pub const RATING_ZERO: i64 = 3;
     /// Photos with 1, 2, 3, 4 and 5 stars.
     pub const RATING_STARS: [i64; 5] = [3, 2, 3, 2, 2];
+    /// Original files that are absent on disk in `write_small_catalog_with_files`.
+    pub const MISSING_FILES: i64 = 2;
+    /// `AgLibraryFile.id_local` of the missing originals. File 2 is `IMG_0001` in
+    /// the Windows-style root (the other `IMG_0001` exists); file 3 has a
+    /// virtual copy (photo 20) that shares it.
+    pub const MISSING_FILE_IDS: [i64; 2] = [2, 3];
+    /// `Adobe_images.id_local` of photos whose original is missing (incl. the
+    /// virtual copy).
+    pub const MISSING_PHOTO_IDS: [i64; 3] = [2, 3, 20];
+    /// Directory names of the two root folders below the target directory.
+    pub const MACOS_ROOT_DIR: &str = "macos-pictures";
+    pub const WINDOWS_ROOT_DIR: &str = "windows-pictures";
 }
 
 const SCHEMA: &str = "
@@ -153,11 +165,71 @@ const KEYWORDS: [(i64, Option<&str>, i64); 12] = [
 
 /// Writes the small fixture with the fixed counts in [`small`].
 pub fn write_small_catalog(path: &Path) -> Result<()> {
+    write_small(
+        path,
+        "/Users/example/Pictures/",
+        "C:\\Users\\example\\Pictures\\",
+    )
+}
+
+fn io_err(e: std::io::Error) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(e))
+}
+
+/// Root folder path string below `dir` with a trailing separator.
+fn root_below(dir: &Path, name: &str) -> String {
+    let mut s = dir.join(name).to_string_lossy().into_owned();
+    s.push(std::path::MAIN_SEPARATOR);
+    s
+}
+
+/// Writes the small fixture as `dir/small.lrcat` and returns that path.
+///
+/// Both root folders lie below `dir` (`small::MACOS_ROOT_DIR`,
+/// `small::WINDOWS_ROOT_DIR`), so the stored paths are valid on the test
+/// machine. Every original gets a tiny placeholder file (not a real image)
+/// except the files in `small::MISSING_FILE_IDS`. Counts are the same as in
+/// `write_small_catalog`.
+pub fn write_small_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    std::fs::create_dir_all(dir).map_err(io_err)?;
+    let mac = root_below(dir, small::MACOS_ROOT_DIR);
+    let win = root_below(dir, small::WINDOWS_ROOT_DIR);
+    let catalog = dir.join("small.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    let c = Connection::open_with_flags(&catalog, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let mut st = c.prepare(
+        "SELECT f.id_local, r.absolutePath, d.pathFromRoot, f.idx_filename FROM AgLibraryFile f \
+         JOIN AgLibraryFolder d ON d.id_local = f.folder \
+         JOIN AgLibraryRootFolder r ON r.id_local = d.rootFolder ORDER BY f.id_local",
+    )?;
+    let rows = st.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+        ))
+    })?;
+    for row in rows {
+        let (id, root, rel, name) = row?;
+        let mut p = PathBuf::from(root);
+        for part in rel.split('/').filter(|x| !x.is_empty()) {
+            p.push(part);
+        }
+        std::fs::create_dir_all(&p).map_err(io_err)?;
+        if !small::MISSING_FILE_IDS.contains(&id) {
+            std::fs::write(p.join(name), b"placeholder\n").map_err(io_err)?;
+        }
+    }
+    Ok(catalog)
+}
+
+fn write_small(path: &Path, mac_root: &str, win_root: &str) -> Result<()> {
     let c = create(path)?;
     c.execute_batch("BEGIN")?;
     add_variables(&c)?;
-    add_root_folder(&c, 1, "/Users/example/Pictures/", "Pictures")?;
-    add_root_folder(&c, 2, "C:\\Users\\example\\Pictures\\", "Pictures")?;
+    add_root_folder(&c, 1, mac_root, "Pictures")?;
+    add_root_folder(&c, 2, win_root, "Pictures")?;
     let long = format!("{}/", vec!["very-long-folder-name"; 13].join("/"));
     let folders: [(i64, Option<i64>, String, i64); 6] = [
         (1, None, String::new(), 1),

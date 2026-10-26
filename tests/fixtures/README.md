@@ -10,6 +10,13 @@ layout (`Adobe_DBVersion` = `1500000`). Output is deterministic: the same call
 gives a byte-identical file. It is used as a library:
 
 - `write_small_catalog(path)` writes the small fixture with fixed counts.
+- `write_small_catalog_with_files(dir)` writes the same small catalog as
+  `dir/small.lrcat` and returns its path. Both root folders lie below `dir`
+  (`macos-pictures/`, `windows-pictures/`, built with `std::path`), and every
+  original gets a tiny placeholder file (not a real image) except the files in
+  `small::MISSING_FILE_IDS` (`AgLibraryFile.id_local` 2 and 3). Missing: one of
+  the two `IMG_0001` files (Windows-style root) and a file shared with a
+  virtual copy. The affected photos are `small::MISSING_PHOTO_IDS` (2, 3, 20).
 - `write_large_catalog(path, images)` writes a catalog with exactly `images`
   photos for load tests.
 
@@ -60,9 +67,8 @@ written to a temporary directory and never committed.
 
 ## Known gaps
 
-- Missing original files are not modelled yet. The fixtures create no photo
-  files on disk, so every referenced file is absent, and no specific photos are
-  marked as missing.
+- Missing originals are modelled only by `write_small_catalog_with_files`;
+  `write_small_catalog` and large catalogs create no files on disk.
 - The small fixture has no skipped-photo split; the read = converted + skipped
   expectations are defined by the tests of the reader and writer.
 
