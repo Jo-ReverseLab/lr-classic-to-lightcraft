@@ -9,3 +9,8 @@ name = "lr2lc"
 path = "src/main.rs"
 
 [dependencies]
+
+[dev-dependencies]
+lrcat-fixtures = { path = "../../tests/fixtures/generator" }
+serde_json = "1"
+tempfile = "3"
