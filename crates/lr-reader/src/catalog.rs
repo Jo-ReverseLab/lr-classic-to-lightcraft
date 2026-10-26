@@ -25,14 +25,6 @@ pub enum ReadError {
     /// A query on an opened catalog failed.
     #[error("cannot read catalog: {0}")]
     Query(#[source] rusqlite::Error),
-    /// A folder refers to a root folder that does not exist or has no path.
-    #[error("folder {folder_id} refers to missing root folder {root_id}")]
-    MissingRootFolder {
-        /// `id_local` of the folder.
-        folder_id: i64,
-        /// The `rootFolder` value of the folder.
-        root_id: i64,
-    },
     /// A non-empty `-wal` or `-journal` file sits next to the catalog, so
     /// Lightroom may still hold changes that are not in the catalog file.
     #[error(

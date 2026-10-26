@@ -1,20 +1,24 @@
 //! Reading folders (`AgLibraryFolder` joined with `AgLibraryRootFolder`).
 
 use crate::catalog::{Catalog, ReadError};
-use model::Folder;
+use model::{Folder, Report};
 
 impl Catalog {
     /// Reads all folders, ordered by their catalog id.
     ///
     /// Each path is the root folder's `absolutePath` followed by the folder's
     /// `pathFromRoot`. Paths are assembled from the stored strings only; the
-    /// file system is never accessed. A folder whose root folder is missing
-    /// yields [`ReadError::MissingRootFolder`] instead of being dropped.
-    pub fn folders(&self) -> Result<Vec<Folder>, ReadError> {
+    /// file system is never accessed.
+    ///
+    /// Every folder row is counted with [`Report::read`]. A folder whose root
+    /// folder row is missing or has no path is recorded with
+    /// [`Report::skipped`] (the reason names the folder id, never a path) and
+    /// left out. Nothing is marked converted here.
+    pub fn folders(&self, report: &mut Report) -> Result<Vec<Folder>, ReadError> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT f.id_local, f.rootFolder, f.pathFromRoot, r.absolutePath \
+                "SELECT f.id_local, f.rootFolder, f.pathFromRoot, r.id_local, r.absolutePath \
                  FROM AgLibraryFolder f \
                  LEFT JOIN AgLibraryRootFolder r ON r.id_local = f.rootFolder \
                  ORDER BY f.id_local",
@@ -22,23 +26,54 @@ impl Catalog {
             .map_err(ReadError::Query)?;
         let rows = stmt
             .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
+                Ok(FolderRow {
+                    folder_id: row.get(0)?,
+                    root_id: row.get(1)?,
+                    rel: row.get(2)?,
+                    root_row: row.get::<_, Option<i64>>(3)?.is_some(),
+                    root_path: row.get(4)?,
+                })
             })
             .map_err(ReadError::Query)?;
         let mut folders = Vec::new();
         for row in rows {
-            let (folder_id, root_id, rel, root) = row.map_err(ReadError::Query)?;
-            let root = root.ok_or(ReadError::MissingRootFolder { folder_id, root_id })?;
-            let path = join_folder_path(&root, rel.as_deref().unwrap_or(""));
-            folders.push(Folder::new(path));
+            let row = row.map_err(ReadError::Query)?;
+            report.read();
+            match folder_from_row(row) {
+                Ok(folder) => folders.push(folder),
+                Err(reason) => report.skipped(reason),
+            }
         }
         Ok(folders)
     }
+}
+
+/// One joined folder row.
+struct FolderRow {
+    folder_id: i64,
+    root_id: Option<i64>,
+    rel: Option<String>,
+    root_row: bool,
+    root_path: Option<String>,
+}
+
+/// Turns a joined row into a folder, or returns the reason it is skipped.
+/// Reasons name catalog ids only, never paths.
+fn folder_from_row(row: FolderRow) -> Result<Folder, String> {
+    let id = row.folder_id;
+    if !row.root_row {
+        return Err(match row.root_id {
+            Some(root) => format!("folder {id}: root folder {root} not found in catalog"),
+            None => format!("folder {id}: has no root folder"),
+        });
+    }
+    let root = row
+        .root_path
+        .ok_or_else(|| format!("folder {id}: root folder has no path"))?;
+    Ok(Folder::new(join_folder_path(
+        &root,
+        row.rel.as_deref().unwrap_or(""),
+    )))
 }
 
 /// Joins a root folder path and a path relative to it.
@@ -110,25 +145,47 @@ mod tests {
         assert_eq!(join_folder_path("C:\\", "a/"), "C:\\a");
     }
 
+    fn row() -> FolderRow {
+        FolderRow {
+            folder_id: 3,
+            root_id: Some(1),
+            rel: Some("a/".into()),
+            root_row: true,
+            root_path: Some("/r/".into()),
+        }
+    }
+
     #[test]
-    fn folder_with_missing_root_is_an_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("broken.lrcat");
-        lrcat_fixtures::write_small_catalog(&path).unwrap();
-        let c = rusqlite::Connection::open(&path).unwrap();
-        c.execute(
-            "UPDATE AgLibraryFolder SET rootFolder = 99 WHERE id_local = 3",
-            [],
-        )
-        .unwrap();
-        drop(c);
-        let catalog = Catalog::open(&path).unwrap();
-        assert!(matches!(
-            catalog.folders(),
-            Err(ReadError::MissingRootFolder {
-                folder_id: 3,
-                root_id: 99
-            })
-        ));
+    fn valid_row_becomes_folder() {
+        assert_eq!(
+            folder_from_row(row()).unwrap().path,
+            std::path::PathBuf::from("/r/a")
+        );
+    }
+
+    #[test]
+    fn missing_root_row_is_skipped_with_ids() {
+        let mut r = row();
+        r.root_row = false;
+        r.root_id = Some(99);
+        let reason = folder_from_row(r).unwrap_err();
+        assert!(reason.contains("root") && reason.contains('3') && reason.contains("99"));
+        assert!(!reason.contains('/'));
+    }
+
+    #[test]
+    fn null_root_reference_is_skipped() {
+        let mut r = row();
+        r.root_row = false;
+        r.root_id = None;
+        assert!(folder_from_row(r).unwrap_err().contains("root"));
+    }
+
+    #[test]
+    fn root_without_path_is_skipped() {
+        let mut r = row();
+        r.root_path = None;
+        let reason = folder_from_row(r).unwrap_err();
+        assert!(reason.contains("root") && reason.contains('3'));
     }
 }
