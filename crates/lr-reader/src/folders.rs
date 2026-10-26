@@ -47,7 +47,7 @@ impl Catalog {
 /// root), the relative part is converted to `\` so the result is consistent.
 /// A trailing separator is removed unless the path is a bare root such as
 /// `/` or `C:\`.
-fn join_folder_path(root: &str, rel: &str) -> String {
+pub(crate) fn join_folder_path(root: &str, rel: &str) -> String {
     let windows = root.contains('\\') && !root.contains('/');
     let sep = if windows { '\\' } else { '/' };
     let mut path = root.to_string();
