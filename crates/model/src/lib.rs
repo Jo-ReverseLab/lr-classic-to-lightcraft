@@ -11,12 +11,17 @@ use std::path::PathBuf;
 pub enum ModelError {
     /// A star rating outside 0..=5.
     InvalidRating(u8),
+    /// A keyword path that is empty or has an empty or whitespace-only part.
+    EmptyKeyword,
 }
 
 impl fmt::Display for ModelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ModelError::InvalidRating(v) => write!(f, "rating {v} is outside 0..=5"),
+            ModelError::EmptyKeyword => {
+                write!(f, "keyword path is empty or has an empty part")
+            }
         }
     }
 }
@@ -91,12 +96,14 @@ pub struct Keyword {
 impl Keyword {
     /// Creates a keyword from its hierarchy path, e.g. `["Travel", "Italy"]`.
     ///
-    /// # Panics
-    ///
-    /// Panics if `path` is empty; a keyword always has a name.
-    pub fn new(path: Vec<String>) -> Self {
-        assert!(!path.is_empty(), "keyword path must not be empty");
-        Keyword { path }
+    /// Returns [`ModelError::EmptyKeyword`] if `parts` is empty or any part
+    /// is empty or whitespace-only; a keyword and each of its levels always
+    /// have a name.
+    pub fn new(parts: Vec<String>) -> Result<Keyword, ModelError> {
+        if parts.is_empty() || parts.iter().any(|p| p.trim().is_empty()) {
+            return Err(ModelError::EmptyKeyword);
+        }
+        Ok(Keyword { path: parts })
     }
 
     /// The keyword's own name (last part of the path).
@@ -223,14 +230,24 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "must not be empty")]
-    fn empty_keyword_path_panics() {
-        Keyword::new(Vec::new());
+    fn empty_keyword_path_is_rejected() {
+        assert_eq!(Keyword::new(Vec::new()), Err(ModelError::EmptyKeyword));
+    }
+
+    #[test]
+    fn whitespace_part_in_middle_is_rejected() {
+        let parts = vec!["A".into(), "\t ".into(), "C".into()];
+        assert_eq!(Keyword::new(parts), Err(ModelError::EmptyKeyword));
+    }
+
+    #[test]
+    fn empty_keyword_error_has_message() {
+        assert!(!ModelError::EmptyKeyword.to_string().is_empty());
     }
 
     #[test]
     fn keyword_is_not_child_of_itself() {
-        let k = Keyword::new(vec!["A".into()]);
+        let k = Keyword::new(vec!["A".into()]).unwrap();
         assert!(!k.is_child_of(&k));
     }
 
