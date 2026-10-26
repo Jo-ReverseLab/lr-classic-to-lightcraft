@@ -336,3 +336,84 @@ fn skipped_reasons_in_report_do_not_name_paths() {
         assert!(!r.contains(dir.path().to_str().unwrap()), "reason: {r}");
     }
 }
+
+// --- Empty mapping target (task P4-9) ---------------------------------------
+// The CLI rejects an empty or whitespace-only new prefix: exit 2, stderr
+// mentions "empty", nothing is read or written. The library keeps allowing it.
+
+#[test]
+fn map_with_empty_target_exits_two_and_mentions_empty() {
+    let (dir, cat) = with_files();
+    let cwd = tempfile::tempdir().unwrap();
+    let cat_before = tree(dir.path());
+    let out = run(cwd.path(), &[cat.as_os_str(), os("--map"), os("/x=")]);
+    assert_eq!(out.status.code(), Some(2), "stderr: {}", stderr(&out));
+    assert!(
+        stderr(&out).to_lowercase().contains("empty"),
+        "stderr: {}",
+        stderr(&out)
+    );
+    assert!(stdout(&out).trim().is_empty(), "nothing may be reported");
+    assert!(tree(cwd.path()).is_empty());
+    assert_eq!(tree(dir.path()), cat_before, "catalog folder changed");
+}
+
+#[test]
+fn map_with_whitespace_only_target_exits_two() {
+    let (dir, cat) = with_files();
+    let cwd = tempfile::tempdir().unwrap();
+    let out = run(cwd.path(), &[cat.as_os_str(), os("--map"), os("/x=   ")]);
+    assert_eq!(out.status.code(), Some(2), "stderr: {}", stderr(&out));
+    assert!(stderr(&out).to_lowercase().contains("empty"));
+    assert!(tree(cwd.path()).is_empty());
+    drop(dir);
+}
+
+#[test]
+fn map_with_empty_target_writes_no_report_file() {
+    let (dir, cat) = with_files();
+    let cwd = tempfile::tempdir().unwrap();
+    let report = cwd.path().join("report.json");
+    let out = run(
+        cwd.path(),
+        &[
+            cat.as_os_str(),
+            os("--map"),
+            os("/x="),
+            os("--report"),
+            report.as_os_str(),
+        ],
+    );
+    assert_eq!(out.status.code(), Some(2), "stderr: {}", stderr(&out));
+    assert!(!report.exists(), "report file must not be created");
+    assert!(tree(cwd.path()).is_empty());
+    drop(dir);
+}
+
+#[test]
+fn map_with_empty_target_among_valid_maps_is_still_rejected() {
+    let (dir, cat) = with_files();
+    let cwd = tempfile::tempdir().unwrap();
+    let out = run(
+        cwd.path(),
+        &[
+            cat.as_os_str(),
+            os("--map"),
+            os("/a=/b"),
+            os("--map"),
+            os("/x="),
+        ],
+    );
+    assert_eq!(out.status.code(), Some(2), "stderr: {}", stderr(&out));
+    drop(dir);
+}
+
+#[test]
+fn map_with_non_empty_target_stays_valid() {
+    let (dir, cat) = with_files();
+    let cwd = tempfile::tempdir().unwrap();
+    let out = run(cwd.path(), &[cat.as_os_str(), os("--map"), os("/x=/y")]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
+    assert!(stdout(&out).contains("dry run"));
+    drop(dir);
+}
