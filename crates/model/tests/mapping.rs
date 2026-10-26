@@ -210,7 +210,7 @@ fn new_rejects_empty_from() {
 #[test]
 fn mapping_photos_keeps_id_and_rating() {
     let m = rules(&[("/Users/example/Pictures", "/mnt/photos")]);
-    let photos = vec![
+    let photos = [
         Photo::new("/Users/example/Pictures/a.jpg", 7, Rating::new(3).unwrap()),
         Photo::new("/Volumes/other/b.jpg", 8, Rating::new(0).unwrap()),
     ];
