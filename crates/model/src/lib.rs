@@ -6,6 +6,10 @@
 use std::fmt;
 use std::path::PathBuf;
 
+pub mod mapping;
+
+pub use mapping::{PathMapping, PathMappings};
+
 /// Errors raised when building model values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelError {
@@ -13,6 +17,10 @@ pub enum ModelError {
     InvalidRating(u8),
     /// A keyword path that is empty or has an empty or whitespace-only part.
     EmptyKeyword,
+    /// A path mapping with an empty old prefix.
+    EmptyMappingPrefix,
+    /// A path mapping spec without `=` between old and new prefix.
+    InvalidMappingSpec(String),
 }
 
 impl fmt::Display for ModelError {
@@ -21,6 +29,12 @@ impl fmt::Display for ModelError {
             ModelError::InvalidRating(v) => write!(f, "rating {v} is outside 0..=5"),
             ModelError::EmptyKeyword => {
                 write!(f, "keyword path is empty or has an empty part")
+            }
+            ModelError::EmptyMappingPrefix => {
+                write!(f, "path mapping has an empty old prefix")
+            }
+            ModelError::InvalidMappingSpec(spec) => {
+                write!(f, "path mapping {spec:?} is not of the form OLD=NEW")
             }
         }
     }
