@@ -5,7 +5,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The only `Adobe_DBVersion` this reader understands (Lightroom Classic 15).
 pub const SUPPORTED_VERSION: &str = "1500000";
@@ -33,7 +33,21 @@ pub enum ReadError {
         /// The `rootFolder` value of the folder.
         root_id: i64,
     },
+    /// A non-empty `-wal` or `-journal` file sits next to the catalog, so
+    /// Lightroom may still hold changes that are not in the catalog file.
+    #[error(
+        "Lightroom may still hold unsaved changes in {}; close Lightroom and try again",
+        path.display()
+    )]
+    PendingChanges {
+        /// The side file that was found.
+        path: PathBuf,
+    },
 }
+
+/// Suffixes SQLite appends to the full catalog file name for side files
+/// that can hold changes not yet merged into the catalog.
+const SIDE_FILE_SUFFIXES: [&str; 2] = ["-wal", "-journal"];
 
 /// An open Lightroom Classic catalog. The connection is read-only and
 /// immutable, so SQLite never writes to the file or creates sidecar files.
@@ -45,7 +59,14 @@ pub struct Catalog {
 
 impl Catalog {
     /// Opens the catalog at `path` read-only and checks its version.
+    ///
+    /// Fails with [`ReadError::PendingChanges`] if a non-empty `-wal` or
+    /// `-journal` file exists, because the immutable connection would
+    /// silently ignore its contents.
     pub fn open(path: &Path) -> Result<Catalog, ReadError> {
+        if let Some(side) = pending_side_file(path) {
+            return Err(ReadError::PendingChanges { path: side });
+        }
         let uri = read_only_uri(path).map_err(ReadError::Open)?;
         let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
             | OpenFlags::SQLITE_OPEN_URI
@@ -78,6 +99,24 @@ impl Catalog {
     pub fn version(&self) -> &str {
         &self.version
     }
+}
+
+/// Returns the first `-wal` or `-journal` file next to `catalog` that is not
+/// empty. Only metadata is read; nothing is created or opened for writing.
+/// A side file whose metadata cannot be read counts as pending, so changes
+/// are never ignored silently.
+fn pending_side_file(catalog: &Path) -> Option<PathBuf> {
+    let name = catalog.file_name()?;
+    SIDE_FILE_SUFFIXES.iter().find_map(|suffix| {
+        let mut side_name = name.to_os_string();
+        side_name.push(suffix);
+        let side = catalog.with_file_name(side_name);
+        match std::fs::metadata(&side) {
+            Ok(meta) if meta.len() == 0 => None,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+            _ => Some(side),
+        }
+    })
 }
 
 /// SHA-256 of the file at `path`, used to prove a catalog stays unchanged.
@@ -192,6 +231,49 @@ mod tests {
         lrcat_fixtures::write_small_catalog(&path).unwrap();
         let catalog = Catalog::open(&path).expect("open");
         assert_eq!(catalog.version(), SUPPORTED_VERSION);
+    }
+
+    #[test]
+    fn side_file_appends_suffix_to_full_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cat.lrcat");
+        assert_eq!(pending_side_file(&path), None);
+        std::fs::write(dir.path().join("cat-wal"), b"x").unwrap();
+        assert_eq!(pending_side_file(&path), None);
+        let wal = dir.path().join("cat.lrcat-wal");
+        std::fs::write(&wal, b"x").unwrap();
+        assert_eq!(pending_side_file(&path), Some(wal));
+    }
+
+    #[test]
+    fn wal_is_reported_before_journal() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cat.lrcat");
+        let journal = dir.path().join("cat.lrcat-journal");
+        std::fs::write(&journal, b"x").unwrap();
+        assert_eq!(pending_side_file(&path), Some(journal));
+        let wal = dir.path().join("cat.lrcat-wal");
+        std::fs::write(&wal, b"x").unwrap();
+        assert_eq!(pending_side_file(&path), Some(wal));
+    }
+
+    #[test]
+    fn empty_side_files_are_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cat.lrcat");
+        std::fs::write(dir.path().join("cat.lrcat-wal"), b"").unwrap();
+        std::fs::write(dir.path().join("cat.lrcat-journal"), b"").unwrap();
+        assert_eq!(pending_side_file(&path), None);
+    }
+
+    #[test]
+    fn pending_changes_message_names_lightroom_and_file() {
+        let err = ReadError::PendingChanges {
+            path: PathBuf::from("cat.lrcat-wal"),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("Lightroom"), "{msg}");
+        assert!(msg.contains("cat.lrcat-wal"), "{msg}");
     }
 
     #[test]
