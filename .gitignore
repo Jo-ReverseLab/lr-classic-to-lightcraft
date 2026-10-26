@@ -11,3 +11,19 @@
 *.lrcat.lock
 
 .DS_Store
+
+# Local Claude Code configuration
+/.claude/
+
+# Placeholders the sandbox mounts into the working directory
+/.bash_profile
+/.bashrc
+/.profile
+/.zshrc
+/.zprofile
+/.gitconfig
+/.gitmodules
+/.mcp.json
+/.ripgreprc
+/.idea
+/.vscode
