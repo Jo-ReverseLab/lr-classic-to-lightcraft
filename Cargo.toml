@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/lr-reader", "crates/model", "crates/lc-writer", "crates/lr2lc"]
+members = ["tests/fixtures/generator", "crates/lr-reader", "crates/model", "crates/lc-writer", "crates/lr2lc"]
 
 [workspace.package]
 version = "0.1.0"
