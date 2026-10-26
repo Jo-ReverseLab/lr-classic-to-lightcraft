@@ -1,4 +1,4 @@
-//! Acceptance tests for the CLI skeleton (task P3-1).
+//! Acceptance tests for the CLI skeleton.
 //!
 //! Dry run is the default (principle 3): without `--apply` nothing is written.
 
@@ -44,7 +44,10 @@ fn no_apply_no_args_writes_nothing() {
     let dir = unique_dir("noapply");
     let out = bin().current_dir(&dir).output().unwrap();
     let code = out.status.code();
-    assert!(matches!(code, Some(0) | Some(2)), "unexpected exit: {code:?}");
+    assert!(
+        matches!(code, Some(0) | Some(2)),
+        "unexpected exit: {code:?}"
+    );
     let entries = std::fs::read_dir(&dir).unwrap().count();
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(entries, 0, "dry run must not write anything");
