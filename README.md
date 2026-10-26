@@ -79,6 +79,15 @@ Writes a machine-readable report to `FILE` after the run:
 For each area, `read` equals `converted` plus the number of `skipped`
 entries. Reasons name the catalog id, never a file path.
 
+To protect the catalog and your files, `FILE` is checked before anything is
+read, and lr2lc stops with exit code 2 if:
+
+- `FILE` is the catalog or one of its `-wal`, `-journal` or `-shm` files,
+  also when given through another path or a symbolic link;
+- `FILE` already exists and is not an earlier lr2lc report (a JSON object
+  with the key `tool_version`). An earlier report is overwritten; any other
+  file, such as a photo, is left untouched.
+
 ### `--apply`
 
 Will write the LightCraft library. Not implemented yet: lr2lc exits with an
@@ -90,7 +99,7 @@ error and reads or writes nothing.
 | --- | --- |
 | 0 | Success (also for `--help` and `--version`) |
 | 1 | The run failed: catalog cannot be opened or read, unsupported version, pending `-wal`/`-journal` changes, report cannot be written, catalog changed during the run, or `--apply` given |
-| 2 | Invalid command line (unknown option, missing value, invalid `--map`); nothing is read or written |
+| 2 | Invalid command line (unknown option, missing value, invalid `--map`, refused `--report` file); nothing is read or written |
 
 ## License
 
