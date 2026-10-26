@@ -4,9 +4,16 @@ All test catalogs are generated; none is copied from a real catalog. Every name,
 path and value below is invented. Windows and macOS paths always use the user
 name `example`.
 
-The generator (a small crate, planned as `tests/generator`) writes a SQLite file
-with the Lightroom Classic 15 layout (`Adobe_DBVersion` = `1500000`). Output is
-deterministic: the same parameters and seed give a byte-identical file.
+The generator is the workspace crate `lrcat-fixtures` in
+`tests/fixtures/generator`. It writes a SQLite file with the Lightroom Classic 15
+layout (`Adobe_DBVersion` = `1500000`). Output is deterministic: the same call
+gives a byte-identical file. It is used as a library:
+
+- `write_small_catalog(path)` writes the small fixture with fixed counts.
+- `write_large_catalog(path, images)` writes a catalog with exactly `images`
+  photos for load tests.
+
+There is no command-line interface (no `main.rs`) yet.
 
 ## Tables and columns
 
@@ -29,37 +36,35 @@ keyword `parent` chain; keyword assignments via `AgLibraryKeywordImage`.
 
 ## Small fixture (fixed counts)
 
-Committed generator output is not needed; tests call the generator. Defaults:
+The generator is called by the tests; no generated file is committed. The
+authoritative counts are the constants in the `small` module of the crate
+(root folders, folders, photos, virtual copies, keywords, keyword depth,
+assignments, ratings). Tests assert these constants. Contents:
 
-- 2 root folders (one macOS-style `/Users/example/Pictures`, one Windows-style
-  `C:\Users\example\Pictures`), 6 folders in total
-- 20 photos (including 1 virtual copy)
-- 12 keywords, max depth 4 (e.g. `Travel` > `Italy` > `Rome` > `Colosseum`)
-- 30 keyword assignments
-- ratings: 5 photos with NULL, 3 with 0, and the rest spread over 1-5
-- the same file name (`IMG_0001.jpg`) in two different folders
-- 2 photos whose files do not exist on disk
-- 1 photo with a path longer than 260 characters
+- two root folders (one macOS-style `/Users/example/Pictures`, one Windows-style
+  `C:\Users\example\Pictures`)
+- one virtual copy
+- keywords with a hierarchy up to depth 4 (e.g. `Travel` > `Italy` > `Rome` >
+  `Colosseum`), plus a hidden root keyword row that is not counted
+- ratings: NULL, 0 and 1-5 stars, counted per value
+- the same file name (`IMG_0001`) in two different folders
+- one folder path longer than 260 characters
 - keywords with umlauts and emoji, a synonym-like pair, one keyword with no
-  assigned photos (empty), one keyword with an empty name
+  assigned photos, one keyword with an empty name
 
-Tests assert these exact numbers: read = converted + skipped, e.g. 20 photos
-read, 17 converted, 3 skipped (with reasons). The exact split is defined in the
-generator and kept in one constant table used by all tests.
+## Large catalogs
 
-## Parameters for large catalogs
+`write_large_catalog` creates the requested number of photos spread over 100
+folders, with 200 keywords and one assignment per photo. Large catalogs are
+written to a temporary directory and never committed.
 
-| Parameter | Default | Meaning |
-| --- | --- | --- |
-| `--photos` | 20 | number of photos (e.g. 50000 for performance tests) |
-| `--folders` | 6 | number of folders |
-| `--keywords` | 12 | number of keywords |
-| `--max-depth` | 4 | maximum keyword depth |
-| `--keywords-per-photo` | 1.5 | average assignments per photo |
-| `--seed` | 1 | seed for the deterministic generator |
-| `--out` | required | output `.lrcat` path |
+## Known gaps
 
-Large catalogs are written to a temporary directory and never committed.
+- Missing original files are not modelled yet. The fixtures create no photo
+  files on disk, so every referenced file is absent, and no specific photos are
+  marked as missing.
+- The small fixture has no skipped-photo split; the read = converted + skipped
+  expectations are defined by the tests of the reader and writer.
 
 ## Checks every test set performs
 
