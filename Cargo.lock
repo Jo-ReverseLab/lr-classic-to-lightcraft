@@ -179,6 +179,7 @@ name = "lr-reader"
 version = "0.1.0"
 dependencies = [
  "lrcat-fixtures",
+ "model",
  "rusqlite",
  "sha2",
  "tempfile",

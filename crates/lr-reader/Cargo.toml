@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+model = { path = "../model" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 sha2 = "0.10"
 thiserror = "2"

@@ -22,15 +22,24 @@ pub enum ReadError {
     /// The catalog was written by a Lightroom version this reader does not support.
     #[error("unsupported catalog version {0} (supported: {SUPPORTED_VERSION})")]
     UnsupportedVersion(String),
+    /// A query on an opened catalog failed.
+    #[error("cannot read catalog: {0}")]
+    Query(#[source] rusqlite::Error),
+    /// A folder refers to a root folder that does not exist or has no path.
+    #[error("folder {folder_id} refers to missing root folder {root_id}")]
+    MissingRootFolder {
+        /// `id_local` of the folder.
+        folder_id: i64,
+        /// The `rootFolder` value of the folder.
+        root_id: i64,
+    },
 }
 
 /// An open Lightroom Classic catalog. The connection is read-only and
 /// immutable, so SQLite never writes to the file or creates sidecar files.
 #[derive(Debug)]
 pub struct Catalog {
-    // Used by the readers that follow; kept open for the catalog's lifetime.
-    #[allow(dead_code)]
-    conn: Connection,
+    pub(crate) conn: Connection,
     version: String,
 }
 
