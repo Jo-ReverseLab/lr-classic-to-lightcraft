@@ -17,8 +17,10 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-/// The commands that only read; everything else may change the library.
-pub const READ_COMMANDS: [&str; 4] = [
+/// The commands that only read or only change the selection; everything else
+/// may change the library.
+pub const READ_COMMANDS: [&str; 5] = [
+    "library.select",
     "library.info",
     "ui.inspect",
     "library.xmpPreferences",
@@ -36,6 +38,8 @@ pub enum KeywordListFormat {
     WrappedTexts,
     /// `{"keywords": [...nested...]}`
     WrappedNested,
+    /// The real format: a bare array of `{name, path, count, children}`.
+    Real,
     /// An answer no format accepts.
     Garbage,
 }
@@ -80,6 +84,11 @@ pub struct Config {
     pub not_saved_updates: bool,
     /// `library.import` of a path containing this text answers `failed: 1`.
     pub import_failed_for: Option<String>,
+    /// Behave like the real app: `photo.rate`, `photo.flag`, `photo.label`
+    /// and `photo.setMeta` fail with `no photos selected` while the selection
+    /// is empty, `library.select` sets it and `library.import` selects the
+    /// first imported photo. On by default.
+    pub selection_gate: bool,
 }
 
 impl Config {
@@ -89,7 +98,7 @@ impl Config {
             persistent: true,
             library_problem: None,
             auto_write: false,
-            keyword_list: KeywordListFormat::Texts,
+            keyword_list: KeywordListFormat::Real,
             import_ids: ImportIdStyle::Number,
             failures: Vec::new(),
             close_at: None,
@@ -97,6 +106,7 @@ impl Config {
             keywords: BTreeSet::new(),
             not_saved_updates: false,
             import_failed_for: None,
+            selection_gate: true,
         }
     }
 }
@@ -114,6 +124,8 @@ struct Library {
     /// file path -> photo id
     photos: BTreeMap<String, i64>,
     ratings: BTreeMap<i64, i64>,
+    /// The ids of the selected photos (empty: nothing selected).
+    selection: Vec<i64>,
     next_id: i64,
     seen: usize,
     closed_once: bool,
@@ -206,6 +218,11 @@ impl FakeLightCraft {
             .collect()
     }
 
+    /// The selection at this moment.
+    pub fn selection(&self) -> Vec<i64> {
+        self.shared.library.lock().unwrap().selection.clone()
+    }
+
     /// Keyword path texts in the fake library.
     pub fn keywords(&self) -> BTreeSet<String> {
         self.shared.library.lock().unwrap().keywords.clone()
@@ -293,6 +310,18 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
         })),
         "ui.inspect" => Ok(json!({"libraryProblem": config.library_problem})),
         "library.xmpPreferences" => Ok(json!({"autoWrite": config.auto_write})),
+        "library.select" => {
+            let ids = params["ids"].as_array().ok_or("ids is missing")?;
+            let ids: Vec<i64> = ids.iter().filter_map(Value::as_i64).collect();
+            if ids.len() != params["ids"].as_array().map_or(0, Vec::len) {
+                return Err("ids must be numbers".into());
+            }
+            if let Some(unknown) = ids.iter().find(|i| !lib.photos.values().any(|p| p == *i)) {
+                return Err(format!("unknown photo id {unknown}"));
+            }
+            lib.selection = ids;
+            Ok(json!({}))
+        }
         "keyword.list" => Ok(keyword_list(&config.keyword_list, &lib.keywords)),
         "keyword.create" => {
             let name = params["name"].as_str().ok_or("name is missing")?;
@@ -333,6 +362,9 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             let id = lib.next_id;
             lib.next_id += 1;
             lib.photos.insert(path.to_string(), id);
+            if config.selection_gate {
+                lib.selection = vec![id];
+            }
             let imported = match config.import_ids {
                 ImportIdStyle::Number => json!(id),
                 ImportIdStyle::ObjectId => json!({"id": id}),
@@ -341,6 +373,9 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             Ok(json!({"imported": [imported], "duplicates": [], "failed": 0}))
         }
         "photo.rate" | "photo.flag" | "photo.label" | "photo.setMeta" => {
+            if config.selection_gate && lib.selection.is_empty() {
+                return Err("no photos selected".into());
+            }
             let id = photo_id.filter(|id| lib.photos.values().any(|p| p == id));
             let id = id.ok_or("unknown photo id")?;
             if command == "photo.rate" {
@@ -363,6 +398,7 @@ fn keyword_list(format: &KeywordListFormat, keywords: &BTreeSet<String>) -> Valu
         KeywordListFormat::Nested => json!(nested(keywords, "")),
         KeywordListFormat::WrappedTexts => json!({"keywords": texts}),
         KeywordListFormat::WrappedNested => json!({"keywords": nested(keywords, "")}),
+        KeywordListFormat::Real => json!(real_nested(keywords, "")),
         KeywordListFormat::Garbage => json!("no keywords here"),
     }
 }
@@ -383,6 +419,38 @@ fn nested(keywords: &BTreeSet<String>, prefix: &str) -> Vec<Value> {
         .map(|k| {
             let name = k.rsplit('|').next().unwrap_or(k);
             json!({"name": name, "children": nested(keywords, k)})
+        })
+        .collect()
+}
+
+/// The real `keyword.list` nodes below `prefix`: `{name, path, count,
+/// children}`. Ancestors of a keyword appear as levels of their own.
+fn real_nested(keywords: &BTreeSet<String>, prefix: &str) -> Vec<Value> {
+    let depth = if prefix.is_empty() {
+        0
+    } else {
+        prefix.split('|').count()
+    };
+    let mut levels = BTreeSet::new();
+    for k in keywords {
+        let parts: Vec<&str> = k.split('|').collect();
+        if parts.len() > depth {
+            let level = parts[..=depth].join("|");
+            if prefix.is_empty() || level.starts_with(&format!("{prefix}|")) {
+                levels.insert(level);
+            }
+        }
+    }
+    levels
+        .iter()
+        .map(|level| {
+            let name = level.rsplit('|').next().unwrap_or(level);
+            json!({
+                "name": name,
+                "path": level,
+                "count": 0,
+                "children": real_nested(keywords, level),
+            })
         })
         .collect()
 }
