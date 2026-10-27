@@ -163,6 +163,45 @@ pub mod keyword_attr {
     pub const NAMES: [&str; 3] = ["Zyx-Attr-14", "Zyx-Attr-22", "Zyx-Attr-27"];
 }
 
+/// Counts and ids of the flag fixture ([`write_flag_catalog_with_files`]).
+///
+/// It is the small fixture with `Adobe_images.pick` set as listed in
+/// [`PICK_VALUES`]. Unlike a real catalog (where `pick` is NOT NULL), the
+/// column of this fixture is nullable so that NULL can be tested. Every
+/// `AgLibraryCollectionImage.pick` is 1, which must never be read.
+pub mod flag_edge {
+    /// `(photo id, stored value, description)`. Photos not listed store the
+    /// INTEGER 0. Photos 2 and 3 have a missing original, photo 20 is a
+    /// virtual copy.
+    pub const PICK_VALUES: [(i64, &str, &str); 12] = [
+        (4, "1", "integer 1: pick"),
+        (5, "-1", "integer -1: reject"),
+        (6, "0", "integer 0: none"),
+        (7, "NULL", "NULL: none"),
+        (8, "1.0", "real 1.0: pick"),
+        (9, "-1.0", "real -1.0: reject"),
+        (10, "2", "integer 2: unknown"),
+        (11, "'flagged'", "text: unknown"),
+        (12, "0.5", "real 0.5: unknown"),
+        (2, "-1", "reject, but original missing (skipped by the CLI)"),
+        (3, "2", "unknown, but original missing (skipped by the CLI)"),
+        (20, "1", "pick, but virtual copy (skipped by the reader)"),
+    ];
+    pub const PICK_IDS: [i64; 2] = [4, 8];
+    pub const REJECT_IDS: [i64; 2] = [5, 9];
+    pub const UNKNOWN_IDS: [i64; 3] = [10, 11, 12];
+    /// Photos 6 and 7 plus every photo not listed above.
+    pub const PHOTOS: i64 = 20;
+    /// Converted photos in the CLI: 20 rows - 1 virtual copy - 2 missing.
+    pub const CONVERTED: i64 = 17;
+    pub const SKIPPED: i64 = 3;
+    pub const PICK: i64 = 2;
+    pub const REJECT: i64 = 2;
+    pub const UNKNOWN: i64 = 3;
+    /// Converted photos with no flag (0, NULL and all unlisted photos).
+    pub const NONE: i64 = 10;
+}
+
 /// Counts and ids of the video fixture ([`write_video_catalog_with_files`]).
 pub mod video_edge {
     /// `Adobe_images` rows: the 20 of the small fixture plus virtual copy 21.
@@ -529,6 +568,43 @@ pub fn write_video_catalog_with_files(dir: &Path) -> Result<PathBuf> {
     add_video_edges(&catalog)?;
     create_original_files(&catalog)?;
     Ok(catalog)
+}
+
+/// Writes the small fixture with `Adobe_images.pick` values as listed in
+/// [`flag_edge::PICK_VALUES`] as `dir/flags.lrcat` with placeholder
+/// originals. Returns the catalog path.
+pub fn write_flag_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("flags.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_flag_edges(&catalog)?;
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+fn add_flag_edges(path: &Path) -> Result<()> {
+    let c = Connection::open(path)?;
+    // Rebuild `Adobe_images` with a nullable, untyped `pick` column.
+    let sql: String = c.query_row(
+        "SELECT sql FROM sqlite_master WHERE name = 'Adobe_images'",
+        [],
+        |r| r.get(0),
+    )?;
+    assert!(sql.contains("pick NOT NULL,"));
+    c.execute_batch("BEGIN")?;
+    c.execute_batch("ALTER TABLE Adobe_images RENAME TO Adobe_images_old")?;
+    c.execute_batch(&sql.replace("pick NOT NULL,", "pick,"))?;
+    c.execute_batch("INSERT INTO Adobe_images SELECT * FROM Adobe_images_old")?;
+    c.execute_batch("DROP TABLE Adobe_images_old")?;
+    for (id, value, _) in flag_edge::PICK_VALUES {
+        c.execute_batch(&format!(
+            "UPDATE Adobe_images SET pick = {value} WHERE id_local = {id}"
+        ))?;
+    }
+    // A pick in a collection is not the flag of the photo.
+    c.execute_batch("UPDATE AgLibraryCollectionImage SET pick = 1")?;
+    c.execute_batch("COMMIT")?;
+    Ok(())
 }
 
 /// Number of keyword assignments (`AgLibraryKeywordImage` rows) of `photo`
