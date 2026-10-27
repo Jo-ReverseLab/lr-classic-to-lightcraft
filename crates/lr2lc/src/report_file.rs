@@ -5,7 +5,8 @@
 //! is checked:
 //!
 //! - it must not resolve to the catalog or to `<catalog>-wal`, `-journal` or
-//!   `-shm`;
+//!   `-shm`, also through a hard link (same device and inode on Unix) or a
+//!   differently cased path (case-insensitive comparison elsewhere);
 //! - if it exists, it must be an earlier lr2lc report (a JSON object with the
 //!   key `tool_version`); anything else is left alone.
 //!
@@ -109,6 +110,34 @@ fn protected_paths(catalog: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// Key that identifies an existing file independently of its path.
+#[cfg(unix)]
+fn identity(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
+/// Key that identifies an existing file independently of its path. File
+/// identity is not available through stable std here, so the canonical path
+/// is compared without regard to case.
+#[cfg(not(unix))]
+fn identity(path: &Path) -> Option<String> {
+    fs::canonicalize(path)
+        .ok()
+        .map(|p| p.to_string_lossy().to_lowercase())
+}
+
+/// True if the existing file `path` is the same file as one of the existing
+/// `protected` paths, even under another name.
+fn same_file_as_any(path: &Path, protected: &[PathBuf]) -> bool {
+    let Some(target) = identity(path) else {
+        return false;
+    };
+    protected
+        .iter()
+        .any(|p| identity(p).as_ref() == Some(&target))
+}
+
 /// True if `bytes` is an earlier lr2lc report.
 fn is_earlier_report(bytes: &[u8]) -> bool {
     matches!(
@@ -136,7 +165,8 @@ pub fn check(report: &Path, catalog: &Path) -> Result<ReportTarget, TargetError>
         given: given.clone(),
         source,
     })?;
-    if protected_paths(catalog).contains(&path) {
+    let protected = protected_paths(catalog);
+    if protected.contains(&path) || same_file_as_any(&path, &protected) {
         return Err(TargetError::Catalog { given });
     }
     match fs::symlink_metadata(&path) {
@@ -232,6 +262,32 @@ mod tests {
         assert!(matches!(err, TargetError::Catalog { .. }));
         let err = check(&with_suffix(&link, "-wal"), &link).unwrap_err();
         assert!(matches!(err, TargetError::Catalog { .. }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hard_links_to_catalog_and_companions_are_same_file() {
+        let (dir, cat) = setup();
+        let wal = with_suffix(&cat, "-wal");
+        fs::write(&wal, b"wal").unwrap();
+        let protected = protected_paths(&cat);
+        for (i, original) in [&cat, &wal].into_iter().enumerate() {
+            let link = dir.path().join(format!("link{i}.json"));
+            fs::hard_link(original, &link).unwrap();
+            assert!(same_file_as_any(&link, &protected));
+            let err = check(&link, &cat).unwrap_err();
+            assert!(matches!(err, TargetError::Catalog { .. }), "{err}");
+        }
+    }
+
+    #[test]
+    fn other_or_missing_file_is_not_same_file() {
+        let (dir, cat) = setup();
+        let protected = protected_paths(&cat);
+        let other = dir.path().join("other.json");
+        assert!(!same_file_as_any(&other, &protected));
+        fs::write(&other, b"SQLite format 3\0").unwrap();
+        assert!(!same_file_as_any(&other, &protected));
     }
 
     #[test]

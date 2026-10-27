@@ -90,7 +90,7 @@ To protect the catalog and your files, `FILE` is checked before anything is
 read, and lr2lc stops with exit code 2 if:
 
 - `FILE` is the catalog or one of its `-wal`, `-journal` or `-shm` files,
-  also when given through another path or a symbolic link;
+  also when given through another path, a symbolic link or a hard link;
 - `FILE` already exists and is not an earlier lr2lc report (a JSON object
   with the key `tool_version`). An earlier report is overwritten; any other
   file, such as a photo, is left untouched.
