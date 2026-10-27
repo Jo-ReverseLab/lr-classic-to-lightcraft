@@ -319,6 +319,71 @@ pub mod caption_edge {
     ];
 }
 
+/// Counts and ids of the rights fixture ([`write_rights_catalog_with_files`]).
+///
+/// The small fixture plus `AgLibraryIPTC.copyright` rows and the tables
+/// `AgHarvestedIptcMetadata` (`image`, `creatorRef`) and
+/// `AgInternedIptcCreator` (`id_local`, `value`). The CLI converts photos 1
+/// and 4..=19 (17 photos); photos 2 and 3 (missing original) and 20 (virtual
+/// copy) are skipped. Photos 2 and 20 carry copyright and creator values that
+/// must not be counted or printed anywhere.
+/// [`write_copyright_only_catalog_with_files`] has the same copyright rows but
+/// neither creator table.
+pub mod rights_edge {
+    pub const CONVERTED: i64 = 17;
+    pub const SKIPPED: i64 = 3;
+    /// Converted photos with a copyright: 4, 5, 9.
+    pub const COPYRIGHTS: i64 = 3;
+    pub const COPYRIGHT_IDS: [i64; 3] = [4, 5, 9];
+    /// Converted photos with a creator: 4, 7, 12, 13.
+    pub const CREATORS: i64 = 4;
+    pub const CREATOR_IDS: [i64; 4] = [4, 7, 12, 13];
+    /// Photo 4: umlaut and emoji (copyright and creator).
+    pub const UMLAUT_ID: i64 = 4;
+    pub const UMLAUT_COPYRIGHT: &str = "\u{a9} 2026 Example Creator K\u{f6}ln \u{1f305}";
+    pub const UMLAUT_CREATOR: &str = "Example Creator M\u{fc}ller \u{1f4f7}";
+    /// Photo 5: copyright with padding and a trailing newline; creatorRef NULL.
+    pub const PADDED_ID: i64 = 5;
+    pub const PADDED_COPYRIGHT: &str = "  padded copyright \n";
+    /// Photo 6: empty copyright; creatorRef points at a missing row (999).
+    pub const EMPTY_ID: i64 = 6;
+    /// Photo 7: copyright NULL; two harvested rows, 301 (ref 502, "Second
+    /// Creator") inserted first and 300 (ref 501, "First Creator"). The
+    /// smallest `id_local` wins.
+    pub const TWO_HARVESTED_ID: i64 = 7;
+    pub const FIRST_CREATOR: &str = "First Creator";
+    /// Photo 8: no rows at all.
+    pub const NO_ROW_ID: i64 = 8;
+    /// Photo 9: copyright rows 101 ("second", inserted first) and 100
+    /// ("first"); harvested rows 400 (creatorRef NULL) and 401 (ref 501): the
+    /// smallest `id_local` wins, so no creator.
+    pub const DUPLICATE_ID: i64 = 9;
+    pub const DUPLICATE_COPYRIGHT: &str = "first";
+    /// Photo 10: copyright rows 200 (NULL) and 201 ("later"): none. Creator
+    /// value is the empty string: none.
+    pub const DUPLICATE_NULL_FIRST_ID: i64 = 10;
+    /// Photo 11: integer 42 instead of text for copyright and creator: none.
+    pub const NON_TEXT_ID: i64 = 11;
+    /// Photos 12 and 13: creator "First Creator" (shared interned row 501).
+    pub const SHARED_CREATOR_IDS: [i64; 2] = [12, 13];
+    /// Skipped photos (2 missing original, 20 virtual copy) with values.
+    pub const SKIPPED_IDS: [i64; 2] = [2, 20];
+    /// Every non-empty text of the fixture; none may appear in any output.
+    pub const ALL_TEXTS: [&str; 11] = [
+        "Example Creator",
+        "padded copyright",
+        "first",
+        "second",
+        "later",
+        "First Creator",
+        "Second Creator",
+        "skipped-missing-copyright",
+        "skipped-virtual-copyright",
+        "skipped-missing-creator",
+        "skipped-virtual-creator",
+    ];
+}
+
 /// Counts and ids of the video fixture ([`write_video_catalog_with_files`]).
 pub mod video_edge {
     /// `Adobe_images` rows: the 20 of the small fixture plus virtual copy 21.
@@ -805,6 +870,95 @@ fn add_caption_edges(path: &Path) -> Result<()> {
     put(1011, e::NON_TEXT_ID, V::Integer(42))?;
     put(1002, 2, text(e::SKIPPED_TEXTS[0]))?;
     put(1020, 20, text(e::SKIPPED_TEXTS[1]))?;
+    c.execute_batch("COMMIT")?;
+    Ok(())
+}
+
+/// Writes the small fixture with the rights rows of [`rights_edge`] as
+/// `dir/rights.lrcat` with placeholder originals. Returns the catalog path.
+pub fn write_rights_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    write_rights(dir, true)
+}
+
+/// Like [`write_rights_catalog_with_files`] but without the tables
+/// `AgHarvestedIptcMetadata` and `AgInternedIptcCreator`.
+pub fn write_copyright_only_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    write_rights(dir, false)
+}
+
+fn write_rights(dir: &Path, creators: bool) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("rights.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_rights_edges(&catalog, creators)?;
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+fn add_rights_edges(path: &Path, creators: bool) -> Result<()> {
+    use rights_edge as e;
+    use rusqlite::types::Value as V;
+    let text = |s: &str| V::Text(s.to_string());
+    let c = Connection::open(path)?;
+    c.execute_batch("BEGIN")?;
+    let copy = |row: i64, image: i64, v: V| {
+        c.execute(
+            "INSERT INTO AgLibraryIPTC (id_local, copyright, image) VALUES (?1, ?2, ?3)",
+            params![row, v, image],
+        )
+    };
+    for id in [1, 12, 13, 14, 15, 16, 17, 18, 19] {
+        copy(1000 + id, id, V::Null)?;
+    }
+    copy(1004, e::UMLAUT_ID, text(e::UMLAUT_COPYRIGHT))?;
+    copy(1005, e::PADDED_ID, text(e::PADDED_COPYRIGHT))?;
+    copy(1006, e::EMPTY_ID, text(""))?;
+    copy(1007, e::TWO_HARVESTED_ID, V::Null)?;
+    copy(101, e::DUPLICATE_ID, text("second"))?;
+    copy(100, e::DUPLICATE_ID, text(e::DUPLICATE_COPYRIGHT))?;
+    copy(200, e::DUPLICATE_NULL_FIRST_ID, V::Null)?;
+    copy(201, e::DUPLICATE_NULL_FIRST_ID, text("later"))?;
+    copy(1011, e::NON_TEXT_ID, V::Integer(42))?;
+    copy(1002, 2, text("skipped-missing-copyright"))?;
+    copy(1020, 20, text("skipped-virtual-copyright"))?;
+    if creators {
+        c.execute_batch(
+            "CREATE TABLE AgInternedIptcCreator (id_local INTEGER PRIMARY KEY, searchIndex, value);
+             CREATE TABLE AgHarvestedIptcMetadata (id_local INTEGER PRIMARY KEY, image INTEGER, creatorRef INTEGER);",
+        )?;
+        let interned = |id: i64, v: V| {
+            c.execute(
+                "INSERT INTO AgInternedIptcCreator (id_local, value) VALUES (?1, ?2)",
+                params![id, v],
+            )
+        };
+        interned(501, text(e::FIRST_CREATOR))?;
+        interned(502, text("Second Creator"))?;
+        interned(503, text(e::UMLAUT_CREATOR))?;
+        interned(504, text(""))?;
+        interned(505, V::Integer(42))?;
+        interned(506, text("skipped-missing-creator"))?;
+        interned(507, text("skipped-virtual-creator"))?;
+        let harvest = |row: i64, image: i64, r: Option<i64>| {
+            c.execute(
+                "INSERT INTO AgHarvestedIptcMetadata (id_local, image, creatorRef) VALUES (?1, ?2, ?3)",
+                params![row, image, r],
+            )
+        };
+        harvest(1, e::UMLAUT_ID, Some(503))?;
+        harvest(2, e::PADDED_ID, None)?;
+        harvest(3, e::EMPTY_ID, Some(999))?;
+        harvest(301, e::TWO_HARVESTED_ID, Some(502))?;
+        harvest(300, e::TWO_HARVESTED_ID, Some(501))?;
+        harvest(400, e::DUPLICATE_ID, None)?;
+        harvest(401, e::DUPLICATE_ID, Some(501))?;
+        harvest(10, e::DUPLICATE_NULL_FIRST_ID, Some(504))?;
+        harvest(11, e::NON_TEXT_ID, Some(505))?;
+        harvest(12, 12, Some(501))?;
+        harvest(13, 13, Some(501))?;
+        harvest(102, 2, Some(506))?;
+        harvest(120, 20, Some(507))?;
+    }
     c.execute_batch("COMMIT")?;
     Ok(())
 }
