@@ -16,6 +16,10 @@ pub struct ReportJson<'a> {
     pub folders: AreaJson<'a>,
     pub photos: AreaJson<'a>,
     pub collections: AreaJson<'a>,
+    pub keywords: AreaJson<'a>,
+    pub keyword_assignments: AreaJson<'a>,
+    /// Converted photos per star rating, keys "0" to "5".
+    pub ratings: BTreeMap<String, usize>,
 }
 
 /// Counts of one kind of element.
@@ -56,6 +60,14 @@ pub fn report_json(outcome: &Outcome) -> String {
         folders: AreaJson::new(&outcome.folders),
         photos: AreaJson::new(&outcome.photos),
         collections: AreaJson::new(&outcome.collections),
+        keywords: AreaJson::new(&outcome.keywords),
+        keyword_assignments: AreaJson::new(&outcome.keyword_assignments),
+        ratings: outcome
+            .ratings
+            .iter()
+            .enumerate()
+            .map(|(stars, count)| (stars.to_string(), *count))
+            .collect(),
     };
     let mut text = serde_json::to_string_pretty(&json).expect("report serializes");
     text.push('\n');
@@ -90,6 +102,7 @@ pub fn summary(outcome: &Outcome) -> String {
             let _ = writeln!(out, "  {count:>6} x {reason}");
         }
     }
+    let _ = writeln!(out, "{}", ratings_line(&outcome.ratings));
     if outcome.catalog_unchanged {
         let _ = writeln!(out, "catalog unchanged (checksum verified)");
     }
@@ -97,12 +110,24 @@ pub fn summary(outcome: &Outcome) -> String {
 }
 
 /// The report areas in output order.
-fn areas(outcome: &Outcome) -> [(&'static str, &Report); 3] {
+fn areas(outcome: &Outcome) -> [(&'static str, &Report); 5] {
     [
         ("folders", &outcome.folders),
         ("photos", &outcome.photos),
         ("collections", &outcome.collections),
+        ("keywords", &outcome.keywords),
+        ("keyword assignments", &outcome.keyword_assignments),
     ]
+}
+
+/// Formats the rating distribution as `ratings: 0: a, 1: b, ..., 5: f`.
+fn ratings_line(ratings: &[usize; 6]) -> String {
+    let parts: Vec<String> = ratings
+        .iter()
+        .enumerate()
+        .map(|(stars, count)| format!("{stars}: {count}"))
+        .collect();
+    format!("ratings: {}", parts.join(", "))
 }
 
 /// Groups skip reasons without the leading `<kind> <id>: ` prefix, sorted
@@ -158,12 +183,25 @@ mod tests {
                 "collection {id}: smart collection is not converted"
             ));
         }
+        let mut keywords = Report::new();
+        for _ in 0..3 {
+            keywords.read();
+        }
+        keywords.converted();
+        keywords.converted();
+        keywords.skipped("keyword 7: name is empty");
+        let mut keyword_assignments = Report::new();
+        keyword_assignments.read();
+        keyword_assignments.skipped("assignment 5: photo 2 is skipped or unknown");
         Outcome {
             catalog_version: "1500000".into(),
             catalog_unchanged: true,
             folders,
             photos,
             collections,
+            keywords,
+            keyword_assignments,
+            ratings: [0, 0, 0, 1, 0, 0],
         }
     }
 
@@ -191,6 +229,21 @@ mod tests {
         assert!(lines.contains(&"2 x smart collection is not converted"));
         assert!(text.contains("dry run"));
         assert!(!text.contains("skipped folders:"));
+        assert!(lines.contains(&"keywords: read 3, would convert 2, skipped 1"));
+        assert!(lines.contains(&"keyword assignments: read 1, would convert 0, skipped 1"));
+        assert!(lines.contains(&"skipped keywords:"));
+        assert!(lines.contains(&"1 x name is empty"));
+        assert!(lines.contains(&"skipped keyword assignments:"));
+        assert!(lines.contains(&"1 x photo 2 is skipped or unknown"));
+        assert!(lines.contains(&"ratings: 0: 0, 1: 0, 2: 0, 3: 1, 4: 0, 5: 0"));
+    }
+
+    #[test]
+    fn ratings_line_lists_all_six_stars() {
+        assert_eq!(
+            ratings_line(&[6, 3, 2, 3, 2, 1]),
+            "ratings: 0: 6, 1: 3, 2: 2, 3: 3, 4: 2, 5: 1"
+        );
     }
 
     #[test]
@@ -207,7 +260,10 @@ mod tests {
                 "collections",
                 "dry_run",
                 "folders",
+                "keyword_assignments",
+                "keywords",
                 "photos",
+                "ratings",
                 "tool_version"
             ]
         );
@@ -225,5 +281,16 @@ mod tests {
             v["collections"]["skipped"][1]["reason"],
             "collection 2: smart collection is not converted"
         );
+        assert_eq!(v["keywords"]["read"], 3);
+        assert_eq!(v["keywords"]["converted"], 2);
+        assert_eq!(
+            v["keywords"]["skipped"][0]["reason"],
+            "keyword 7: name is empty"
+        );
+        assert_eq!(v["keyword_assignments"]["read"], 1);
+        let ratings = v["ratings"].as_object().unwrap();
+        let keys: Vec<&str> = ratings.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["0", "1", "2", "3", "4", "5"]);
+        assert_eq!(v["ratings"]["3"], 1);
     }
 }
