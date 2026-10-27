@@ -30,16 +30,18 @@
 //! - Every other keyword row calls `keyword_report.read()`; the reader never
 //!   calls `converted()` (the writer does). Skipped with a reason (exact
 //!   texts, ids only, never names):
-//!   - name contains `|`:    "keyword {id}: name contains a vertical bar"
-//!   - name empty:           "keyword {id}: name is empty"
-//!   - parent skipped (this covers the whole subtree of an empty keyword):
-//!                           "keyword {id}: parent keyword {parent} is skipped"
+//!   - name contains `|`: "keyword {id}: name contains a vertical bar"
+//!   - name empty: "keyword {id}: name is empty"
+//!   - parent skipped: "keyword {id}: parent keyword {parent} is skipped"
+//!     (this covers the whole subtree of an empty keyword and the children
+//!     of a `|` keyword; a missing parent or a cycle gets the same reason)
 //! - Every `AgLibraryKeywordImage` row calls `assignment_report.read()`.
 //!   Skipped with a reason:
-//!   - photo is not in `photos` (skipped by the photo reader, or unknown):
-//!                           "assignment {id}: photo {image} is skipped or unknown"
-//!   - keyword was skipped:  "assignment {id}: keyword {tag} is skipped"
-//!   (the fixture never combines both problems in one row).
+//!   - photo not in `photos` (skipped by the photo reader, or unknown):
+//!     "assignment {id}: photo {image} is skipped or unknown"
+//!   - keyword skipped, unknown or the root:
+//!     "assignment {id}: keyword {tag} is skipped"
+//!   - photo and keyword both skipped: one entry, with the photo reason
 //! - Person and "do not export" keywords are converted like any other.
 
 use lr_reader::{Catalog, checksum};
