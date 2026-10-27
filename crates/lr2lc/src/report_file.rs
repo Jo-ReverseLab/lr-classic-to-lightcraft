@@ -1,4 +1,4 @@
-//! Safe handling of the `--report FILE` target.
+//! Safe handling of the `--report FILE` and `--script FILE` targets.
 //!
 //! The report must never destroy the catalog, its SQLite companion files or
 //! any other user file (such as a photo). Before anything is read, the target
@@ -8,7 +8,9 @@
 //!   `-shm`, also through a hard link (same device and inode on Unix) or a
 //!   differently cased path (case-insensitive comparison elsewhere);
 //! - if it exists, it must be an earlier lr2lc report (a JSON object with the
-//!   key `tool_version`); anything else is left alone.
+//!   key `tool_version`), or for `--script` an earlier lr2lc script (empty,
+//!   or every non-empty line a JSON object with `"method":"engine.execute"`);
+//!   anything else is left alone.
 //!
 //! Writing then creates a new file with `create_new`, or re-checks and
 //! truncates the earlier report, so a file appearing in between is not
@@ -25,6 +27,32 @@ const MAX_REPORT_BYTES: u64 = 64 * 1024 * 1024;
 /// SQLite companion files that belong to a catalog.
 const COMPANION_SUFFIXES: [&str; 3] = ["-wal", "-journal", "-shm"];
 
+/// What is written to a checked target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// The JSON report (`--report`).
+    Report,
+    /// The plan as JSON lines (`--script`).
+    Script,
+}
+
+impl Kind {
+    fn noun(self) -> &'static str {
+        match self {
+            Kind::Report => "report",
+            Kind::Script => "script",
+        }
+    }
+
+    /// True if `bytes` is an earlier file of this kind written by lr2lc.
+    fn is_earlier(self, bytes: &[u8]) -> bool {
+        match self {
+            Kind::Report => is_earlier_report(bytes),
+            Kind::Script => is_earlier_script(bytes),
+        }
+    }
+}
+
 /// A checked report target.
 #[derive(Debug, PartialEq)]
 pub enum ReportTarget {
@@ -34,35 +62,58 @@ pub enum ReportTarget {
     EarlierReport { path: PathBuf },
 }
 
+impl ReportTarget {
+    /// The resolved location.
+    pub fn path(&self) -> &Path {
+        match self {
+            ReportTarget::New { path } | ReportTarget::EarlierReport { path } => path,
+        }
+    }
+}
+
 /// Why a report target is refused.
 #[derive(Debug)]
 pub enum TargetError {
     /// The target is the catalog or one of its companion files.
-    Catalog { given: PathBuf },
-    /// The target exists and is not an earlier lr2lc report.
-    Exists { given: PathBuf },
+    Catalog { kind: Kind, given: PathBuf },
+    /// The target exists and is not an earlier lr2lc file of its kind.
+    Exists { kind: Kind, given: PathBuf },
     /// The target cannot be resolved (missing directory, no file name, ...).
-    Unresolvable { given: PathBuf, source: io::Error },
+    Unresolvable {
+        kind: Kind,
+        given: PathBuf,
+        source: io::Error,
+    },
 }
 
 impl fmt::Display for TargetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TargetError::Catalog { given } => write!(
+            TargetError::Catalog { kind, given } => write!(
                 f,
-                "refusing to write the report to {}: it is the catalog or one of its \
+                "refusing to write the {} to {}: it is the catalog or one of its \
                  companion files (-wal, -journal, -shm)",
+                kind.noun(),
                 given.display()
             ),
-            TargetError::Exists { given } => write!(
+            TargetError::Exists { kind, given } => write!(
                 f,
-                "refusing to write the report to {}: the file exists and is not an \
-                 earlier lr2lc report; choose another file name",
-                given.display()
+                "refusing to write the {} to {}: the file exists and is not an \
+                 earlier lr2lc {}; choose another file name",
+                kind.noun(),
+                given.display(),
+                kind.noun()
             ),
-            TargetError::Unresolvable { given, source } => {
-                write!(f, "cannot use {} as report file: {source}", given.display())
-            }
+            TargetError::Unresolvable {
+                kind,
+                given,
+                source,
+            } => write!(
+                f,
+                "cannot use {} as {} file: {source}",
+                given.display(),
+                kind.noun()
+            ),
         }
     }
 }
@@ -154,40 +205,67 @@ fn is_earlier_report(bytes: &[u8]) -> bool {
     )
 }
 
+/// True if `bytes` is an earlier lr2lc script: empty, or every non-empty
+/// line a JSON object with `"method": "engine.execute"`.
+fn is_earlier_script(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    text.lines().filter(|l| !l.trim().is_empty()).all(|l| {
+        match serde_json::from_str::<serde_json::Value>(l) {
+            Ok(serde_json::Value::Object(map)) => {
+                map.get("method").and_then(|m| m.as_str()) == Some("engine.execute")
+            }
+            _ => false,
+        }
+    })
+}
+
 /// Reads `file` from its current position if it is small enough and checks
-/// whether it is an earlier report.
-fn file_is_earlier_report(file: &mut File) -> io::Result<bool> {
+/// whether it is an earlier file of `kind`.
+fn file_is_earlier(file: &mut File, kind: Kind) -> io::Result<bool> {
     let meta = file.metadata()?;
     if !meta.is_file() || meta.len() > MAX_REPORT_BYTES {
         return Ok(false);
     }
     let mut bytes = Vec::new();
     file.take(MAX_REPORT_BYTES + 1).read_to_end(&mut bytes)?;
-    Ok(bytes.len() as u64 <= MAX_REPORT_BYTES && is_earlier_report(&bytes))
+    Ok(bytes.len() as u64 <= MAX_REPORT_BYTES && kind.is_earlier(&bytes))
 }
 
 /// Checks the `--report` target before anything is read.
+#[cfg(test)]
 pub fn check(report: &Path, catalog: &Path) -> Result<ReportTarget, TargetError> {
-    let given = report.to_path_buf();
-    let path = resolve(report).map_err(|source| TargetError::Unresolvable {
+    check_as(Kind::Report, report, catalog)
+}
+
+/// Checks a target of `kind` before anything is read.
+pub fn check_as(kind: Kind, target: &Path, catalog: &Path) -> Result<ReportTarget, TargetError> {
+    let given = target.to_path_buf();
+    let path = resolve(target).map_err(|source| TargetError::Unresolvable {
+        kind,
         given: given.clone(),
         source,
     })?;
     let protected = protected_paths(catalog);
     if protected.contains(&path) || same_file_as_any(&path, &protected) {
-        return Err(TargetError::Catalog { given });
+        return Err(TargetError::Catalog { kind, given });
     }
     match fs::symlink_metadata(&path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(ReportTarget::New { path }),
-        Err(source) => Err(TargetError::Unresolvable { given, source }),
+        Err(source) => Err(TargetError::Unresolvable {
+            kind,
+            given,
+            source,
+        }),
         Ok(_) => {
             let earlier = File::open(&path)
-                .and_then(|mut f| file_is_earlier_report(&mut f))
+                .and_then(|mut f| file_is_earlier(&mut f, kind))
                 .unwrap_or(false);
             if earlier {
                 Ok(ReportTarget::EarlierReport { path })
             } else {
-                Err(TargetError::Exists { given })
+                Err(TargetError::Exists { kind, given })
             }
         }
     }
@@ -196,6 +274,11 @@ pub fn check(report: &Path, catalog: &Path) -> Result<ReportTarget, TargetError>
 /// Writes `contents` to a checked target without overwriting anything that
 /// is not an earlier report, even if the file changed since [`check`].
 pub fn write(target: &ReportTarget, contents: &str) -> io::Result<()> {
+    write_as(Kind::Report, target, contents)
+}
+
+/// Writes `contents` to a target checked with [`check_as`] for `kind`.
+pub fn write_as(kind: Kind, target: &ReportTarget, contents: &str) -> io::Result<()> {
     match target {
         ReportTarget::New { path } => {
             let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
@@ -204,10 +287,13 @@ pub fn write(target: &ReportTarget, contents: &str) -> io::Result<()> {
         }
         ReportTarget::EarlierReport { path } => {
             let mut file = OpenOptions::new().read(true).write(true).open(path)?;
-            if !file_is_earlier_report(&mut file)? {
+            if !file_is_earlier(&mut file, kind)? {
                 return Err(io::Error::new(
                     io::ErrorKind::AlreadyExists,
-                    "the file changed and is no longer an earlier lr2lc report",
+                    format!(
+                        "the file changed and is no longer an earlier lr2lc {}",
+                        kind.noun()
+                    ),
                 ));
             }
             file.set_len(0)?;
@@ -252,6 +338,34 @@ mod tests {
         ] {
             assert_ne!(cat, case_insensitive_key(Path::new(other)), "{other}");
         }
+    }
+
+    #[test]
+    fn earlier_script_detection() {
+        assert!(is_earlier_script(b""));
+        assert!(is_earlier_script(b"\n\n"));
+        assert!(is_earlier_script(
+            b"{\"method\":\"engine.execute\"}\n\n{\"method\":\"engine.execute\",\"id\":1}\n"
+        ));
+        assert!(!is_earlier_script(b"{\"method\":\"other\"}\n"));
+        assert!(!is_earlier_script(
+            b"{\"method\":\"engine.execute\"}\nnot json\n"
+        ));
+        assert!(!is_earlier_script(b"[1]"));
+        assert!(!is_earlier_script(b"\xff\xd8"));
+    }
+
+    #[test]
+    fn script_target_refuses_the_catalog_and_mentions_it() {
+        let (dir, cat) = setup();
+        let err = check_as(Kind::Script, &cat, &cat).unwrap_err();
+        assert!(err.to_string().contains("catalog"), "{err}");
+        assert!(err.to_string().contains("script"), "{err}");
+        let empty = dir.path().join("s.jsonl");
+        fs::write(&empty, b"").unwrap();
+        let target = check_as(Kind::Script, &empty, &cat).unwrap();
+        write_as(Kind::Script, &target, "{}\n").unwrap();
+        assert_eq!(fs::read(&empty).unwrap(), b"{}\n");
     }
 
     #[test]

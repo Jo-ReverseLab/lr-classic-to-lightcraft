@@ -19,7 +19,16 @@ Options:
   --label-set SET  Names of the colour labels: en, de, auto (default) or a
                    JSON file mapping each name to red, yellow, green,
                    blue or purple
-  --apply          Actually write the LightCraft library (default: dry run)
+  --library DIR    The LightCraft library to write; needed for --apply.
+                   In a dry run it is only used to read the mapping file
+                   DIR.lr2lc.json next to it
+  --port N         Control port of the running LightCraft app
+                   (default: 7980)
+  --allow-xmp      Write even if the library writes XMP sidecars next to
+                   the originals (refused by default)
+  --script FILE    Also write the planned commands as JSON lines to FILE
+  --apply          Actually write the LightCraft library through the
+                   running app (default: dry run); needs --library
   -h, --help       Print this help
   -V, --version    Print the version";
 
@@ -39,7 +48,14 @@ pub struct RunOptions {
     pub report: Option<PathBuf>,
     pub apply: bool,
     pub labels: LabelChoice,
+    pub library: Option<PathBuf>,
+    pub port: u16,
+    pub allow_xmp: bool,
+    pub script: Option<PathBuf>,
 }
+
+/// The default control port of the LightCraft app.
+pub const DEFAULT_PORT: u16 = 7980;
 
 /// Parses the arguments (without the program name).
 pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, String> {
@@ -49,11 +65,37 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
     let mut report: Option<PathBuf> = None;
     let mut rules = Vec::new();
     let mut labels: Option<LabelChoice> = None;
+    let mut library: Option<PathBuf> = None;
+    let mut port: Option<u16> = None;
+    let mut allow_xmp = false;
+    let mut script: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("-h" | "--help") => return Ok(Command::Help),
             Some("-V" | "--version") => return Ok(Command::Version),
             Some("--apply") => apply = true,
+            Some("--allow-xmp") => allow_xmp = true,
+            Some("--library") => {
+                if library.is_some() {
+                    return Err("--library given more than once".to_string());
+                }
+                let value = args.next().ok_or("--library needs a folder")?;
+                library = Some(PathBuf::from(value));
+            }
+            Some("--script") => {
+                if script.is_some() {
+                    return Err("--script given more than once".to_string());
+                }
+                let value = args.next().ok_or("--script needs a file name")?;
+                script = Some(PathBuf::from(value));
+            }
+            Some("--port") => {
+                if port.is_some() {
+                    return Err("--port given more than once".to_string());
+                }
+                let value = args.next().ok_or("--port needs a number")?;
+                port = Some(parse_port(&value)?);
+            }
             Some("--map") => {
                 let value = args.next().ok_or("--map needs a value OLD=NEW")?;
                 let spec = value.to_str().ok_or("--map value is not valid UTF-8")?;
@@ -94,13 +136,31 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
         }
     }
     let catalog = catalog.ok_or("missing catalog path")?;
+    if apply && library.is_none() {
+        return Err(
+            "--apply needs --library <folder>: the LightCraft library to write".to_string(),
+        );
+    }
     Ok(Command::Run(RunOptions {
         catalog,
         mappings: PathMappings::new(rules),
         report,
         apply,
         labels: labels.unwrap_or_default(),
+        library,
+        port: port.unwrap_or(DEFAULT_PORT),
+        allow_xmp,
+        script,
     }))
+}
+
+/// A port number from 1 to 65535.
+fn parse_port(value: &std::ffi::OsStr) -> Result<u16, String> {
+    let text = value.to_string_lossy();
+    match text.parse::<u16>() {
+        Ok(n) if n > 0 => Ok(n),
+        _ => Err(format!("--port {text}: expected a number from 1 to 65535")),
+    }
 }
 
 #[cfg(test)]
@@ -138,7 +198,51 @@ mod tests {
 
     #[test]
     fn apply_flag_is_recognised() {
-        assert!(run(&["--apply", "cat.lrcat"]).apply);
+        let o = run(&["--apply", "cat.lrcat", "--library", "L.lightcraft"]);
+        assert!(o.apply);
+        assert_eq!(o.library, Some(PathBuf::from("L.lightcraft")));
+    }
+
+    #[test]
+    fn apply_needs_a_library() {
+        assert!(
+            parse(&["--apply", "cat.lrcat"])
+                .unwrap_err()
+                .contains("--library")
+        );
+    }
+
+    #[test]
+    fn writer_options_have_defaults() {
+        let o = run(&["cat.lrcat"]);
+        assert_eq!(o.port, DEFAULT_PORT);
+        assert!(!o.allow_xmp);
+        assert_eq!(o.library, None);
+        assert_eq!(o.script, None);
+    }
+
+    #[test]
+    fn writer_options_are_parsed() {
+        let o = run(&[
+            "cat.lrcat",
+            "--port",
+            "8000",
+            "--allow-xmp",
+            "--script",
+            "s.jsonl",
+        ]);
+        assert_eq!(o.port, 8000);
+        assert!(o.allow_xmp);
+        assert_eq!(o.script, Some(PathBuf::from("s.jsonl")));
+    }
+
+    #[test]
+    fn bad_ports_are_errors() {
+        for bad in ["0", "-1", "65536", "abc", "", " 80"] {
+            assert!(parse(&["cat.lrcat", "--port", bad]).is_err(), "{bad}");
+        }
+        assert!(parse(&["cat.lrcat", "--port"]).is_err());
+        assert!(parse(&["cat.lrcat", "--port", "1", "--port", "2"]).is_err());
     }
 
     #[test]
@@ -204,6 +308,10 @@ mod tests {
             "--report",
             "--label-set",
             "--apply",
+            "--library",
+            "--port",
+            "--allow-xmp",
+            "--script",
             "--help",
             "--version",
         ] {

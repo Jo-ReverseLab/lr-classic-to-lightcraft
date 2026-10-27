@@ -237,6 +237,7 @@ name = "lr2lc"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "lc-writer",
  "lr-reader",
  "lrcat-fixtures",
  "model",

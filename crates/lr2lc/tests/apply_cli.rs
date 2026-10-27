@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! Acceptance tests for `--apply` and the writer options of the CLI (task
 //! P5-4c), against a stateful fake LightCraft (`tests/support`).
 //!

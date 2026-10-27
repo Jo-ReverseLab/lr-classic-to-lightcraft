@@ -2,7 +2,8 @@
 
 use crate::dry_run::{FlagCounts, KeywordAttributes, Outcome};
 use crate::labels::LabelCounts;
-use model::Report;
+use crate::writer::WriterJson;
+use model::{Report, Skipped};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -22,6 +23,9 @@ pub struct ReportJson<'a> {
     pub keyword_synonyms: AreaJson<'a>,
     /// Converted photos per star rating, keys "0" to "5".
     pub ratings: BTreeMap<String, usize>,
+    /// What the writer plans (dry run) or did (`--apply`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub writer: Option<&'a WriterJson>,
 }
 
 /// Counts of one kind of element.
@@ -157,12 +161,18 @@ impl<'a> AreaJson<'a> {
     }
 }
 
-/// Builds the JSON report of a dry run.
+/// Builds the JSON report of a dry run without writer section.
+#[cfg(test)]
 pub fn report_json(outcome: &Outcome) -> String {
+    report_json_with(outcome, true, None)
+}
+
+/// Builds the JSON report of a run.
+pub fn report_json_with(outcome: &Outcome, dry_run: bool, writer: Option<&WriterJson>) -> String {
     let json = ReportJson {
         tool_version: env!("CARGO_PKG_VERSION"),
         catalog_version: &outcome.catalog_version,
-        dry_run: true,
+        dry_run,
         catalog_unchanged: outcome.catalog_unchanged,
         folders: AreaJson::new(&outcome.folders),
         photos: PhotosJson {
@@ -194,6 +204,7 @@ pub fn report_json(outcome: &Outcome) -> String {
             .enumerate()
             .map(|(stars, count)| (stars.to_string(), *count))
             .collect(),
+        writer,
     };
     let mut text = serde_json::to_string_pretty(&json).expect("report serializes");
     text.push('\n');
@@ -201,18 +212,28 @@ pub fn report_json(outcome: &Outcome) -> String {
 }
 
 /// Builds the readable summary of a dry run.
+#[cfg(test)]
 pub fn summary(outcome: &Outcome) -> String {
+    summary_with(outcome, true)
+}
+
+/// Builds the readable summary of the catalog part of a run.
+pub fn summary_with(outcome: &Outcome, dry_run: bool) -> String {
     let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "lr2lc {} dry run: nothing is written (use --apply to convert)",
-        env!("CARGO_PKG_VERSION")
-    );
+    let (header, convert) = if dry_run {
+        (
+            "dry run: nothing is written (use --apply to convert)",
+            "would convert",
+        )
+    } else {
+        ("apply: writing to the LightCraft library", "converted")
+    };
+    let _ = writeln!(out, "lr2lc {} {header}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(out, "catalog version {}", outcome.catalog_version);
     for (area, report) in areas(outcome) {
         let _ = writeln!(
             out,
-            "{area}: read {}, would convert {}, skipped {}",
+            "{area}: read {}, {convert} {}, skipped {}",
             report.read_count(),
             report.converted_count(),
             report.skipped_count()
@@ -221,7 +242,7 @@ pub fn summary(outcome: &Outcome) -> String {
     let _ = writeln!(out, "videos: skipped {}", outcome.videos);
     let _ = writeln!(out, "{}", attributes_line(&outcome.keyword_attributes));
     for (area, report) in areas(outcome) {
-        let groups = group_reasons(report);
+        let groups = group_reasons(report.skipped_items());
         if groups.is_empty() {
             continue;
         }
@@ -307,9 +328,9 @@ fn flags_line(f: &FlagCounts) -> String {
 
 /// Groups skip reasons without the leading `<kind> <id>: ` prefix, sorted
 /// by count (descending), then by text.
-fn group_reasons(report: &Report) -> Vec<(&str, usize)> {
+pub fn group_reasons(skipped: &[Skipped]) -> Vec<(&str, usize)> {
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-    for s in report.skipped_items() {
+    for s in skipped {
         *counts.entry(strip_id_prefix(&s.reason)).or_default() += 1;
     }
     let mut groups: Vec<(&str, usize)> = counts.into_iter().collect();
@@ -409,6 +430,8 @@ mod tests {
             creators: 0,
             titles: 0,
             titles_unreadable: 0,
+            catalog_checksum: [0; 32],
+            converted: Default::default(),
         }
     }
 

@@ -6,13 +6,15 @@ use crate::labels::{self, LabelCounts, LabelMode};
 use anyhow::{Context, Result, bail};
 use lr_reader::{Catalog, KeywordData, VIDEO_SKIP_REASON, checksum, drop_missing_originals};
 use model::{Flag, Folder, Keyword, PathMappings, Photo, Rating, Report};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 /// Result of a dry run.
 #[derive(Debug)]
 pub struct Outcome {
     pub catalog_version: String,
+    /// SHA-256 of the catalog file before the run.
+    pub catalog_checksum: [u8; 32],
     pub catalog_unchanged: bool,
     pub folders: Report,
     pub photos: Report,
@@ -43,6 +45,18 @@ pub struct Outcome {
     pub titles: usize,
     /// Converted photos whose title blob cannot be read.
     pub titles_unreadable: usize,
+    /// What the writer gets: the converted photos (paths mapped), the
+    /// converted keywords and the keywords of each converted photo.
+    pub converted: Converted,
+}
+
+/// The converted elements, as input for the writer.
+#[derive(Debug, Default)]
+pub struct Converted {
+    pub photos: Vec<Photo>,
+    pub keywords: Vec<Keyword>,
+    /// Keywords per `Photo::lightroom_id`.
+    pub photo_keywords: BTreeMap<i64, Vec<Keyword>>,
 }
 
 /// Number of converted photos per flag. `none` does not include `unknown`,
@@ -132,6 +146,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         creators,
         titles,
         titles_unreadable,
+        converted,
     ) = {
         let catalog = Catalog::open(path)?;
         let mut folders = Report::new();
@@ -196,6 +211,11 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
                 .iter()
                 .filter(|p| photo_data.title_unreadable.contains(&p.lightroom_id))
                 .count(),
+            Converted {
+                photos: kept_photos,
+                keywords: data.keywords,
+                photo_keywords: data.assignments,
+            },
         )
     };
     let after = checksum(path).context("cannot read catalog file after the run")?;
@@ -213,6 +233,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
     }
     Ok(Outcome {
         catalog_version,
+        catalog_checksum: before,
         catalog_unchanged: before == after,
         folders,
         videos: count_videos(&photos),
@@ -230,6 +251,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         creators,
         titles,
         titles_unreadable,
+        converted,
     })
 }
 

@@ -5,11 +5,13 @@ mod dry_run;
 mod labels;
 mod output;
 mod report_file;
+mod writer;
 
 use anyhow::{Context, Result, bail};
 use args::{Command, RunOptions, USAGE, parse_args};
 use labels::LabelMode;
-use report_file::ReportTarget;
+use report_file::{Kind, ReportTarget};
+use std::collections::BTreeSet;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -23,17 +25,15 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(Command::Run(options)) => {
-            // Check the report target before anything is read, so a wrong
-            // --report can never overwrite the catalog or another file.
-            let target = match &options.report {
-                Some(path) => match report_file::check(path, &options.catalog) {
-                    Ok(target) => Some(target),
-                    Err(e) => {
-                        eprintln!("error: {e}");
-                        return ExitCode::from(2);
-                    }
-                },
-                None => None,
+            // Check the output targets before anything is read, so a wrong
+            // --report or --script can never overwrite the catalog or
+            // another file.
+            let targets = match check_targets(&options) {
+                Ok(targets) => targets,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return ExitCode::from(2);
+                }
             };
             // A bad label set is a usage error as well: nothing is read.
             let labels = match LabelMode::load(&options.labels) {
@@ -43,7 +43,7 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             };
-            run_and_report(&options, &labels, target.as_ref())
+            run_and_report(&options, &labels, &targets)
         }
         Err(msg) => {
             eprintln!("error: {msg}\n\n{USAGE}");
@@ -52,12 +52,31 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_and_report(
-    options: &RunOptions,
-    labels: &LabelMode,
-    target: Option<&ReportTarget>,
-) -> ExitCode {
-    match run(options, labels, target) {
+/// The checked `--report` and `--script` targets.
+struct Targets {
+    report: Option<ReportTarget>,
+    script: Option<ReportTarget>,
+}
+
+fn check_targets(options: &RunOptions) -> Result<Targets, String> {
+    let check = |kind, path: &Option<std::path::PathBuf>| {
+        path.as_ref()
+            .map(|p| report_file::check_as(kind, p, &options.catalog))
+            .transpose()
+            .map_err(|e| e.to_string())
+    };
+    let report = check(Kind::Report, &options.report)?;
+    let script = check(Kind::Script, &options.script)?;
+    if let (Some(r), Some(s)) = (&report, &script)
+        && r.path() == s.path()
+    {
+        return Err("--report and --script name the same file".to_string());
+    }
+    Ok(Targets { report, script })
+}
+
+fn run_and_report(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> ExitCode {
+    match run(options, labels, targets) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e:#}");
@@ -66,18 +85,53 @@ fn run_and_report(
     }
 }
 
-/// Runs a conversion. Only the dry run exists so far.
-fn run(options: &RunOptions, labels: &LabelMode, report: Option<&ReportTarget>) -> Result<()> {
-    if options.apply {
-        bail!(
-            "--apply is not implemented yet: writing to LightCraft is not available; \
-             nothing was read or written. Run without --apply for a dry run."
-        );
+/// Runs a conversion: reads the catalog, plans the writer commands and, with
+/// `--apply`, writes them through the LightCraft control port.
+fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()> {
+    let mut outcome = dry_run::run(&options.catalog, &options.mappings, labels)?;
+    let input = writer::input(&outcome.converted);
+    let state = writer::load_state(options.library.as_deref())?;
+    // Without a connection the library's own keywords are unknown; the
+    // plan assumes none beyond the mapping file.
+    let plan = lc_writer::plan::plan(&input, &state, &BTreeSet::new());
+    if let (Some(target), Some(given)) = (&targets.script, &options.script) {
+        report_file::write_as(Kind::Script, target, &plan.to_script(&state))
+            .with_context(|| format!("cannot write script to {}", given.display()))?;
     }
-    let outcome = dry_run::run(&options.catalog, &options.mappings, labels)?;
-    print!("{}", output::summary(&outcome));
-    if let (Some(target), Some(given)) = (report, &options.report) {
-        report_file::write(target, &output::report_json(&outcome))
+
+    let (text, json) = match (&options.library, options.apply) {
+        (Some(library), true) => {
+            if !outcome.catalog_unchanged {
+                bail!(
+                    "the catalog changed while it was read (checksum differs); is Lightroom \
+                     running? Nothing was written to LightCraft"
+                );
+            }
+            print!("{}", output::summary_with(&outcome, false));
+            let target = writer::Target {
+                library,
+                port: options.port,
+                allow_xmp: options.allow_xmp,
+            };
+            let summary = writer::write(&target, &input, state)?;
+            (
+                writer::applied_summary(&summary),
+                writer::applied_json(&summary),
+            )
+        }
+        _ => {
+            print!("{}", output::summary_with(&outcome, true));
+            (writer::planned_summary(&plan), writer::planned_json(&plan))
+        }
+    };
+    print!("{text}");
+
+    // Check again after writing: the catalog must still be unchanged.
+    outcome.catalog_unchanged = outcome.catalog_unchanged
+        && lr_reader::checksum(&options.catalog).ok() == Some(outcome.catalog_checksum);
+    if let (Some(target), Some(given)) = (&targets.report, &options.report) {
+        let report = output::report_json_with(&outcome, !options.apply, Some(&json));
+        report_file::write(target, &report)
             .with_context(|| format!("cannot write report to {}", given.display()))?;
     }
     if !outcome.catalog_unchanged {
