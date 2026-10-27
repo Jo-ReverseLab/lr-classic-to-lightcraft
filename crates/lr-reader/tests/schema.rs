@@ -165,3 +165,12 @@ fn missing_iptc_image_column_is_reported() {
     let path = damaged(dir.path(), "AgLibraryIPTC", Some("image"));
     expect_missing(&path, "AgLibraryIPTC", Some("image"));
 }
+
+#[test]
+#[ignore = "waiting for P5b-7b"]
+fn missing_iptc_copyright_column_is_reported() {
+    // P5b-7b: AgLibraryIPTC.copyright is required (the creator tables are not).
+    let dir = tempfile::tempdir().unwrap();
+    let path = damaged(dir.path(), "AgLibraryIPTC", Some("copyright"));
+    expect_missing(&path, "AgLibraryIPTC", Some("copyright"));
+}
