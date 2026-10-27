@@ -127,3 +127,12 @@ fn missing_synonym_keyword_column_is_reported() {
     let path = damaged(dir.path(), "AgLibraryKeywordSynonym", Some("keyword"));
     expect_missing(&path, "AgLibraryKeywordSynonym", Some("keyword"));
 }
+
+#[test]
+#[ignore = "waiting for P5b-1"]
+fn missing_pick_column_is_reported() {
+    // P5b-1: Adobe_images.pick is required.
+    let dir = tempfile::tempdir().unwrap();
+    let path = damaged(dir.path(), "Adobe_images", Some("pick"));
+    expect_missing(&path, "Adobe_images", Some("pick"));
+}
