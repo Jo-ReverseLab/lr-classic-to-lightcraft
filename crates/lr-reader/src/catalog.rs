@@ -59,7 +59,13 @@ fn missing_schema_message(table: &str, column: Option<&str>) -> String {
 const REQUIRED_SCHEMA: &[(&str, &[&str])] = &[
     (
         "Adobe_images",
-        &["id_local", "masterImage", "rating", "rootFile"],
+        &[
+            "id_local",
+            "masterImage",
+            "rating",
+            "fileFormat",
+            "rootFile",
+        ],
     ),
     (
         "AgLibraryFile",
