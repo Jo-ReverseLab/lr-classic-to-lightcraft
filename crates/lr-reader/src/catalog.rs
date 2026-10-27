@@ -76,6 +76,7 @@ const REQUIRED_SCHEMA: &[(&str, &[&str])] = &[
     ),
     ("AgLibraryKeyword", &["id_local", "name", "parent"]),
     ("AgLibraryKeywordImage", &["id_local", "image", "tag"]),
+    ("AgLibraryKeywordSynonym", &["id_local", "keyword", "name"]),
 ];
 
 /// Suffixes SQLite appends to the full catalog file name for side files

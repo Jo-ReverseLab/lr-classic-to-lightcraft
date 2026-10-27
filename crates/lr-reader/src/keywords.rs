@@ -1,7 +1,8 @@
-//! Reading keywords (`AgLibraryKeyword`) and their assignments to photos
+//! Reading keywords (`AgLibraryKeyword`), their synonyms
+//! (`AgLibraryKeywordSynonym`) and their assignments to photos
 //! (`AgLibraryKeywordImage`).
 //!
-//! Skip reasons name ids only, never keyword names.
+//! Skip reasons name ids only, never keyword names or synonym texts.
 
 use crate::catalog::{Catalog, ReadError};
 use model::{Keyword, Photo, Report};
@@ -18,6 +19,20 @@ pub struct KeywordData {
     /// the assignment rows (`AgLibraryKeywordImage.id_local`). Photos
     /// without keywords have no entry.
     pub assignments: BTreeMap<i64, Vec<Keyword>>,
+    /// One read per `AgLibraryKeywordSynonym` row; rows that are not
+    /// attached to a keyword are skipped with a reason. Nothing is marked
+    /// converted; the converted synonyms are those in
+    /// [`Keyword::synonyms`] of [`KeywordData::keywords`].
+    pub synonym_report: Report,
+}
+
+/// One `AgLibraryKeywordSynonym` row.
+#[derive(Debug, Clone)]
+struct SynonymRow {
+    id: i64,
+    keyword: Option<i64>,
+    /// `None` if the name is NULL.
+    name: Option<String>,
 }
 
 /// One `AgLibraryKeyword` row.
@@ -44,6 +59,8 @@ impl Catalog {
     /// (`AgLibraryKeyword_rootTagID`) is counted with [`Report::read`] on
     /// `keyword_report`; every assignment row on `assignment_report`. Rows
     /// that cannot be converted are recorded with [`Report::skipped`].
+    /// Synonyms are attached to their converted keyword and counted in
+    /// [`KeywordData::synonym_report`].
     /// Nothing is marked converted here; the writer does that.
     pub fn keywords(
         &self,
@@ -55,12 +72,22 @@ impl Catalog {
         let rows = self.keyword_rows()?;
         let resolved = resolve_keywords(&rows, root);
 
+        let known: HashSet<i64> = rows.iter().map(|r| r.id).collect();
+        let mut synonym_report = Report::new();
+        let mut synonyms = group_synonyms(
+            &self.synonym_rows()?,
+            &known,
+            &resolved,
+            &mut synonym_report,
+        );
+
         let mut keywords = Vec::new();
         let mut by_id = HashMap::new();
         for (id, result) in resolved {
             keyword_report.read();
             match result {
-                Ok(keyword) => {
+                Ok(mut keyword) => {
+                    keyword.synonyms = synonyms.remove(&id).unwrap_or_default();
                     by_id.insert(id, keyword.clone());
                     keywords.push(keyword);
                 }
@@ -78,6 +105,7 @@ impl Catalog {
         Ok(KeywordData {
             keywords,
             assignments,
+            synonym_report,
         })
     }
 
@@ -108,6 +136,25 @@ impl Catalog {
                     id: row.get(0)?,
                     name: value_as_text(row.get(1)?),
                     parent: row.get(2)?,
+                })
+            })
+            .map_err(ReadError::Query)?;
+        rows.collect::<Result<_, _>>().map_err(ReadError::Query)
+    }
+
+    fn synonym_rows(&self) -> Result<Vec<SynonymRow>, ReadError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id_local, keyword, name FROM AgLibraryKeywordSynonym ORDER BY id_local",
+            )
+            .map_err(ReadError::Query)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(SynonymRow {
+                    id: row.get(0)?,
+                    keyword: row.get(1)?,
+                    name: value_as_text(row.get(2)?),
                 })
             })
             .map_err(ReadError::Query)?;
@@ -241,6 +288,40 @@ fn own_name(row: &KeywordRow) -> Result<String, String> {
         }
         Some(n) => Ok(n.to_owned()),
     }
+}
+
+/// Groups the synonym texts per keyword id, in row order. Every row is
+/// counted as read; a row is skipped if its keyword has no row in `known`,
+/// if its keyword is not converted in `resolved` (including the hidden
+/// root), or if its text is NULL, empty or whitespace-only, checked in
+/// this order.
+fn group_synonyms(
+    rows: &[SynonymRow],
+    known: &HashSet<i64>,
+    resolved: &[(i64, Result<Keyword, String>)],
+    report: &mut Report,
+) -> HashMap<i64, Vec<String>> {
+    let converted: HashSet<i64> = resolved
+        .iter()
+        .filter(|(_, r)| r.is_ok())
+        .map(|(id, _)| *id)
+        .collect();
+    let mut out: HashMap<i64, Vec<String>> = HashMap::new();
+    for row in rows {
+        report.read();
+        let keyword = id_text(row.keyword);
+        match row.keyword {
+            Some(k) if converted.contains(&k) => match row.name.as_deref() {
+                Some(n) if !n.trim().is_empty() => out.entry(k).or_default().push(n.to_owned()),
+                _ => report.skipped(format!("synonym {}: name is empty", row.id)),
+            },
+            Some(k) if known.contains(&k) => {
+                report.skipped(format!("synonym {}: keyword {keyword} is skipped", row.id))
+            }
+            _ => report.skipped(format!("synonym {}: keyword {keyword} is unknown", row.id)),
+        }
+    }
+    out
 }
 
 /// Groups the converted keywords per photo. Every row is counted as read;
@@ -475,6 +556,62 @@ mod tests {
             report.skipped_items()[0].reason,
             "assignment 1: photo NULL is skipped or unknown"
         );
+    }
+
+    fn synonym(id: i64, keyword: Option<i64>, name: Option<&str>) -> SynonymRow {
+        SynonymRow {
+            id,
+            keyword,
+            name: name.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn synonyms_are_grouped_and_skipped_in_order() {
+        let keyword_rows = [
+            row(1, None, None),
+            row(2, Some("A"), Some(1)),
+            row(3, Some(""), Some(1)),
+        ];
+        let resolved = resolve_keywords(&keyword_rows, Some(1));
+        let known: HashSet<i64> = keyword_rows.iter().map(|r| r.id).collect();
+        let rows = [
+            synonym(1, Some(2), Some("Second")),
+            synonym(2, Some(2), Some("First")),
+            synonym(3, Some(1), Some("Root")), // hidden root: skipped
+            synonym(4, Some(3), None),         // skipped keyword wins over empty
+            synonym(5, Some(50), Some("")),    // unknown wins over empty
+            synonym(6, None, Some("Orphan")),  // NULL keyword is unknown
+            synonym(7, Some(2), Some(" \t")),  // whitespace-only
+            synonym(8, Some(2), None),         // NULL text
+        ];
+        let mut report = Report::new();
+        let out = group_synonyms(&rows, &known, &resolved, &mut report);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[&2], vec!["Second".to_string(), "First".to_string()]);
+        assert_eq!(report.read_count(), 8);
+        assert_eq!(report.converted_count(), 0);
+        let reasons: Vec<_> = report
+            .skipped_items()
+            .iter()
+            .map(|s| s.reason.as_str())
+            .collect();
+        assert_eq!(
+            reasons,
+            vec![
+                "synonym 3: keyword 1 is skipped",
+                "synonym 4: keyword 3 is skipped",
+                "synonym 5: keyword 50 is unknown",
+                "synonym 6: keyword NULL is unknown",
+                "synonym 7: name is empty",
+                "synonym 8: name is empty",
+            ]
+        );
+        for reason in reasons {
+            for text in ["Second", "First", "Root", "Orphan"] {
+                assert!(!reason.contains(text), "{reason}");
+            }
+        }
     }
 
     #[test]
