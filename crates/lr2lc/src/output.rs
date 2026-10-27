@@ -1,6 +1,6 @@
 //! Readable summary and `report.json`.
 
-use crate::dry_run::Outcome;
+use crate::dry_run::{KeywordAttributes, Outcome};
 use model::Report;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -16,7 +16,7 @@ pub struct ReportJson<'a> {
     pub folders: AreaJson<'a>,
     pub photos: PhotosJson<'a>,
     pub collections: AreaJson<'a>,
-    pub keywords: AreaJson<'a>,
+    pub keywords: KeywordsJson<'a>,
     pub keyword_assignments: AreaJson<'a>,
     pub keyword_synonyms: AreaJson<'a>,
     /// Converted photos per star rating, keys "0" to "5".
@@ -38,6 +38,19 @@ pub struct PhotosJson<'a> {
     pub area: AreaJson<'a>,
     /// Skipped videos; they are also listed in `skipped`.
     pub videos: usize,
+}
+
+/// Counts of keywords, plus attribute counts over the converted keywords.
+#[derive(Debug, Serialize)]
+pub struct KeywordsJson<'a> {
+    #[serde(flatten)]
+    pub area: AreaJson<'a>,
+    pub persons: usize,
+    pub not_exported: usize,
+    pub no_parents_on_export: usize,
+    pub no_synonyms_on_export: usize,
+    pub unknown_type: usize,
+    pub unused: usize,
 }
 
 /// One skipped element.
@@ -73,7 +86,15 @@ pub fn report_json(outcome: &Outcome) -> String {
             videos: outcome.videos,
         },
         collections: AreaJson::new(&outcome.collections),
-        keywords: AreaJson::new(&outcome.keywords),
+        keywords: KeywordsJson {
+            area: AreaJson::new(&outcome.keywords),
+            persons: outcome.keyword_attributes.persons,
+            not_exported: outcome.keyword_attributes.not_exported,
+            no_parents_on_export: outcome.keyword_attributes.no_parents_on_export,
+            no_synonyms_on_export: outcome.keyword_attributes.no_synonyms_on_export,
+            unknown_type: outcome.keyword_attributes.unknown_type,
+            unused: outcome.keyword_attributes.unused,
+        },
         keyword_assignments: AreaJson::new(&outcome.keyword_assignments),
         keyword_synonyms: AreaJson::new(&outcome.keyword_synonyms),
         ratings: outcome
@@ -107,6 +128,7 @@ pub fn summary(outcome: &Outcome) -> String {
         );
     }
     let _ = writeln!(out, "videos: skipped {}", outcome.videos);
+    let _ = writeln!(out, "{}", attributes_line(&outcome.keyword_attributes));
     for (area, report) in areas(outcome) {
         let groups = group_reasons(report);
         if groups.is_empty() {
@@ -134,6 +156,20 @@ fn areas(outcome: &Outcome) -> [(&'static str, &Report); 6] {
         ("keyword assignments", &outcome.keyword_assignments),
         ("keyword synonyms", &outcome.keyword_synonyms),
     ]
+}
+
+/// Formats the keyword attribute counts as one line.
+fn attributes_line(a: &KeywordAttributes) -> String {
+    format!(
+        "keyword attributes: persons {}, not exported {}, no parents on export {}, \
+         no synonyms on export {}, unknown type {}, unused {}",
+        a.persons,
+        a.not_exported,
+        a.no_parents_on_export,
+        a.no_synonyms_on_export,
+        a.unknown_type,
+        a.unused
+    )
 }
 
 /// Formats the rating distribution as `ratings: 0: a, 1: b, ..., 5: f`.
@@ -223,6 +259,14 @@ mod tests {
             videos: 0,
             collections,
             keywords,
+            keyword_attributes: KeywordAttributes {
+                persons: 1,
+                not_exported: 2,
+                no_parents_on_export: 3,
+                no_synonyms_on_export: 4,
+                unknown_type: 5,
+                unused: 6,
+            },
             keyword_assignments,
             keyword_synonyms,
             ratings: [0, 0, 0, 1, 0, 0],
@@ -280,6 +324,27 @@ mod tests {
         assert_eq!(v["photos"]["videos"], 1);
         assert_eq!(v["photos"]["read"], 5);
         assert_eq!(v["photos"]["skipped"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn keyword_attributes_are_in_summary_and_json() {
+        let o = outcome();
+        let text = summary(&o);
+        assert!(
+            text.lines().any(|l| l
+                == "keyword attributes: persons 1, not exported 2, no parents on export 3, \
+                    no synonyms on export 4, unknown type 5, unused 6"),
+            "{text}"
+        );
+        let v: serde_json::Value = serde_json::from_str(&report_json(&o)).unwrap();
+        let k = &v["keywords"];
+        assert_eq!(k["read"], 3);
+        assert_eq!(k["persons"], 1);
+        assert_eq!(k["not_exported"], 2);
+        assert_eq!(k["no_parents_on_export"], 3);
+        assert_eq!(k["no_synonyms_on_export"], 4);
+        assert_eq!(k["unknown_type"], 5);
+        assert_eq!(k["unused"], 6);
     }
 
     #[test]

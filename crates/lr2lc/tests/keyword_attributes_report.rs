@@ -51,7 +51,6 @@ fn attrs() -> (tempfile::TempDir, PathBuf) {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn report_json_has_the_attribute_counts() {
     let (_d, cat) = attrs();
     let (_, v, _) = run_report(&cat, &[]);
@@ -77,7 +76,6 @@ fn existing_keyword_fields_are_unchanged() {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn small_catalog_has_zero_counts() {
     let dir = tempfile::tempdir().unwrap();
     let cat = lrcat_fixtures::write_small_catalog_with_files(dir.path()).unwrap();
@@ -104,7 +102,6 @@ fn small_catalog_has_zero_counts() {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn stdout_has_the_attribute_line() {
     let (_d, cat) = attrs();
     let (text, _, _) = run_report(&cat, &[]);
@@ -122,7 +119,6 @@ fn stdout_has_the_attribute_line() {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn keyword_names_never_appear_in_output() {
     let (_d, cat) = attrs();
     let (text, _, raw) = run_report(&cat, &[]);
@@ -148,7 +144,6 @@ fn dry_run_leaves_catalog_unchanged_and_second_run_agrees() {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn keyword_numbers_add_up() {
     let (_d, cat) = attrs();
     let (_, v, _) = run_report(&cat, &[]);

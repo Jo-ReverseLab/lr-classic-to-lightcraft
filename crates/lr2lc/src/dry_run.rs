@@ -3,8 +3,9 @@
 //! Nothing is written except the optional report file.
 
 use anyhow::{Context, Result, bail};
-use lr_reader::{Catalog, VIDEO_SKIP_REASON, checksum, drop_missing_originals};
-use model::{Folder, PathMappings, Photo, Rating, Report};
+use lr_reader::{Catalog, KeywordData, VIDEO_SKIP_REASON, checksum, drop_missing_originals};
+use model::{Folder, Keyword, PathMappings, Photo, Rating, Report};
+use std::collections::HashSet;
 use std::path::Path;
 
 /// Result of a dry run.
@@ -19,11 +20,46 @@ pub struct Outcome {
     pub videos: usize,
     pub collections: Report,
     pub keywords: Report,
+    /// Attribute counts over the converted keywords.
+    pub keyword_attributes: KeywordAttributes,
     pub keyword_assignments: Report,
     /// Synonyms of keywords; converted with their keyword.
     pub keyword_synonyms: Report,
     /// Number of converted photos per star rating, index 0 to 5.
     pub ratings: [usize; 6],
+}
+
+/// Counts of keyword attributes, over converted keywords only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KeywordAttributes {
+    /// Keywords that name a person.
+    pub persons: usize,
+    /// Keywords not written into exported photos.
+    pub not_exported: usize,
+    /// Keywords exported without their parents.
+    pub no_parents_on_export: usize,
+    /// Keywords exported without their synonyms.
+    pub no_synonyms_on_export: usize,
+    /// Keywords with a type that is neither a plain keyword nor a person.
+    pub unknown_type: usize,
+    /// Keywords without any converted assignment.
+    pub unused: usize,
+}
+
+impl KeywordAttributes {
+    /// Counts the attributes of the converted keywords in `data`.
+    fn count(data: &KeywordData) -> Self {
+        let used: HashSet<&Keyword> = data.assignments.values().flatten().collect();
+        let n = |f: &dyn Fn(&Keyword) -> bool| data.keywords.iter().filter(|k| f(k)).count();
+        KeywordAttributes {
+            persons: n(&|k| k.person),
+            not_exported: n(&|k| !k.include_on_export),
+            no_parents_on_export: n(&|k| !k.export_containing),
+            no_synonyms_on_export: n(&|k| !k.export_synonyms),
+            unknown_type: data.unknown_type,
+            unused: n(&|k| !used.contains(k)),
+        }
+    }
 }
 
 /// Runs the dry run on the catalog at `path`.
@@ -38,6 +74,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         photos,
         collections,
         keywords,
+        keyword_attributes,
         keyword_assignments,
         keyword_synonyms,
         ratings,
@@ -72,6 +109,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         // Only converted photos are passed on, so assignments to skipped
         // photos are skipped as well.
         let data = catalog.keywords(&kept_photos, &mut keywords, &mut keyword_assignments)?;
+        let keyword_attributes = KeywordAttributes::count(&data);
         let mut keyword_synonyms = data.synonym_report;
         for keyword in &data.keywords {
             keywords.converted();
@@ -88,6 +126,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
             photos,
             collections,
             keywords,
+            keyword_attributes,
             keyword_assignments,
             keyword_synonyms,
             rating_counts(&kept_photos),
@@ -114,6 +153,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         photos,
         collections,
         keywords,
+        keyword_attributes,
         keyword_assignments,
         keyword_synonyms,
         ratings,
@@ -154,6 +194,40 @@ mod tests {
 
     fn photo(id: i64, stars: u8) -> Photo {
         Photo::new(format!("p{id}.jpg"), id, Rating::new(stars).unwrap())
+    }
+
+    fn kw(name: &str) -> Keyword {
+        Keyword::new(vec![name.into()]).unwrap()
+    }
+
+    #[test]
+    fn keyword_attributes_are_counted() {
+        let mut person = kw("P");
+        person.person = true;
+        person.include_on_export = false;
+        let mut quiet = kw("Q");
+        quiet.export_containing = false;
+        quiet.export_synonyms = false;
+        let plain = kw("R");
+        let data = KeywordData {
+            keywords: vec![person.clone(), quiet, plain],
+            assignments: [(1, vec![person.clone()]), (2, vec![person])]
+                .into_iter()
+                .collect(),
+            synonym_report: Report::new(),
+            unknown_type: 1,
+        };
+        assert_eq!(
+            KeywordAttributes::count(&data),
+            KeywordAttributes {
+                persons: 1,
+                not_exported: 1,
+                no_parents_on_export: 1,
+                no_synonyms_on_export: 1,
+                unknown_type: 1,
+                unused: 2,
+            }
+        );
     }
 
     #[test]
