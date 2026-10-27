@@ -108,7 +108,9 @@ fn text_output_shows_counts_and_skipped_group() {
     );
     assert!(text.lines().any(|l| l.trim() == want), "stdout: {text}");
     assert!(text.contains("skipped keyword synonyms:"), "stdout: {text}");
-    assert!(text.contains("synonym 4: keyword 999 is unknown"));
+    // The text output groups reasons without the "<kind> <id>: " prefix in
+    // every area; the full reason is checked in report.json elsewhere.
+    assert!(text.contains("keyword 999 is unknown"), "stdout: {text}");
 }
 
 #[test]
