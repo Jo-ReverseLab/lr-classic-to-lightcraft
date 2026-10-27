@@ -37,15 +37,22 @@ Without `--apply`, lr2lc only reads the catalog and prints a summary: how
 many folders, photos, collections, keywords, keyword assignments and keyword
 synonyms it read,
 how many it would convert and how many it skips, with the reasons grouped.
-A last line shows how many of the converted photos have 0 to 5 stars
-(unrated photos count as 0):
+A line `videos: skipped N` follows, and a last line shows how many of the
+converted photos have 0 to 5 stars (unrated photos count as 0):
 
 ```text
 keywords: read 12, would convert 11, skipped 1
 keyword assignments: read 30, would convert 25, skipped 5
 keyword synonyms: read 4, would convert 3, skipped 1
+videos: skipped 2
 ratings: 0: 6, 1: 3, 2: 2, 3: 3, 4: 2, 5: 1
 ```
+
+LightCraft cannot read videos, so they are skipped with the reason
+`video files are not supported by LightCraft`. A photo counts as a video if
+Lightroom stores its format as `VIDEO` or its file extension is one of mov,
+mp4, m4v, avi, mts, m2ts, 3gp, mpg, mpeg, wmv or mkv (any letter case).
+Virtual copies keep their own reason, even of a video.
 
 Keywords are only assigned to photos that are converted, so assignments to
 skipped photos are skipped too. Synonyms are converted together with their
@@ -91,7 +98,8 @@ Writes a machine-readable report to `FILE` after the run:
   "photos": {
     "read": 3,
     "converted": 2,
-    "skipped": [{ "reason": "photo 7: original file is missing" }]
+    "skipped": [{ "reason": "photo 7: original file is missing" }],
+    "videos": 0
   },
   "collections": {
     "read": 1,
@@ -120,7 +128,8 @@ Writes a machine-readable report to `FILE` after the run:
 For each area, `read` equals `converted` plus the number of `skipped`
 entries. Reasons name the catalog id, never a file path, a collection
 name, a keyword or a synonym. `ratings` always has the keys `"0"` to `"5"`; the
-counts add up to `photos.converted`.
+counts add up to `photos.converted`. `photos.videos` is the number of
+skipped videos; they are also listed in `photos.skipped`.
 
 To protect the catalog and your files, `FILE` is checked before anything is
 read, and lr2lc stops with exit code 2 if:
