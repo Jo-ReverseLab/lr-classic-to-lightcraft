@@ -262,7 +262,7 @@ fn catalog_unchanged_and_second_run_identical() {
 #[test]
 fn ratings_sum_matches_photos_on_small_fixture() {
     // All six keys always exist. Here the plain small fixture is used and the
-    // sum rule is checked against the photo count; keywords are all converted.
+    // sum rule is checked against the photo count; one empty-named keyword is skipped.
     let dir = tempfile::tempdir().unwrap();
     let cat = lrcat_fixtures::write_small_catalog_with_files(dir.path()).unwrap();
     let (_, v, _) = report_of(&cat);
@@ -270,5 +270,6 @@ fn ratings_sum_matches_photos_on_small_fixture() {
     assert_eq!(r.len(), 6);
     let sum: i64 = r.values().map(|x| x.as_i64().unwrap()).sum();
     assert_eq!(sum, PHOTOS_OK);
-    check_area(&v, "keywords", small::KEYWORDS, small::KEYWORDS, 0);
+    // One keyword has an empty name and is skipped (see the P5-1 reader test).
+    check_area(&v, "keywords", small::KEYWORDS, small::KEYWORDS - 1, 1);
 }
