@@ -1,4 +1,3 @@
-#![cfg(any())] // waiting for P5b-3a: remove this line when the CLI reports collections
 //! Acceptance tests for collections in the CLI dry run (task P5b-3a).
 //!
 //! Fixtures: `lrcat_fixtures::write_collection_catalog_with_files`

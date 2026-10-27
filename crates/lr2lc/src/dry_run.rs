@@ -5,7 +5,9 @@
 use crate::labels::{self, LabelCounts, LabelMode};
 use anyhow::{Context, Result, bail};
 use lr_reader::{Catalog, KeywordData, VIDEO_SKIP_REASON, checksum, drop_missing_originals};
-use model::{Flag, Folder, Keyword, PathMappings, Photo, Rating, Report};
+use model::{
+    Collection, CollectionKind, Flag, Folder, Keyword, PathMappings, Photo, Rating, Report,
+};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
@@ -22,6 +24,10 @@ pub struct Outcome {
     /// photos.
     pub videos: usize,
     pub collections: Report,
+    /// Kind and name counts over the converted collections.
+    pub collection_counts: CollectionCounts,
+    /// Members of collections: converted with an album, or skipped.
+    pub collection_members: Report,
     pub keywords: Report,
     /// Attribute counts over the converted keywords.
     pub keyword_attributes: KeywordAttributes,
@@ -57,6 +63,37 @@ pub struct Converted {
     pub keywords: Vec<Keyword>,
     /// Keywords per `Photo::lightroom_id`.
     pub photo_keywords: BTreeMap<i64, Vec<Keyword>>,
+    /// Converted albums and folders, ascending by Lightroom id. Not written
+    /// yet.
+    #[expect(dead_code, reason = "the writer takes collections in task P5b-3b")]
+    pub collections: Vec<Collection>,
+}
+
+/// Counts over the converted collections.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CollectionCounts {
+    pub albums: usize,
+    pub folders: usize,
+    /// Collections that repeat the exact name of an earlier converted
+    /// sibling below the same parent (two equal names count as 1).
+    pub duplicate_names: usize,
+}
+
+impl CollectionCounts {
+    fn count(collections: &[Collection]) -> Self {
+        let mut siblings: HashSet<(Option<i64>, &str)> = HashSet::new();
+        let mut counts = CollectionCounts::default();
+        for c in collections {
+            match c.kind {
+                CollectionKind::Album => counts.albums += 1,
+                CollectionKind::Folder => counts.folders += 1,
+            }
+            if !siblings.insert((c.parent, c.name.as_str())) {
+                counts.duplicate_names += 1;
+            }
+        }
+        counts
+    }
 }
 
 /// Number of converted photos per flag. `none` does not include `unknown`,
@@ -134,6 +171,8 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         folders,
         photos,
         collections,
+        collection_counts,
+        collection_members,
         keywords,
         keyword_attributes,
         keyword_assignments,
@@ -151,12 +190,10 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         let catalog = Catalog::open(path)?;
         let mut folders = Report::new();
         let mut photos = Report::new();
-        let mut collections = Report::new();
         let mut keywords = Report::new();
         let mut keyword_assignments = Report::new();
         let found_folders = catalog.folders(&mut folders)?;
         let photo_data = catalog.photo_data(&mut photos)?;
-        catalog.collections(&mut collections)?;
         let mapped_folders: Vec<Folder> = found_folders
             .into_iter()
             .map(|f| Folder::new(mappings.map(&f.path)))
@@ -181,6 +218,8 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         // photos are skipped as well.
         let data = catalog.keywords(&kept_photos, &mut keywords, &mut keyword_assignments)?;
         let keyword_attributes = KeywordAttributes::count(&data);
+        // Members naming skipped photos are skipped as well.
+        let collection_data = catalog.collection_data(&kept_photos)?;
         let mut keyword_synonyms = data.synonym_report;
         for keyword in &data.keywords {
             keywords.converted();
@@ -195,7 +234,9 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
             catalog.version().to_string(),
             folders,
             photos,
-            collections,
+            collection_data.report,
+            CollectionCounts::count(&collection_data.collections),
+            collection_data.members,
             keywords,
             keyword_attributes,
             keyword_assignments,
@@ -215,6 +256,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
                 photos: kept_photos,
                 keywords: data.keywords,
                 photo_keywords: data.assignments,
+                collections: collection_data.collections,
             },
         )
     };
@@ -223,6 +265,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         ("folders", &folders),
         ("photos", &photos),
         ("collections", &collections),
+        ("collection members", &collection_members),
         ("keywords", &keywords),
         ("keyword assignments", &keyword_assignments),
         ("keyword synonyms", &keyword_synonyms),
@@ -239,6 +282,8 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         videos: count_videos(&photos),
         photos,
         collections,
+        collection_counts,
+        collection_members,
         keywords,
         keyword_attributes,
         keyword_assignments,
@@ -349,6 +394,39 @@ mod tests {
             }
         );
         assert_eq!(FlagCounts::count(&[], &[1]), FlagCounts::default());
+    }
+
+    fn coll(id: i64, kind: CollectionKind, parent: Option<i64>, name: &str) -> Collection {
+        Collection {
+            lightroom_id: id,
+            name: name.into(),
+            kind,
+            parent,
+            members: vec![],
+        }
+    }
+
+    #[test]
+    fn collection_kinds_and_duplicate_names_are_counted() {
+        use CollectionKind::{Album, Folder};
+        let cs = [
+            coll(1, Folder, None, "A"),
+            coll(2, Album, None, "A"),
+            coll(3, Album, Some(1), "A"),
+            coll(4, Album, Some(1), "A"),
+            coll(5, Album, Some(1), "A"),
+            coll(6, Album, Some(1), "a"),
+            coll(7, Album, Some(1), "A "),
+        ];
+        assert_eq!(
+            CollectionCounts::count(&cs),
+            CollectionCounts {
+                albums: 6,
+                folders: 1,
+                duplicate_names: 3,
+            }
+        );
+        assert_eq!(CollectionCounts::count(&[]), CollectionCounts::default());
     }
 
     #[test]

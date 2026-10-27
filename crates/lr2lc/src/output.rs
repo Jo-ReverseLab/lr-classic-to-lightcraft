@@ -1,6 +1,6 @@
 //! Readable summary and `report.json`.
 
-use crate::dry_run::{FlagCounts, KeywordAttributes, Outcome};
+use crate::dry_run::{CollectionCounts, FlagCounts, KeywordAttributes, Outcome};
 use crate::labels::LabelCounts;
 use crate::writer::WriterJson;
 use model::{Report, Skipped};
@@ -17,7 +17,8 @@ pub struct ReportJson<'a> {
     pub catalog_unchanged: bool,
     pub folders: AreaJson<'a>,
     pub photos: PhotosJson<'a>,
-    pub collections: AreaJson<'a>,
+    pub collections: CollectionsJson<'a>,
+    pub collection_members: AreaJson<'a>,
     pub keywords: KeywordsJson<'a>,
     pub keyword_assignments: AreaJson<'a>,
     pub keyword_synonyms: AreaJson<'a>,
@@ -128,6 +129,17 @@ impl From<&LabelCounts> for LabelsJson {
 /// `photo {id}: ` prefix.
 const CUSTOM_LABEL_REASON: &str = "custom label not in label set";
 
+/// Counts of collections, plus kind and name counts over the converted
+/// ones. Names are never listed.
+#[derive(Debug, Serialize)]
+pub struct CollectionsJson<'a> {
+    #[serde(flatten)]
+    pub area: AreaJson<'a>,
+    pub albums: usize,
+    pub folders: usize,
+    pub duplicate_names: usize,
+}
+
 /// Counts of keywords, plus attribute counts over the converted keywords.
 #[derive(Debug, Serialize)]
 pub struct KeywordsJson<'a> {
@@ -186,7 +198,8 @@ pub fn report_json_with(outcome: &Outcome, dry_run: bool, writer: Option<&Writer
             titles: outcome.titles,
             titles_unreadable: outcome.titles_unreadable,
         },
-        collections: AreaJson::new(&outcome.collections),
+        collections: collections_json(&outcome.collections, &outcome.collection_counts),
+        collection_members: AreaJson::new(&outcome.collection_members),
         keywords: KeywordsJson {
             area: AreaJson::new(&outcome.keywords),
             persons: outcome.keyword_attributes.persons,
@@ -209,6 +222,15 @@ pub fn report_json_with(outcome: &Outcome, dry_run: bool, writer: Option<&Writer
     let mut text = serde_json::to_string_pretty(&json).expect("report serializes");
     text.push('\n');
     text
+}
+
+fn collections_json<'a>(report: &'a Report, counts: &CollectionCounts) -> CollectionsJson<'a> {
+    CollectionsJson {
+        area: AreaJson::new(report),
+        albums: counts.albums,
+        folders: counts.folders,
+        duplicate_names: counts.duplicate_names,
+    }
 }
 
 /// Builds the readable summary of a dry run.
@@ -274,11 +296,12 @@ pub fn summary_with(outcome: &Outcome, dry_run: bool) -> String {
 }
 
 /// The report areas in output order.
-fn areas(outcome: &Outcome) -> [(&'static str, &Report); 6] {
+fn areas(outcome: &Outcome) -> [(&'static str, &Report); 7] {
     [
         ("folders", &outcome.folders),
         ("photos", &outcome.photos),
         ("collections", &outcome.collections),
+        ("collection members", &outcome.collection_members),
         ("keywords", &outcome.keywords),
         ("keyword assignments", &outcome.keyword_assignments),
         ("keyword synonyms", &outcome.keyword_synonyms),
@@ -379,6 +402,15 @@ mod tests {
                 "collection {id}: smart collection is not converted"
             ));
         }
+        collections.read();
+        collections.converted();
+        let mut collection_members = Report::new();
+        for _ in 0..3 {
+            collection_members.read();
+        }
+        collection_members.converted();
+        collection_members.skipped("photo 1: collection skipped (collection 2)");
+        collection_members.skipped("photo 4: collection skipped (collection 2)");
         let mut keywords = Report::new();
         for _ in 0..3 {
             keywords.read();
@@ -402,6 +434,12 @@ mod tests {
             photos,
             videos: 0,
             collections,
+            collection_counts: CollectionCounts {
+                albums: 1,
+                folders: 0,
+                duplicate_names: 0,
+            },
+            collection_members,
             keywords,
             keyword_attributes: KeywordAttributes {
                 persons: 1,
@@ -525,9 +563,17 @@ mod tests {
         assert!(lines.contains(&"folders: read 1, would convert 1, skipped 0"));
         assert!(lines.contains(&"photos: read 4, would convert 1, skipped 3"));
         assert!(lines.contains(&"2 x original file is missing"), "{text}");
-        assert!(lines.contains(&"collections: read 2, would convert 0, skipped 2"));
+        assert!(lines.contains(&"collections: read 3, would convert 1, skipped 2"));
         assert!(lines.contains(&"skipped collections:"));
         assert!(lines.contains(&"2 x smart collection is not converted"));
+        assert!(lines.contains(&"collection members: read 3, would convert 1, skipped 2"));
+        assert!(lines.contains(&"skipped collection members:"));
+        assert!(
+            lines.contains(&"2 x collection skipped (collection 2)"),
+            "{text}"
+        );
+        assert!(!text.contains("albums"));
+        assert!(!text.contains("duplicate"));
         assert!(text.contains("dry run"));
         assert!(!text.contains("skipped folders:"));
         assert!(lines.contains(&"keywords: read 3, would convert 2, skipped 1"));
@@ -622,6 +668,7 @@ mod tests {
             [
                 "catalog_unchanged",
                 "catalog_version",
+                "collection_members",
                 "collections",
                 "dry_run",
                 "folders",
@@ -642,8 +689,17 @@ mod tests {
             "photo 2: original file is missing"
         );
         assert_eq!(v["folders"]["skipped"].as_array().unwrap().len(), 0);
-        assert_eq!(v["collections"]["read"], 2);
-        assert_eq!(v["collections"]["converted"], 0);
+        assert_eq!(v["collections"]["read"], 3);
+        assert_eq!(v["collections"]["converted"], 1);
+        assert_eq!(v["collections"]["albums"], 1);
+        assert_eq!(v["collections"]["folders"], 0);
+        assert_eq!(v["collections"]["duplicate_names"], 0);
+        assert_eq!(v["collection_members"]["read"], 3);
+        assert_eq!(v["collection_members"]["converted"], 1);
+        assert_eq!(
+            v["collection_members"]["skipped"][1]["reason"],
+            "photo 4: collection skipped (collection 2)"
+        );
         assert_eq!(
             v["collections"]["skipped"][1]["reason"],
             "collection 2: smart collection is not converted"
