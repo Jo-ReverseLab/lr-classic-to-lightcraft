@@ -1,4 +1,3 @@
-#![cfg(any())] // waiting for P5b-3a: remove this line when `collection_data` exists
 //! Acceptance tests for reading collections from the small fixture
 //! (task P5b-3a; replaces the P4-10 tests, which expected every collection
 //! to be skipped).

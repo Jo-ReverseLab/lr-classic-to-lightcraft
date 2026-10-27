@@ -1,4 +1,3 @@
-#![cfg(any())] // waiting for P5b-3a: remove this line when `collection_data` exists
 //! Acceptance tests for reading collections and collection sets into the
 //! model (task P5b-3a), on the collection fixture
 //! (`lrcat_fixtures::collection_edge`).

@@ -81,7 +81,11 @@ const REQUIRED_SCHEMA: &[(&str, &[&str])] = &[
     ("AgLibraryRootFolder", &["id_local", "absolutePath"]),
     (
         "AgLibraryCollection",
-        &["id_local", "creationId", "systemOnly"],
+        &["id_local", "creationId", "systemOnly", "name", "parent"],
+    ),
+    (
+        "AgLibraryCollectionImage",
+        &["id_local", "collection", "image", "positionInCollection"],
     ),
     (
         "AgLibraryKeyword",
@@ -429,7 +433,7 @@ mod tests {
         let mut report = model::Report::default();
         catalog.folders(&mut report).expect("folders");
         catalog.photos(&mut report).expect("photos");
-        catalog.collections(&mut report).expect("collections");
+        catalog.collection_data(&[]).expect("collections");
         let mut assignments = model::Report::default();
         catalog
             .keywords(&[], &mut report, &mut assignments)
