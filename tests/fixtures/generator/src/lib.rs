@@ -782,7 +782,7 @@ fn add_caption_edges(path: &Path) -> Result<()> {
     use caption_edge as e;
     let c = Connection::open(path)?;
     c.execute_batch("BEGIN")?;
-    let mut put = |row: i64, image: i64, caption: rusqlite::types::Value| {
+    let put = |row: i64, image: i64, caption: rusqlite::types::Value| {
         c.execute(
             "INSERT INTO AgLibraryIPTC (id_local, caption, image) VALUES (?1, ?2, ?3)",
             params![row, caption, image],

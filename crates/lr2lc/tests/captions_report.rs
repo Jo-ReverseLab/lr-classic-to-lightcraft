@@ -60,7 +60,8 @@ fn counts_converted_photos_with_a_caption() {
     assert_eq!(captions_line(&out), format!("captions: {}", e::CAPTIONS));
     // Skipped photos with a caption (2, 20) are not counted; balance holds.
     assert_eq!(v["photos"]["converted"], e::CONVERTED);
-    assert_eq!(v["photos"]["skipped"], e::SKIPPED);
+    let skipped = v["photos"]["skipped"].as_array().unwrap().len() as i64;
+    assert_eq!(skipped, e::SKIPPED);
     assert_eq!(v["photos"]["read"], e::CONVERTED + e::SKIPPED);
 }
 
