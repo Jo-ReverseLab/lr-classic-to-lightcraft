@@ -7,7 +7,10 @@ fn removes_table_and_column() {
     lrcat_fixtures::write_small_catalog_without(&p, "AgLibraryFolder", Some("pathFromRoot"))
         .unwrap();
     let c = Connection::open(&p).unwrap();
-    assert!(c.prepare("SELECT pathFromRoot FROM AgLibraryFolder").is_err());
+    assert!(
+        c.prepare("SELECT pathFromRoot FROM AgLibraryFolder")
+            .is_err()
+    );
     assert!(c.prepare("SELECT rootFolder FROM AgLibraryFolder").is_ok());
     let q = dir.path().join("b.lrcat");
     lrcat_fixtures::write_small_catalog_without(&q, "AgLibraryCollection", None).unwrap();
