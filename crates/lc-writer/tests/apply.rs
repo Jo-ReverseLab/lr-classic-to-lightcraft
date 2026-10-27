@@ -78,6 +78,7 @@ fn input() -> WriteInput {
         photos: vec![g1, g2, g3, g4],
         keywords: vec![kw(&["Travel", "Rome"]), kw(&["Café ☕"])],
         photo_keywords,
+        ..WriteInput::default()
     }
 }
 

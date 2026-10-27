@@ -19,8 +19,9 @@ use std::time::Duration;
 
 /// The commands that only read or only change the selection; everything else
 /// may change the library.
-pub const READ_COMMANDS: [&str; 5] = [
+pub const READ_COMMANDS: [&str; 6] = [
     "library.select",
+    "albums.list",
     "library.info",
     "ui.inspect",
     "library.xmpPreferences",
@@ -53,6 +54,28 @@ pub enum ImportIdStyle {
     ObjectId,
     /// `"imported": [{"photoId": 1001}]`
     ObjectPhotoId,
+}
+
+/// An error reply for an album command, optionally only for the album with
+/// this name (`album.create`: the name sent; `album.addPhotos` and
+/// `album.removePhotos`: the name of the album the id refers to).
+#[derive(Clone, Debug)]
+pub struct AlbumFailure {
+    pub command: String,
+    pub album_name: Option<String>,
+    pub message: String,
+}
+
+/// One album or album folder of the fake library.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AlbumView {
+    pub id: u64,
+    pub name: String,
+    pub folder: bool,
+    /// The id of the enclosing folder; `None` on top level.
+    pub parent: Option<u64>,
+    /// The ids of the member photos, in the order they were added.
+    pub photos: Vec<i64>,
 }
 
 /// An error reply for a command, optionally only for one photo id.
@@ -89,6 +112,8 @@ pub struct Config {
     /// is empty, `library.select` sets it and `library.import` selects the
     /// first imported photo. On by default.
     pub selection_gate: bool,
+    /// Error replies for album commands.
+    pub album_failures: Vec<AlbumFailure>,
 }
 
 impl Config {
@@ -107,6 +132,7 @@ impl Config {
             not_saved_updates: false,
             import_failed_for: None,
             selection_gate: true,
+            album_failures: Vec::new(),
         }
     }
 }
@@ -126,7 +152,10 @@ struct Library {
     ratings: BTreeMap<i64, i64>,
     /// The ids of the selected photos (empty: nothing selected).
     selection: Vec<i64>,
+    /// album id -> album
+    albums: BTreeMap<u64, AlbumView>,
     next_id: i64,
+    next_album_id: u64,
     seen: usize,
     closed_once: bool,
 }
@@ -153,6 +182,7 @@ impl FakeLightCraft {
         let library = Library {
             keywords: config.keywords.clone(),
             next_id: 1001,
+            next_album_id: 5001,
             ..Library::default()
         };
         let shared = Arc::new(Shared {
@@ -237,6 +267,30 @@ impl FakeLightCraft {
     /// Imported files and their ids.
     pub fn photos(&self) -> BTreeMap<String, i64> {
         self.shared.library.lock().unwrap().photos.clone()
+    }
+
+    /// Every album and album folder, in creation order.
+    pub fn albums(&self) -> Vec<AlbumView> {
+        self.shared
+            .library
+            .lock()
+            .unwrap()
+            .albums
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// The member photo ids of one album, in the order they were added.
+    pub fn album_members(&self, album_id: u64) -> Vec<i64> {
+        self.shared
+            .library
+            .lock()
+            .unwrap()
+            .albums
+            .get(&album_id)
+            .map(|a| a.photos.clone())
+            .unwrap_or_default()
     }
 
     /// Rating of each photo, by photo id (only photos that were rated).
@@ -327,6 +381,9 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             }
             lib.selection = ids;
             Ok(json!({}))
+        }
+        "album.create" | "album.addPhotos" | "album.removePhotos" | "albums.list" => {
+            album_command(config, lib, command, params)
         }
         "keyword.list" => Ok(keyword_list(&config.keyword_list, &lib.keywords)),
         "keyword.create" => {
@@ -456,6 +513,125 @@ fn real_nested(keywords: &BTreeSet<String>, prefix: &str) -> Vec<Value> {
                 "path": level,
                 "count": 0,
                 "children": real_nested(keywords, level),
+            })
+        })
+        .collect()
+}
+
+/// The album commands, with the rules of the real app: `album.create` never
+/// takes `addSelected` here (the writer must not send it), names are
+/// trimmed, an empty name and a parent that is not an existing folder are
+/// errors, the same name may exist twice; `album.addPhotos` needs a
+/// non-empty selection, refuses folders, appends and is idempotent;
+/// `album.removePhotos` needs a non-empty selection too.
+fn album_command(
+    config: &Config,
+    lib: &mut Library,
+    command: &str,
+    params: &Value,
+) -> Result<Value, String> {
+    let album_name = match command {
+        "album.create" => params["name"].as_str().map(str::to_string),
+        _ => params["id"]
+            .as_u64()
+            .and_then(|id| lib.albums.get(&id))
+            .map(|a| a.name.clone()),
+    };
+    for f in &config.album_failures {
+        if f.command == command
+            && (f.album_name.is_none() || f.album_name.as_deref() == album_name.as_deref())
+        {
+            return Err(f.message.clone());
+        }
+    }
+    match command {
+        "album.create" => {
+            if params.get("addSelected").is_some() {
+                return Err("addSelected must not be sent".into());
+            }
+            let name = params["name"].as_str().ok_or("name is missing")?.trim();
+            if name.is_empty() {
+                return Err("empty name".into());
+            }
+            let parent = match params.get("parent") {
+                None | Some(Value::Null) => None,
+                Some(v) => {
+                    let id = v.as_u64().ok_or("parent must be a number")?;
+                    if !lib.albums.get(&id).is_some_and(|a| a.folder) {
+                        return Err("parent must be an existing folder".into());
+                    }
+                    Some(id)
+                }
+            };
+            let folder = match params.get("folder") {
+                None | Some(Value::Null) => false,
+                Some(v) => v.as_bool().ok_or("folder must be true or false")?,
+            };
+            let id = lib.next_album_id;
+            lib.next_album_id += 1;
+            lib.albums.insert(
+                id,
+                AlbumView {
+                    id,
+                    name: name.to_string(),
+                    folder,
+                    parent,
+                    photos: Vec::new(),
+                },
+            );
+            Ok(json!({"id": id, "skipped": 0}))
+        }
+        "album.addPhotos" | "album.removePhotos" => {
+            if params.get("addSelected").is_some() {
+                return Err("addSelected must not be sent".into());
+            }
+            if config.selection_gate && lib.selection.is_empty() {
+                return Err("no photos selected".into());
+            }
+            let id = params["id"].as_u64().ok_or("id must be a number")?;
+            let ids = params["ids"].as_array().ok_or("ids is missing")?;
+            let ids: Vec<i64> = ids.iter().filter_map(Value::as_i64).collect();
+            if ids.len() != params["ids"].as_array().map_or(0, Vec::len) {
+                return Err("ids must be numbers".into());
+            }
+            if let Some(unknown) = ids.iter().find(|i| !lib.photos.values().any(|p| p == *i)) {
+                return Err(format!("unknown photo id {unknown}"));
+            }
+            let album = lib.albums.get_mut(&id).ok_or("unknown album id")?;
+            if album.folder {
+                return Err("smart albums and folders can't hold photos".into());
+            }
+            if command == "album.addPhotos" {
+                let mut added = 0;
+                for photo in ids {
+                    if !album.photos.contains(&photo) {
+                        album.photos.push(photo);
+                        added += 1;
+                    }
+                }
+                Ok(json!({"added": added, "skipped": 0}))
+            } else {
+                let before = album.photos.len();
+                album.photos.retain(|p| !ids.contains(p));
+                Ok(json!({"removed": before - album.photos.len(), "album": id}))
+            }
+        }
+        _ => Ok(json!(albums_nested(lib, None))),
+    }
+}
+
+/// `albums.list`: the nested tree `{id, name, folder, count, children}`.
+fn albums_nested(lib: &Library, parent: Option<u64>) -> Vec<Value> {
+    lib.albums
+        .values()
+        .filter(|a| a.parent == parent)
+        .map(|a| {
+            json!({
+                "id": a.id,
+                "name": a.name,
+                "folder": a.folder,
+                "count": a.photos.len(),
+                "children": albums_nested(lib, Some(a.id)),
             })
         })
         .collect()

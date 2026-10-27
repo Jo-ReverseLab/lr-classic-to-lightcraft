@@ -61,6 +61,7 @@ fn input() -> WriteInput {
         ],
         keywords: vec![kw(&["Travel", "Rome"])],
         photo_keywords,
+        ..WriteInput::default()
     }
 }
 

@@ -74,6 +74,7 @@ fn input(photos: Vec<Photo>, per_photo: Vec<(i64, Vec<Keyword>)>) -> WriteInput 
         photos,
         keywords,
         photo_keywords: per_photo.into_iter().collect::<BTreeMap<_, _>>(),
+        ..WriteInput::default()
     }
 }
 
@@ -162,6 +163,9 @@ fn empty_state_three_photos_gives_the_expected_steps() {
             Step::CreateKeyword { .. } => "kw",
             Step::Import { .. } => "import",
             Step::Update { command, .. } => command.as_str(),
+            Step::CreateAlbum { .. } | Step::AddMembers { .. } | Step::RemoveMembers { .. } => {
+                "album"
+            }
         })
         .collect();
     assert_eq!(
@@ -884,6 +888,7 @@ fn missing_ancestors_are_created_implicitly_with_default_attributes() {
         photos: vec![photo("g1", 1, 0)],
         keywords: vec![],
         photo_keywords: BTreeMap::from([(1, vec![child])]),
+        ..WriteInput::default()
     };
     let p = plan(&inp, &State::default(), &none());
     let created: Vec<(&str, &Value)> = p
@@ -918,6 +923,7 @@ fn ancestor_known_to_the_library_or_state_is_not_created_again() {
         photos: vec![],
         keywords: vec![],
         photo_keywords: BTreeMap::from([(1, vec![kw(&["a", "b", "c"])])]),
+        ..WriteInput::default()
     };
     let existing: BTreeSet<String> = ["a".to_string()].into();
     let mut state = State::default();

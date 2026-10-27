@@ -173,7 +173,8 @@ fn planned_line(text: &str) -> (u64, u64, u64) {
         .filter(|p| !p.is_empty())
         .map(|p| p.parse().unwrap())
         .collect();
-    assert_eq!(numbers.len(), 3, "line must stay as it was: {line}");
+    // P5b-3b appends the numbers of albums and album members to the line.
+    assert!(numbers.len() >= 3, "line must start as it did: {line}");
     (numbers[0], numbers[1], numbers[2])
 }
 
