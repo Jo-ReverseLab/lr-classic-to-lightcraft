@@ -259,6 +259,19 @@ pub fn write_small_catalog(path: &Path) -> Result<()> {
     )
 }
 
+/// Writes the small fixture, then removes `table` (when `column` is `None`)
+/// or just `column` from `table`. Used to test schema checks.
+pub fn write_small_catalog_without(path: &Path, table: &str, column: Option<&str>) -> Result<()> {
+    write_small_catalog(path)?;
+    let conn = Connection::open(path)?;
+    match column {
+        None => conn.execute_batch(&format!("DROP TABLE \"{table}\";"))?,
+        Some(c) => conn.execute_batch(&format!("ALTER TABLE \"{table}\" DROP COLUMN \"{c}\";"))?,
+    }
+    drop(conn);
+    Ok(())
+}
+
 fn io_err(e: std::io::Error) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(e))
 }
