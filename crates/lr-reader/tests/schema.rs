@@ -173,3 +173,17 @@ fn missing_iptc_copyright_column_is_reported() {
     let path = damaged(dir.path(), "AgLibraryIPTC", Some("copyright"));
     expect_missing(&path, "AgLibraryIPTC", Some("copyright"));
 }
+
+#[test]
+#[ignore = "waiting for P5b-7c"]
+fn missing_xmp_column_or_metadata_table_is_not_an_error() {
+    // P5b-7c: Adobe_AdditionalMetadata.xmp is optional (titles become None).
+    let dir = tempfile::tempdir().unwrap();
+    let t = dir.path().join("no-table.lrcat");
+    lrcat_fixtures::write_small_catalog_without(&t, "Adobe_AdditionalMetadata", None).unwrap();
+    assert!(Catalog::open(&t).is_ok());
+    let c = dir.path().join("no-column.lrcat");
+    lrcat_fixtures::write_small_catalog_without(&c, "Adobe_AdditionalMetadata", Some("xmp"))
+        .unwrap();
+    assert!(Catalog::open(&c).is_ok());
+}
