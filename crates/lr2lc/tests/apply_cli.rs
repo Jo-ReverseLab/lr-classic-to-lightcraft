@@ -369,6 +369,19 @@ fn script_in_a_dry_run_contains_valid_json_lines() {
         .lines()
         .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("{l}: {e}")))
         .collect();
+    // Album commands and the selects before them (P5b-3b) are checked in
+    // `apply_albums_cli.rs`; the numbers of this line do not count them.
+    let is_album = |l: &serde_json::Value| {
+        l["params"]["command"]
+            .as_str()
+            .is_some_and(|c| c.starts_with("album."))
+    };
+    let lines: Vec<serde_json::Value> = lines
+        .iter()
+        .enumerate()
+        .filter(|(i, l)| !is_album(l) && !lines.get(i + 1).is_some_and(is_album))
+        .map(|(_, l)| l.clone())
+        .collect();
     // `library.select` lines (P5-4e) are not updates: one per photo with
     // updates, before them.
     let selects = lines

@@ -36,6 +36,9 @@
 //! `cfg(any())` above. The developer may ONLY remove the `#![cfg(any())]`
 //! line. Any other change to this file needs the test author.
 
+// `..WriteInput::default()` stays valid when the struct gains fields (P5b-3b).
+#![allow(clippy::needless_update)]
+
 use lc_writer::apply::{ApplySummary, apply};
 use lc_writer::control::{ControlClient, WriteError};
 use lc_writer::plan::WriteInput;
