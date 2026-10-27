@@ -18,6 +18,7 @@ pub struct ReportJson<'a> {
     pub collections: AreaJson<'a>,
     pub keywords: AreaJson<'a>,
     pub keyword_assignments: AreaJson<'a>,
+    pub keyword_synonyms: AreaJson<'a>,
     /// Converted photos per star rating, keys "0" to "5".
     pub ratings: BTreeMap<String, usize>,
 }
@@ -62,6 +63,7 @@ pub fn report_json(outcome: &Outcome) -> String {
         collections: AreaJson::new(&outcome.collections),
         keywords: AreaJson::new(&outcome.keywords),
         keyword_assignments: AreaJson::new(&outcome.keyword_assignments),
+        keyword_synonyms: AreaJson::new(&outcome.keyword_synonyms),
         ratings: outcome
             .ratings
             .iter()
@@ -110,13 +112,14 @@ pub fn summary(outcome: &Outcome) -> String {
 }
 
 /// The report areas in output order.
-fn areas(outcome: &Outcome) -> [(&'static str, &Report); 5] {
+fn areas(outcome: &Outcome) -> [(&'static str, &Report); 6] {
     [
         ("folders", &outcome.folders),
         ("photos", &outcome.photos),
         ("collections", &outcome.collections),
         ("keywords", &outcome.keywords),
         ("keyword assignments", &outcome.keyword_assignments),
+        ("keyword synonyms", &outcome.keyword_synonyms),
     ]
 }
 
@@ -193,6 +196,12 @@ mod tests {
         let mut keyword_assignments = Report::new();
         keyword_assignments.read();
         keyword_assignments.skipped("assignment 5: photo 2 is skipped or unknown");
+        let mut keyword_synonyms = Report::new();
+        for _ in 0..2 {
+            keyword_synonyms.read();
+        }
+        keyword_synonyms.converted();
+        keyword_synonyms.skipped("synonym 4: keyword 9 is unknown");
         Outcome {
             catalog_version: "1500000".into(),
             catalog_unchanged: true,
@@ -201,6 +210,7 @@ mod tests {
             collections,
             keywords,
             keyword_assignments,
+            keyword_synonyms,
             ratings: [0, 0, 0, 1, 0, 0],
         }
     }
@@ -235,6 +245,9 @@ mod tests {
         assert!(lines.contains(&"1 x name is empty"));
         assert!(lines.contains(&"skipped keyword assignments:"));
         assert!(lines.contains(&"1 x photo 2 is skipped or unknown"));
+        assert!(lines.contains(&"keyword synonyms: read 2, would convert 1, skipped 1"));
+        assert!(lines.contains(&"skipped keyword synonyms:"));
+        assert!(lines.contains(&"1 x keyword 9 is unknown"));
         assert!(lines.contains(&"ratings: 0: 0, 1: 0, 2: 0, 3: 1, 4: 0, 5: 0"));
     }
 
@@ -261,6 +274,7 @@ mod tests {
                 "dry_run",
                 "folders",
                 "keyword_assignments",
+                "keyword_synonyms",
                 "keywords",
                 "photos",
                 "ratings",
@@ -288,6 +302,12 @@ mod tests {
             "keyword 7: name is empty"
         );
         assert_eq!(v["keyword_assignments"]["read"], 1);
+        assert_eq!(v["keyword_synonyms"]["read"], 2);
+        assert_eq!(v["keyword_synonyms"]["converted"], 1);
+        assert_eq!(
+            v["keyword_synonyms"]["skipped"][0]["reason"],
+            "synonym 4: keyword 9 is unknown"
+        );
         let ratings = v["ratings"].as_object().unwrap();
         let keys: Vec<&str> = ratings.keys().map(String::as_str).collect();
         assert_eq!(keys, ["0", "1", "2", "3", "4", "5"]);

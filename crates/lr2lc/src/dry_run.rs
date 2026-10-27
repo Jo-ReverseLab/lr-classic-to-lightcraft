@@ -1,6 +1,6 @@
 //! The dry run: read the catalog, apply path mappings, check originals, read
-//! keywords for the converted photos and count what would be converted. Nothing is written except the optional
-//! report file.
+//! keywords for the converted photos and count what would be converted.
+//! Nothing is written except the optional report file.
 
 use anyhow::{Context, Result, bail};
 use lr_reader::{Catalog, checksum, drop_missing_originals};
@@ -17,6 +17,8 @@ pub struct Outcome {
     pub collections: Report,
     pub keywords: Report,
     pub keyword_assignments: Report,
+    /// Synonyms of keywords; converted with their keyword.
+    pub keyword_synonyms: Report,
     /// Number of converted photos per star rating, index 0 to 5.
     pub ratings: [usize; 6],
 }
@@ -27,7 +29,16 @@ pub struct Outcome {
 /// an error here; the caller decides after writing the report.
 pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
     let before = checksum(path).context("cannot read catalog file")?;
-    let (catalog_version, folders, photos, collections, keywords, keyword_assignments, ratings) = {
+    let (
+        catalog_version,
+        folders,
+        photos,
+        collections,
+        keywords,
+        keyword_assignments,
+        keyword_synonyms,
+        ratings,
+    ) = {
         let catalog = Catalog::open(path)?;
         let mut folders = Report::new();
         let mut photos = Report::new();
@@ -58,8 +69,12 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         // Only converted photos are passed on, so assignments to skipped
         // photos are skipped as well.
         let data = catalog.keywords(&kept_photos, &mut keywords, &mut keyword_assignments)?;
-        for _ in &data.keywords {
+        let mut keyword_synonyms = data.synonym_report;
+        for keyword in &data.keywords {
             keywords.converted();
+            for _ in &keyword.synonyms {
+                keyword_synonyms.converted();
+            }
         }
         for _ in data.assignments.values().flatten() {
             keyword_assignments.converted();
@@ -71,6 +86,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
             collections,
             keywords,
             keyword_assignments,
+            keyword_synonyms,
             rating_counts(&kept_photos),
         )
     };
@@ -81,6 +97,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         ("collections", &collections),
         ("keywords", &keywords),
         ("keyword assignments", &keyword_assignments),
+        ("keyword synonyms", &keyword_synonyms),
     ] {
         if !report.is_balanced() {
             bail!("internal error: {area} do not add up (read != converted + skipped)");
@@ -94,6 +111,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         collections,
         keywords,
         keyword_assignments,
+        keyword_synonyms,
         ratings,
     })
 }
