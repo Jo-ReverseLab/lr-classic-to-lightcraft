@@ -99,6 +99,70 @@ pub mod keyword_edge {
     ];
 }
 
+/// Keyword attribute fixture ([`write_keyword_attr_catalog`]): the small
+/// fixture plus keywords 14-28. Names are invented (`Zyx-Attr-<id>`).
+pub mod keyword_attr {
+    /// One added keyword: `(id, keywordType, includeOnExport, includeParents,
+    /// includeSynonyms, photo)`. `photo` is the photo the keyword is assigned
+    /// to; photo 20 is a skipped virtual copy, 0 means no assignment.
+    pub type Row = (i64, Option<&'static str>, i64, i64, i64, i64);
+    /// Ids 14-21: all 8 flag combinations, type NULL. For `n = id - 14`:
+    /// export = bit 2, parents = bit 1, synonyms = bit 0 (14 = all off,
+    /// 21 = all on). 20 is unused. Then: 22 person all on, 23 person all off
+    /// (unused), 24 type `Person` (wrong case, unknown), 25 type `zyx-kind`
+    /// (unknown; export 0, parents 1, synonyms 0), 26 NULL type with the
+    /// non-zero values 2, -1, 7, 27 assigned only to the skipped photo 20
+    /// (unused), 28 empty name with type `weird` (skipped, not counted).
+    pub const ROWS: [Row; 15] = [
+        (14, None, 0, 0, 0, 1),
+        (15, None, 0, 0, 1, 4),
+        (16, None, 0, 1, 0, 5),
+        (17, None, 0, 1, 1, 6),
+        (18, None, 1, 0, 0, 7),
+        (19, None, 1, 0, 1, 8),
+        (20, None, 1, 1, 0, 0),
+        (21, None, 1, 1, 1, 9),
+        (22, Some("person"), 1, 1, 1, 10),
+        (23, Some("person"), 0, 0, 0, 0),
+        (24, Some("Person"), 1, 1, 1, 11),
+        (25, Some("zyx-kind"), 0, 1, 0, 12),
+        (26, None, 2, -1, 7, 13),
+        (27, None, 1, 1, 1, 20),
+        (28, Some("weird"), 1, 1, 1, 0),
+    ];
+    /// Keyword rows read (small: 12, plus ids 14-28).
+    pub const KEYWORDS: i64 = 27;
+    /// Converted: all but the empty names 12 and 28.
+    pub const KEYWORDS_CONVERTED: i64 = 25;
+    /// Ids of the skipped keywords.
+    pub const SKIPPED_IDS: [i64; 2] = [12, 28];
+    /// Converted keywords with `person` set (22, 23).
+    pub const PERSONS: i64 = 2;
+    /// Converted keywords with `include_on_export` false
+    /// (14-17, 23, 25).
+    pub const NOT_EXPORTED: i64 = 6;
+    /// Converted keywords with `export_containing` false (14, 15, 18, 19, 23).
+    pub const NO_PARENTS: i64 = 5;
+    /// Converted keywords with `export_synonyms` false
+    /// (14, 16, 18, 20, 23, 25).
+    pub const NO_SYNONYMS: i64 = 6;
+    /// Converted keywords with an unknown type (24, 25; not 28, it is skipped).
+    pub const UNKNOWN_TYPE: i64 = 2;
+    /// Converted keywords without a converted assignment
+    /// (small keyword 11, plus 20, 23, 27).
+    pub const UNUSED: i64 = 4;
+    /// Ids of the unused converted keywords.
+    pub const UNUSED_IDS: [i64; 4] = [11, 20, 23, 27];
+    /// Rows in `AgLibraryKeywordImage` (small: 30, plus 12 added).
+    pub const ASSIGNMENTS: i64 = 42;
+    /// Converted assignments: the 12 added ones minus the one on photo 20.
+    /// With placeholder originals the small fixture's skipped photos stay
+    /// as before; the added assignments avoid photos 2 and 3.
+    pub const ADDED_ASSIGNMENTS_CONVERTED: i64 = 11;
+    /// Names that must never appear in any output.
+    pub const NAMES: [&str; 3] = ["Zyx-Attr-14", "Zyx-Attr-22", "Zyx-Attr-27"];
+}
+
 /// Counts and ids of the video fixture ([`write_video_catalog_with_files`]).
 pub mod video_edge {
     /// `Adobe_images` rows: the 20 of the small fixture plus virtual copy 21.
@@ -393,6 +457,55 @@ fn add_keyword_edges(path: &Path) -> Result<()> {
             "INSERT INTO AgLibraryKeywordSynonym (id_local, keyword, lc_name, name) VALUES (?1, ?2, ?3, ?4)",
             params![id, keyword, name.map(str::to_lowercase), name],
         )?;
+    }
+    c.execute_batch("COMMIT")?;
+    Ok(())
+}
+
+/// Writes the small fixture plus the keywords of [`keyword_attr`] (all
+/// 8 flag combinations, person and unknown types, non-zero flag values,
+/// unused keywords, a skipped keyword with an unknown type).
+/// `includeOnExport`, `includeParents` and `includeSynonyms` are
+/// `NOT NULL` in this schema, so a NULL flag cannot be generated.
+pub fn write_keyword_attr_catalog(path: &Path) -> Result<()> {
+    write_small_catalog(path)?;
+    add_keyword_attrs(path)
+}
+
+/// Like [`write_keyword_attr_catalog`], but as `dir/attrs.lrcat` with
+/// placeholder originals. Returns the catalog path.
+pub fn write_keyword_attr_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("attrs.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_keyword_attrs(&catalog)?;
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+fn add_keyword_attrs(path: &Path) -> Result<()> {
+    let c = Connection::open(path)?;
+    c.execute_batch("BEGIN")?;
+    for (id, kind, export, parents, synonyms, _) in keyword_attr::ROWS {
+        let name = if id == 28 {
+            String::new()
+        } else {
+            format!("Zyx-Attr-{id}")
+        };
+        add_keyword(&c, id, Some(&name), 1, &format!("/1/{id}"))?;
+        c.execute(
+            "UPDATE AgLibraryKeyword SET keywordType = ?2, includeOnExport = ?3, includeParents = ?4, includeSynonyms = ?5 WHERE id_local = ?1",
+            params![id, kind, export, parents, synonyms],
+        )?;
+    }
+    // Assignments 31..=42; photo 0 means none. Photo 20 is a virtual copy.
+    for (id, _, _, _, _, photo) in keyword_attr::ROWS {
+        if photo != 0 {
+            c.execute(
+                "INSERT INTO AgLibraryKeywordImage (image, tag) VALUES (?1, ?2)",
+                params![photo, id],
+            )?;
+        }
     }
     c.execute_batch("COMMIT")?;
     Ok(())
