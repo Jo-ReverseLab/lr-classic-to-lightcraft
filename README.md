@@ -37,14 +37,16 @@ Without `--apply`, lr2lc only reads the catalog and prints a summary: how
 many folders, photos, collections, keywords, keyword assignments and keyword
 synonyms it read,
 how many it would convert and how many it skips, with the reasons grouped.
-A line `videos: skipped N` follows, and a last line shows how many of the
-converted photos have 0 to 5 stars (unrated photos count as 0):
+A line `videos: skipped N` follows, then a line with keyword attribute
+counts, and a last line shows how many of the converted photos have 0 to 5
+stars (unrated photos count as 0):
 
 ```text
 keywords: read 12, would convert 11, skipped 1
 keyword assignments: read 30, would convert 25, skipped 5
 keyword synonyms: read 4, would convert 3, skipped 1
 videos: skipped 2
+keyword attributes: persons 0, not exported 0, no parents on export 0, no synonyms on export 0, unknown type 0, unused 1
 ratings: 0: 6, 1: 3, 2: 2, 3: 3, 4: 2, 5: 1
 ```
 
@@ -57,7 +59,12 @@ Virtual copies keep their own reason, even of a video.
 Keywords are only assigned to photos that are converted, so assignments to
 skipped photos are skipped too. Synonyms are converted together with their
 keyword; a synonym of a skipped or unknown keyword, or one without text, is
-skipped. Nothing is written except the optional report file.
+skipped. Each keyword keeps its attributes: whether it is included on
+export, exported with its parents and with its synonyms, and whether it names
+a person. A keyword of another type is converted as an ordinary keyword and
+counted as `unknown type`. `unused` counts converted keywords without a
+converted assignment; they are still converted. Nothing is written except
+the optional report file.
 
 ### `--map OLD=NEW`
 
@@ -109,7 +116,13 @@ Writes a machine-readable report to `FILE` after the run:
   "keywords": {
     "read": 3,
     "converted": 2,
-    "skipped": [{ "reason": "keyword 9: name is empty" }]
+    "skipped": [{ "reason": "keyword 9: name is empty" }],
+    "persons": 1,
+    "not_exported": 0,
+    "no_parents_on_export": 0,
+    "no_synonyms_on_export": 0,
+    "unknown_type": 0,
+    "unused": 1
   },
   "keyword_assignments": {
     "read": 2,
@@ -129,7 +142,8 @@ For each area, `read` equals `converted` plus the number of `skipped`
 entries. Reasons name the catalog id, never a file path, a collection
 name, a keyword or a synonym. `ratings` always has the keys `"0"` to `"5"`; the
 counts add up to `photos.converted`. `photos.videos` is the number of
-skipped videos; they are also listed in `photos.skipped`.
+skipped videos; they are also listed in `photos.skipped`. The six attribute
+counts in `keywords` cover converted keywords only, like the summary line.
 
 To protect the catalog and your files, `FILE` is checked before anything is
 read, and lr2lc stops with exit code 2 if:
