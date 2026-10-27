@@ -56,6 +56,15 @@ Lightroom stores its format as `VIDEO` or its file extension is one of mov,
 mp4, m4v, avi, mts, m2ts, 3gp, mpg, mpeg, wmv or mkv (any letter case).
 Virtual copies keep their own reason, even of a video.
 
+Photos and keywords are identified by Lightroom's global id, which, unlike the
+internal row id, does not depend on the order in which rows were stored. This keeps repeated runs from creating duplicates. A photo or keyword
+without a global id is skipped with the reason `missing global id`; if
+several rows share one, the row with the lowest catalog id is kept and the
+others are skipped with `duplicate global id` (a skipped photo does not
+claim its global id). A skipped keyword takes the keywords below it along.
+Global ids are used internally only and never appear in the output or in
+the report.
+
 Keywords are only assigned to photos that are converted, so assignments to
 skipped photos are skipped too. Synonyms are converted together with their
 keyword; a synonym of a skipped or unknown keyword, or one without text, is
