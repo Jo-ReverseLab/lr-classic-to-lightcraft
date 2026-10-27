@@ -243,8 +243,10 @@ With `--library DIR` the dry run reads the mapping file of that library
 LightCraft and writes nothing next to the library.
 
 `--script FILE` also writes the plan as JSON lines, one `engine.execute`
-request per command; photos that are not imported yet are named
-`lr:<global id>` in `ids`. The same protection as for `--report` applies:
+request per command, with a `library.select` line before the updates of
+each photo (see `--apply`); photos that are not imported yet are named
+`lr:<global id>` in `ids`. The number of updates in the summary does not
+count the selects. The same protection as for `--report` applies:
 the catalog and its companion files are refused, and an existing `FILE` is
 only overwritten if it is empty or an earlier lr2lc script (every non-empty
 line a JSON object with `"method":"engine.execute"`).
@@ -269,7 +271,10 @@ checks the app before it writes anything and stops with exit code 1 if:
 
 Then it creates the missing keywords (parents first), imports each photo on
 its own as a reference (`mode: add`, the file stays where it is) and sets
-the fields that differ. A command LightCraft rejects skips only that photo
+the fields that differ. LightCraft applies rating, flag, label and metadata
+commands only to selected photos, so lr2lc selects each photo before its
+first update; this changes the selection in LightCraft, which afterwards
+holds the last updated photo. A select is not counted as an update. A command LightCraft rejects skips only that photo
 or keyword, with a reason in the report. If the connection is lost, lr2lc
 stops at once and never repeats the command: its outcome is unknown, so run
 lr2lc again; it re-checks the state and finds photos LightCraft already
@@ -285,8 +290,8 @@ the `writer` section:
   and `photos_unchanged` (known, no command needed);
 - `updates` (field updates applied) and `not_saved` (applied but not yet
   saved to disk by LightCraft);
-- `photos_skipped`, `photos_incomplete` (an update failed; the next run
-  sends it again) and `keywords_skipped`, each with reasons.
+- `photos_skipped`, `photos_incomplete` (an update or the select before
+  it failed; the next run sends the updates again) and `keywords_skipped`, each with reasons.
 
 Every converted photo counts once, in every run: `photos.converted` equals
 `photos_imported` plus `photos_existing` plus `photos_updated` plus
