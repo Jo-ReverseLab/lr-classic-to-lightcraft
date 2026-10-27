@@ -205,3 +205,55 @@ fn keyword_new_rejects_empty_path_and_empty_parts() {
         Err(ModelError::EmptyKeyword)
     ));
 }
+
+// --- Stable identity (task P5-8) -------------------------------------------
+// Expected API: `Photo::global_id` and `Keyword::global_id`, both
+// `Option<String>`, `None` after `new`; `with_global_id(impl Into<String>)`
+// sets it; the derived `PartialEq` compares it.
+
+#[test]
+#[ignore = "waiting for P5-8"]
+fn new_photo_has_no_global_id() {
+    let p = Photo::new("/Users/example/a.jpg", 1, Rating::new(0).unwrap());
+    assert_eq!(p.global_id, None);
+}
+
+#[test]
+#[ignore = "waiting for P5-8"]
+fn photo_global_id_can_be_set_and_is_compared() {
+    let plain = Photo::new("/Users/example/a.jpg", 1, Rating::new(0).unwrap());
+    let a = plain.clone().with_global_id("abc-123");
+    assert_eq!(a.global_id.as_deref(), Some("abc-123"));
+    assert_eq!(a.path, plain.path);
+    assert_eq!(a.lightroom_id, 1);
+    assert_ne!(a, plain);
+    assert_eq!(a, plain.clone().with_global_id(String::from("abc-123")));
+    assert_ne!(a, plain.with_global_id("abc-124"));
+}
+
+#[test]
+#[ignore = "waiting for P5-8"]
+fn new_keyword_has_no_global_id() {
+    let k = Keyword::new(vec!["A".into()]).unwrap();
+    assert_eq!(k.global_id, None);
+}
+
+#[test]
+#[ignore = "waiting for P5-8"]
+fn keyword_global_id_can_be_set_and_is_compared() {
+    let plain = Keyword::new(vec!["A".into(), "B".into()]).unwrap();
+    let a = plain.clone().with_global_id("kw-1");
+    assert_eq!(a.global_id.as_deref(), Some("kw-1"));
+    assert_eq!(a.path(), plain.path());
+    assert_ne!(a, plain);
+    assert_eq!(a, plain.clone().with_global_id("kw-1"));
+}
+
+#[test]
+#[ignore = "waiting for P5-8"]
+fn parent_keyword_has_no_global_id() {
+    let k = Keyword::new(vec!["A".into(), "B".into()])
+        .unwrap()
+        .with_global_id("kw-1");
+    assert_eq!(k.parent().unwrap().global_id, None);
+}

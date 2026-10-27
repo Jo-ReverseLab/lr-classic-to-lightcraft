@@ -739,6 +739,142 @@ fn write_small(path: &Path, mac_root: &str, win_root: &str) -> Result<()> {
     Ok(())
 }
 
+/// Identity fixture ([`write_identity_catalog`]): the same logical content
+/// stored twice with different `id_local` values, row order and root path.
+pub mod identity {
+    /// `(photo global id, folder below the root, base name, rating)`.
+    pub const PHOTOS: [(&str, &str, &str, i64); 5] = [
+        ("ph-0a1b", "", "IMG_0001", 3),
+        ("ph-2c3d", "2024/", "IMG_0001", 0),
+        ("ph-4e5f", "2024/Rome/", "IMG_0003", 5),
+        ("ph-6a7b", "2024/Rome/", "IMG_0004", 1),
+        ("ph-8c9d", "", "IMG_0005", 2),
+    ];
+    /// `(keyword global id, name, parent index into this array or None)`.
+    /// A parent always comes before its children.
+    pub const KEYWORDS: [(&str, &str, Option<usize>); 4] = [
+        ("kw-0a1b", "Travel", None),
+        ("kw-2c3d", "Italy", Some(0)),
+        ("kw-4e5f", "Rome", Some(1)),
+        ("kw-6a7b", "Sea", None),
+    ];
+    /// `(photo index, keyword index)` assignments.
+    pub const ASSIGNMENTS: [(usize, usize); 6] = [(0, 0), (0, 3), (1, 2), (3, 1), (3, 3), (4, 3)];
+    /// Root folder path of the two variants (index 0 and 1).
+    pub const ROOTS: [&str; 2] = ["/Users/example/Pictures/", "/Users/example/Archive/2026/"];
+}
+
+/// Writes the identity fixture, variant 0 or 1. Both variants hold the same
+/// photos and keywords with the same `id_global`, but variant 1 uses other
+/// `id_local` values (photos 100+, keywords 500+, root keyword 400), inserts
+/// the rows in reverse order and has another root folder path
+/// ([`identity::ROOTS`]). No photo is missing, no virtual copies.
+pub fn write_identity_catalog(path: &Path, variant: usize) -> Result<()> {
+    assert!(variant < 2, "variant must be 0 or 1");
+    let c = create(path)?;
+    c.execute_batch("BEGIN")?;
+    add_variables(&c)?;
+    let root_kw = if variant == 0 { 1 } else { 400 };
+    c.execute(
+        "UPDATE Adobe_variablesTable SET value = ?1 WHERE name = 'AgLibraryKeyword_rootTagID'",
+        [root_kw.to_string()],
+    )?;
+    add_root_folder(&c, 1, identity::ROOTS[variant], "Pictures")?;
+    let folders = ["", "2024/", "2024/Rome/"];
+    let order = |n: usize| -> Vec<usize> {
+        if variant == 0 {
+            (0..n).collect()
+        } else {
+            (0..n).rev().collect()
+        }
+    };
+    let folder_id = |i: usize| -> i64 {
+        if variant == 0 {
+            i as i64 + 1
+        } else {
+            70 - i as i64
+        }
+    };
+    for i in order(folders.len()) {
+        add_folder(&c, folder_id(i), None, folders[i], 1)?;
+    }
+    let photo_id = |i: usize| -> i64 {
+        if variant == 0 {
+            i as i64 + 1
+        } else {
+            100 + 7 * (4 - i as i64)
+        }
+    };
+    for i in order(identity::PHOTOS.len()) {
+        let (global, folder, base, rating) = identity::PHOTOS[i];
+        let fi = folders.iter().position(|f| *f == folder).unwrap();
+        let id = photo_id(i);
+        add_photo(&c, id, base, folder_id(fi), Some(rating), None, id + 1000)?;
+        c.execute(
+            "UPDATE Adobe_images SET id_global = ?2 WHERE id_local = ?1",
+            params![id, global],
+        )?;
+    }
+    add_keyword(&c, root_kw, None, 0, &format!("/{root_kw}"))?;
+    let kw_id = |i: usize| -> i64 {
+        if variant == 0 {
+            i as i64 + 2
+        } else {
+            500 + 3 * (3 - i as i64)
+        }
+    };
+    let mut genealogy: Vec<String> = vec![String::new(); identity::KEYWORDS.len()];
+    for (i, (_, _, parent)) in identity::KEYWORDS.iter().enumerate() {
+        let base = match parent {
+            Some(p) => genealogy[*p].clone(),
+            None => format!("/{root_kw}"),
+        };
+        genealogy[i] = format!("{base}/{}", kw_id(i));
+    }
+    for i in order(identity::KEYWORDS.len()) {
+        let (global, name, parent) = identity::KEYWORDS[i];
+        let parent_id = parent.map_or(root_kw, kw_id);
+        add_keyword(&c, kw_id(i), Some(name), parent_id, &genealogy[i])?;
+        c.execute(
+            "UPDATE AgLibraryKeyword SET id_global = ?2 WHERE id_local = ?1",
+            params![kw_id(i), global],
+        )?;
+    }
+    let mut assignments = identity::ASSIGNMENTS.to_vec();
+    if variant == 1 {
+        assignments.reverse();
+    }
+    for (p, k) in assignments {
+        c.execute(
+            "INSERT INTO AgLibraryKeywordImage (image, tag) VALUES (?1, ?2)",
+            params![photo_id(p), kw_id(k)],
+        )?;
+    }
+    c.execute_batch("COMMIT")?;
+    Ok(())
+}
+
+/// Sets `Adobe_images.id_global` of photo `id` (e.g. to `""` or `"  "`).
+/// The column is `NOT NULL` in this schema, so NULL cannot be generated.
+pub fn set_photo_global_id(path: &Path, id: i64, global: &str) -> Result<()> {
+    let c = Connection::open(path)?;
+    c.execute(
+        "UPDATE Adobe_images SET id_global = ?2 WHERE id_local = ?1",
+        params![id, global],
+    )?;
+    Ok(())
+}
+
+/// Sets `AgLibraryKeyword.id_global` of keyword `id` (NOT NULL, see above).
+pub fn set_keyword_global_id(path: &Path, id: i64, global: &str) -> Result<()> {
+    let c = Connection::open(path)?;
+    c.execute(
+        "UPDATE AgLibraryKeyword SET id_global = ?2 WHERE id_local = ?1",
+        params![id, global],
+    )?;
+    Ok(())
+}
+
 /// Writes a large catalog with exactly `images` photos for load tests.
 pub fn write_large_catalog(path: &Path, images: usize) -> Result<()> {
     let c = create(path)?;
