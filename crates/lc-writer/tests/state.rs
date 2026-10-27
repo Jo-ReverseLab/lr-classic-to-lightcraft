@@ -21,7 +21,6 @@
 //! `cfg(any())` below. The developer may ONLY remove the `#![cfg(any())]`
 //! line (and add the dependency on `model` and `serde` to `Cargo.toml`). Any
 //! other change to this file needs the test author.
-#![cfg(any())]
 
 use lc_writer::state::{State, snapshot, state_path};
 use model::{ColorLabel, Flag, Keyword, Photo, Rating};
