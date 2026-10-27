@@ -71,7 +71,7 @@ fn is_nonzero(value: &Value) -> bool {
         Value::Null => false,
         Value::Integer(n) => *n != 0,
         Value::Real(f) => *f != 0.0,
-        Value::Text(t) => t.trim().parse::<f64>().map_or(true, |f| f != 0.0),
+        Value::Text(t) => t.trim().parse::<f64>() != Ok(0.0),
         Value::Blob(b) => !b.is_empty(),
     }
 }
