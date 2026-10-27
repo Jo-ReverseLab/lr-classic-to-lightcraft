@@ -49,6 +49,31 @@ pub mod small {
     pub const WINDOWS_ROOT_DIR: &str = "windows-pictures";
 }
 
+/// Counts of the keyword edge-case catalog ([`write_keyword_edge_catalog`]).
+/// It is the small fixture plus the extra rows described there.
+pub mod keyword_edge {
+    /// Keyword rows excluding the hidden root row (small: 12, plus ids 14, 16-19).
+    pub const KEYWORDS: i64 = 17;
+    /// Keywords that can be converted (all except ids 12, 14, 16, 17, 18).
+    pub const KEYWORDS_CONVERTED: i64 = 12;
+    /// Name contains `|` (id 14, no children).
+    pub const KEYWORD_PIPE_ID: i64 = 14;
+    /// Empty names: id 12 (no children) and id 16 (children 17, 18 below it).
+    pub const KEYWORD_EMPTY_IDS: [i64; 2] = [12, 16];
+    /// Keywords below the empty keyword 16 (17 is its child, 18 the child of 17).
+    pub const KEYWORD_UNDER_EMPTY_IDS: [i64; 2] = [17, 18];
+    /// Person keyword with `includeOnExport` = 0 (id 19); converted normally.
+    pub const KEYWORD_PERSON_ID: i64 = 19;
+    /// Rows in `AgLibraryKeywordImage` (small: ids 1-30, extra: ids 31-37).
+    pub const ASSIGNMENTS: i64 = 37;
+    /// Assignment ids that cannot be converted: 20 (virtual copy photo 20),
+    /// 31 (pipe keyword), 32 (empty keyword), 33 (keyword under empty one),
+    /// 34 (photo 999 does not exist), 35 (virtual copy photo 20),
+    /// 36 (empty keyword 12).
+    pub const ASSIGNMENTS_SKIPPED: [i64; 7] = [20, 31, 32, 33, 34, 35, 36];
+    pub const ASSIGNMENTS_CONVERTED: i64 = 30;
+}
+
 const SCHEMA: &str = "
 CREATE TABLE Adobe_variablesTable (id_local INTEGER PRIMARY KEY, id_global NOT NULL, name, type, value NOT NULL);
 CREATE TABLE AgLibraryRootFolder (id_local INTEGER PRIMARY KEY, id_global NOT NULL, absolutePath NOT NULL, name NOT NULL, relativePathFromCatalog);
@@ -257,6 +282,48 @@ pub fn write_small_catalog(path: &Path) -> Result<()> {
         "/Users/example/Pictures/",
         "C:\\Users\\example\\Pictures\\",
     )
+}
+
+/// Writes the small fixture plus keyword edge cases (counts in
+/// [`keyword_edge`]):
+/// - keyword 14 `Bad|Name` (parent 1), assigned to photo 1 (assignment 31)
+/// - keyword 16 with an empty name, child 17 and grandchild 18 below it;
+///   assignment 32: photo 1 -> 16, assignment 33: photo 2 -> 18
+/// - assignment 36: photo 4 -> the already existing empty keyword 12
+/// - keyword 19 `Alice Example` (person, `includeOnExport` = 0), photo 5 (37)
+/// - assignment 34: photo 999 (does not exist), keyword 2
+/// - assignment 35: photo 20 (virtual copy), keyword 2
+///
+/// No assignment hits two problems at once.
+pub fn write_keyword_edge_catalog(path: &Path) -> Result<()> {
+    write_small_catalog(path)?;
+    let c = Connection::open(path)?;
+    c.execute_batch("BEGIN")?;
+    add_keyword(&c, 14, Some("Bad|Name"), 1, "/1/14")?;
+    add_keyword(&c, 16, Some(""), 1, "/1/16")?;
+    add_keyword(&c, 17, Some("Under Empty"), 16, "/1/16/17")?;
+    add_keyword(&c, 18, Some("Deep Under Empty"), 17, "/1/16/17/18")?;
+    add_keyword(&c, 19, Some("Alice Example"), 1, "/1/19")?;
+    c.execute_batch(
+        "UPDATE AgLibraryKeyword SET includeOnExport = 0, keywordType = 'person' WHERE id_local = 19;",
+    )?;
+    // Ids 31..=37 in this order.
+    for (image, tag) in [
+        (1, 14),
+        (1, 16),
+        (2, 18),
+        (999, 2),
+        (20, 2),
+        (4, 12),
+        (5, 19),
+    ] {
+        c.execute(
+            "INSERT INTO AgLibraryKeywordImage (image, tag) VALUES (?1, ?2)",
+            params![image, tag],
+        )?;
+    }
+    c.execute_batch("COMMIT")?;
+    Ok(())
 }
 
 /// Writes the small fixture, then removes `table` (when `column` is `None`)

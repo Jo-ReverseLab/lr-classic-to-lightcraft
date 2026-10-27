@@ -61,6 +61,19 @@ assignments, ratings). Tests assert these constants. Contents:
 - keywords with umlauts and emoji, a synonym-like pair, one keyword with no
   assigned photos, one keyword with an empty name
 
+## Keyword edge-case catalog
+
+`write_keyword_edge_catalog(path)` writes the small fixture plus extra keyword
+rows; constants are in the `keyword_edge` module. Added: keyword 14 with `|` in
+its name, keyword 16 with an empty name and descendants 17 and 18, a person
+keyword 19 with `includeOnExport` = 0, and assignments 31-37 (to the `|`
+keyword, to the empty keywords, to a missing photo 999, to the virtual copy 20,
+and one normal assignment of the person keyword). Together with the existing
+empty keyword 12 and the small fixture's own assignment of photo 20 (id 20)
+this gives 17 keyword rows (12 convertible) and 37 assignment rows (30
+convertible, 7 skipped). No assignment hits two problems at once, and the `|`
+keyword has no children (the expected behaviour for those is not defined yet).
+
 ## Collections in the small fixture
 
 Names are invented placeholders. Constants live in the `small` module.

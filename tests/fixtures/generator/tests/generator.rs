@@ -228,3 +228,30 @@ fn large_catalog_has_collections() {
     );
     assert!(count(&c, "SELECT count(*) FROM AgLibraryCollectionImage") > 0);
 }
+
+#[test]
+fn keyword_edge_catalog_has_documented_counts() {
+    use lrcat_fixtures::{keyword_edge, write_keyword_edge_catalog};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("kw.lrcat");
+    write_keyword_edge_catalog(&path).unwrap();
+    let c = open(&path);
+    assert_eq!(
+        count(
+            &c,
+            "SELECT COUNT(*) FROM AgLibraryKeyword WHERE id_local <> 1"
+        ),
+        keyword_edge::KEYWORDS
+    );
+    assert_eq!(
+        count(&c, "SELECT COUNT(*) FROM AgLibraryKeywordImage"),
+        keyword_edge::ASSIGNMENTS
+    );
+    assert_eq!(
+        count(
+            &c,
+            "SELECT COUNT(*) FROM AgLibraryKeyword WHERE includeOnExport = 0"
+        ),
+        1
+    );
+}
