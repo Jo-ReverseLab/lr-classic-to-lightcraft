@@ -1,6 +1,7 @@
 //! Readable summary and `report.json`.
 
 use crate::dry_run::{FlagCounts, KeywordAttributes, Outcome};
+use crate::labels::LabelCounts;
 use model::Report;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -40,6 +41,8 @@ pub struct PhotosJson<'a> {
     pub videos: usize,
     /// Converted photos per flag.
     pub flags: FlagsJson,
+    /// Converted photos per colour label.
+    pub labels: LabelsJson,
 }
 
 /// Converted photos per flag; the fields add up to the converted photos.
@@ -61,6 +64,55 @@ impl From<FlagCounts> for FlagsJson {
         }
     }
 }
+
+/// Converted photos per colour label; the seven counters add up to the
+/// converted photos. Label names are never listed.
+#[derive(Debug, Serialize)]
+pub struct LabelsJson {
+    pub red: usize,
+    pub yellow: usize,
+    pub green: usize,
+    pub blue: usize,
+    pub purple: usize,
+    pub none: usize,
+    pub custom: usize,
+    /// `en`, `de`, `file` or `none`.
+    pub label_set: &'static str,
+    /// One entry per custom photo, ascending by id.
+    pub custom_reasons: Vec<ReasonJson>,
+}
+
+/// A reason without a borrowed source.
+#[derive(Debug, Serialize)]
+pub struct ReasonJson {
+    pub reason: String,
+}
+
+impl From<&LabelCounts> for LabelsJson {
+    fn from(l: &LabelCounts) -> Self {
+        LabelsJson {
+            red: l.red,
+            yellow: l.yellow,
+            green: l.green,
+            blue: l.blue,
+            purple: l.purple,
+            none: l.none,
+            custom: l.custom,
+            label_set: l.set,
+            custom_reasons: l
+                .custom_ids
+                .iter()
+                .map(|id| ReasonJson {
+                    reason: format!("photo {id}: {CUSTOM_LABEL_REASON}"),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Reason of a photo whose label is not in the label set, after the
+/// `photo {id}: ` prefix.
+const CUSTOM_LABEL_REASON: &str = "custom label not in label set";
 
 /// Counts of keywords, plus attribute counts over the converted keywords.
 #[derive(Debug, Serialize)]
@@ -107,6 +159,7 @@ pub fn report_json(outcome: &Outcome) -> String {
             area: AreaJson::new(&outcome.photos),
             videos: outcome.videos,
             flags: outcome.flags.into(),
+            labels: (&outcome.labels).into(),
         },
         collections: AreaJson::new(&outcome.collections),
         keywords: KeywordsJson {
@@ -164,6 +217,15 @@ pub fn summary(outcome: &Outcome) -> String {
     }
     let _ = writeln!(out, "{}", ratings_line(&outcome.ratings));
     let _ = writeln!(out, "{}", flags_line(&outcome.flags));
+    let _ = writeln!(out, "{}", labels_line(&outcome.labels));
+    if outcome.labels.recommend {
+        let _ = writeln!(
+            out,
+            "hint: the colour label names match neither the English nor the German set; \
+             {} photos keep no label. Choose a set with --label-set en, de or FILE",
+            outcome.labels.custom
+        );
+    }
     if outcome.catalog_unchanged {
         let _ = writeln!(out, "catalog unchanged (checksum verified)");
     }
@@ -204,6 +266,15 @@ fn ratings_line(ratings: &[usize; 6]) -> String {
         .map(|(stars, count)| format!("{stars}: {count}"))
         .collect();
     format!("ratings: {}", parts.join(", "))
+}
+
+/// Formats the label counts as
+/// `labels: red R, yellow Y, green G, blue B, purple P, none N, custom C, set S`.
+fn labels_line(l: &LabelCounts) -> String {
+    format!(
+        "labels: red {}, yellow {}, green {}, blue {}, purple {}, none {}, custom {}, set {}",
+        l.red, l.yellow, l.green, l.blue, l.purple, l.none, l.custom, l.set
+    )
 }
 
 /// Formats the flag counts as `flags: pick P, reject R, none N, unknown U`.
@@ -308,7 +379,42 @@ mod tests {
                 none: 0,
                 unknown: 0,
             },
+            labels: LabelCounts {
+                set: "none",
+                none: 1,
+                ..LabelCounts::default()
+            },
         }
+    }
+
+    #[test]
+    fn labels_are_in_summary_and_json() {
+        let mut o = outcome();
+        o.labels = LabelCounts {
+            red: 1,
+            custom: 2,
+            set: "none",
+            custom_ids: vec![3, 8],
+            recommend: true,
+            ..LabelCounts::default()
+        };
+        let text = summary(&o);
+        assert!(text.lines().any(|l| l
+            == "labels: red 1, yellow 0, green 0, blue 0, purple 0, none 0, custom 2, set none"));
+        assert!(
+            text.lines()
+                .any(|l| l.starts_with("hint:") && l.contains("--label-set"))
+        );
+        let v: serde_json::Value = serde_json::from_str(&report_json(&o)).unwrap();
+        let l = &v["photos"]["labels"];
+        assert_eq!(l["custom"], 2);
+        assert_eq!(l["label_set"], "none");
+        assert_eq!(
+            l["custom_reasons"][1]["reason"],
+            "photo 8: custom label not in label set"
+        );
+        o.labels.recommend = false;
+        assert!(!summary(&o).contains("--label-set"));
     }
 
     #[test]

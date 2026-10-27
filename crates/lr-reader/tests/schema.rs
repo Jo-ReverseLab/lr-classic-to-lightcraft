@@ -137,7 +137,6 @@ fn missing_pick_column_is_reported() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn missing_color_labels_column_is_reported() {
     // P5b-2: Adobe_images.colorLabels is required.
     let dir = tempfile::tempdir().unwrap();

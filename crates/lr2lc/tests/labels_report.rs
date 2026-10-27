@@ -173,7 +173,6 @@ const ALL_STD_NAMES: [&str; 10] = [
 // --- auto -------------------------------------------------------------
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn auto_detects_the_english_set() {
     let (_d, cat) = fixture(Fixture::En);
     let (text, v, _) = ok(&cat, &[]);
@@ -183,7 +182,6 @@ fn auto_detects_the_english_set() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn auto_detects_the_german_set_with_nfc_gruen() {
     let (_d, cat) = fixture(Fixture::De);
     let (text, v, _) = ok(&cat, &[]);
@@ -193,7 +191,6 @@ fn auto_detects_the_german_set_with_nfc_gruen() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn auto_on_mixed_sets_guesses_nothing_and_recommends() {
     let (_d, cat) = fixture(Fixture::Mixed);
     let (text, v, _) = ok(&cat, &[]);
@@ -203,7 +200,6 @@ fn auto_on_mixed_sets_guesses_nothing_and_recommends() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn auto_on_odd_names_guesses_nothing_and_recommends() {
     // NFD "Grün", "rot", "Red " and a custom name: no set fits exactly, even
     // though "Green" and "Red" alone would match the English set.
@@ -215,7 +211,6 @@ fn auto_on_odd_names_guesses_nothing_and_recommends() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn auto_without_labels_has_set_none_and_no_recommendation() {
     let (_d, cat) = fixture(Fixture::Empty);
     let (text, v, _) = ok(&cat, &[]);
@@ -225,7 +220,6 @@ fn auto_without_labels_has_set_none_and_no_recommendation() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn explicit_auto_equals_the_default() {
     let (_d, cat) = fixture(Fixture::De);
     let a = ok(&cat, &[]);
@@ -234,7 +228,6 @@ fn explicit_auto_equals_the_default() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn small_catalog_without_label_columns_values_has_zero_labels() {
     let dir = tempfile::tempdir().unwrap();
     let cat = lrcat_fixtures::write_small_catalog_with_files(dir.path()).unwrap();
@@ -250,7 +243,6 @@ fn small_catalog_without_label_columns_values_has_zero_labels() {
 // --- explicit set -----------------------------------------------------
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn explicit_en_on_en_catalog() {
     let (_d, cat) = fixture(Fixture::En);
     let (text, v, _) = ok(&cat, &["--label-set", "en"]);
@@ -258,7 +250,6 @@ fn explicit_en_on_en_catalog() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn explicit_de_on_de_catalog() {
     let (_d, cat) = fixture(Fixture::De);
     let (text, v, _) = ok(&cat, &["--label-set", "de"]);
@@ -266,7 +257,6 @@ fn explicit_de_on_de_catalog() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn wrong_explicit_set_makes_every_label_custom_but_keeps_photos() {
     let (_d, cat) = fixture(Fixture::En);
     let (text, v, _) = ok(&cat, &["--label-set", "de"]);
@@ -277,7 +267,6 @@ fn wrong_explicit_set_makes_every_label_custom_but_keeps_photos() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn explicit_en_on_mixed_catalog_maps_only_english_names() {
     // Photos 4 Red, 6 Green, 8 Purple match; 5 Rot, 7 Blau, 9 Gelb are custom.
     let (_d, cat) = fixture(Fixture::Mixed);
@@ -287,7 +276,6 @@ fn explicit_en_on_mixed_catalog_maps_only_english_names() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn explicit_de_on_mixed_catalog_maps_only_german_names() {
     // Photos 5 Rot, 7 Blau, 9 Gelb match; 4, 6, 8 are custom.
     let (_d, cat) = fixture(Fixture::Mixed);
@@ -297,7 +285,6 @@ fn explicit_de_on_mixed_catalog_maps_only_german_names() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn exact_matching_in_the_english_set() {
     // 4 NFD Grün, 5 "rot", 6 "Red " and 7 custom do not match. 8 "Green"
     // and 9 "Red" do.
@@ -308,7 +295,6 @@ fn exact_matching_in_the_english_set() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn nfd_gruen_does_not_match_the_german_set() {
     let (_d, cat) = fixture(Fixture::Odd);
     let (text, v, _) = ok(&cat, &["--label-set", "de"]);
@@ -319,7 +305,6 @@ fn nfd_gruen_does_not_match_the_german_set() {
 // --- file -------------------------------------------------------------
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn file_set_maps_odd_names_exactly() {
     let (d, cat) = fixture(Fixture::Odd);
     let file = write_set(
@@ -339,7 +324,6 @@ fn file_set_maps_odd_names_exactly() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn file_set_replaces_the_built_in_meaning_of_names() {
     let (d, cat) = fixture(Fixture::En);
     let file = write_set(d.path(), &json!({"Red": "blue"}));
@@ -350,7 +334,6 @@ fn file_set_replaces_the_built_in_meaning_of_names() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn empty_object_file_is_valid_and_makes_everything_custom() {
     let (d, cat) = fixture(Fixture::De);
     let file = write_set(d.path(), &json!({}));
@@ -359,7 +342,6 @@ fn empty_object_file_is_valid_and_makes_everything_custom() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn file_set_works_for_a_german_catalog() {
     let (d, cat) = fixture(Fixture::De);
     let file = write_set(
@@ -386,7 +368,6 @@ fn expect_usage_error(cat: &Path, set: &str) {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn missing_file_is_a_usage_error() {
     let (d, cat) = fixture(Fixture::En);
     let p = d.path().join("nope.json");
@@ -394,7 +375,6 @@ fn missing_file_is_a_usage_error() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn unknown_set_name_is_a_usage_error() {
     let (_d, cat) = fixture(Fixture::En);
     // Neither en, de, auto nor an existing file.
@@ -402,14 +382,12 @@ fn unknown_set_name_is_a_usage_error() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn directory_instead_of_file_is_a_usage_error() {
     let (d, cat) = fixture(Fixture::En);
     expect_usage_error(&cat, d.path().to_str().unwrap());
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn broken_files_are_usage_errors() {
     let (d, cat) = fixture(Fixture::Odd);
     let cases: [(&str, String); 7] = [
@@ -435,7 +413,6 @@ fn broken_files_are_usage_errors() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn label_set_without_a_value_is_a_usage_error() {
     let (_d, cat) = fixture(Fixture::En);
     let cwd = tempfile::tempdir().unwrap();
@@ -451,7 +428,6 @@ fn label_set_without_a_value_is_a_usage_error() {
 // --- privacy, balance, repeatability -----------------------------------
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn no_label_name_in_any_output() {
     let (d, cat) = fixture(Fixture::Odd);
     let file = write_set(d.path(), &json!({"Red": "red"}));
@@ -494,7 +470,6 @@ fn no_label_name_in_any_output() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn custom_labels_do_not_change_the_photo_balance() {
     let (_d, cat) = fixture(Fixture::Odd);
     let (text, v, _) = ok(&cat, &[]);
@@ -535,7 +510,6 @@ fn custom_labels_do_not_change_the_photo_balance() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn labels_of_skipped_photos_do_not_influence_auto() {
     // Fixture En has "Red" on photo 2 and "Green" on virtual copy 20; they
     // are skipped and must be ignored either way. The counts above already
@@ -550,7 +524,6 @@ fn labels_of_skipped_photos_do_not_influence_auto() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn catalog_unchanged_second_run_identical_and_nothing_written() {
     for (f, extra) in [
         (Fixture::En, vec![]),
@@ -581,7 +554,6 @@ fn catalog_unchanged_second_run_identical_and_nothing_written() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn apply_is_still_refused_with_a_label_set_and_writes_nothing() {
     let (_d, cat) = fixture(Fixture::De);
     let before = fs::read(&cat).unwrap();
@@ -598,7 +570,6 @@ fn apply_is_still_refused_with_a_label_set_and_writes_nothing() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn help_mentions_label_set() {
     let out = Command::new(env!("CARGO_BIN_EXE_lr2lc"))
         .arg("--help")

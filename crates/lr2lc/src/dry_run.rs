@@ -2,6 +2,7 @@
 //! keywords for the converted photos and count what would be converted.
 //! Nothing is written except the optional report file.
 
+use crate::labels::{self, LabelCounts, LabelMode};
 use anyhow::{Context, Result, bail};
 use lr_reader::{Catalog, KeywordData, VIDEO_SKIP_REASON, checksum, drop_missing_originals};
 use model::{Flag, Folder, Keyword, PathMappings, Photo, Rating, Report};
@@ -29,6 +30,8 @@ pub struct Outcome {
     pub ratings: [usize; 6],
     /// Pick/reject counts over the converted photos.
     pub flags: FlagCounts,
+    /// Colour label counts over the converted photos.
+    pub labels: LabelCounts,
 }
 
 /// Number of converted photos per flag. `none` does not include `unknown`,
@@ -99,7 +102,7 @@ impl KeywordAttributes {
 ///
 /// Fails if the catalog cannot be opened or read. A changed checksum is not
 /// an error here; the caller decides after writing the report.
-pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
+pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Result<Outcome> {
     let before = checksum(path).context("cannot read catalog file")?;
     let (
         catalog_version,
@@ -112,6 +115,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         keyword_synonyms,
         ratings,
         flags,
+        labels,
     ) = {
         let catalog = Catalog::open(path)?;
         let mut folders = Report::new();
@@ -137,7 +141,8 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
                 p
             })
             .collect();
-        let kept_photos = drop_missing_originals(mapped_photos, &mut photos);
+        let mut kept_photos = drop_missing_originals(mapped_photos, &mut photos);
+        let labels = labels::apply(&mut kept_photos, &photo_data.color_labels, label_mode);
         for _ in &kept_photos {
             photos.converted();
         }
@@ -166,6 +171,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
             keyword_synonyms,
             rating_counts(&kept_photos),
             FlagCounts::count(&kept_photos, &photo_data.unknown_flag),
+            labels,
         )
     };
     let after = checksum(path).context("cannot read catalog file after the run")?;
@@ -194,6 +200,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         keyword_synonyms,
         ratings,
         flags,
+        labels,
     })
 }
 

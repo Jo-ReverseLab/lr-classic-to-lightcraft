@@ -1,5 +1,6 @@
 //! Command-line argument parsing.
 
+use crate::labels::LabelChoice;
 use model::{PathMapping, PathMappings};
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -15,6 +16,9 @@ Options:
   --map OLD=NEW    Replace the path prefix OLD with NEW (repeatable),
                    e.g. when photos moved to another disk or computer
   --report FILE    Write a machine-readable report (JSON) to FILE
+  --label-set SET  Names of the colour labels: en, de, auto (default) or a
+                   JSON file mapping each name to red, yellow, green,
+                   blue or purple
   --apply          Actually write the LightCraft library (default: dry run)
   -h, --help       Print this help
   -V, --version    Print the version";
@@ -34,6 +38,7 @@ pub struct RunOptions {
     pub mappings: PathMappings,
     pub report: Option<PathBuf>,
     pub apply: bool,
+    pub labels: LabelChoice,
 }
 
 /// Parses the arguments (without the program name).
@@ -43,6 +48,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
     let mut catalog: Option<PathBuf> = None;
     let mut report: Option<PathBuf> = None;
     let mut rules = Vec::new();
+    let mut labels: Option<LabelChoice> = None;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("-h" | "--help") => return Ok(Command::Help),
@@ -66,6 +72,18 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
                 let value = args.next().ok_or("--report needs a file name")?;
                 report = Some(PathBuf::from(value));
             }
+            Some("--label-set") => {
+                if labels.is_some() {
+                    return Err("--label-set given more than once".to_string());
+                }
+                let value = args
+                    .next()
+                    .ok_or("--label-set needs a value: en, de, auto or a file")?;
+                let value = value
+                    .to_str()
+                    .ok_or("--label-set value is not valid UTF-8")?;
+                labels = Some(LabelChoice::parse(value));
+            }
             Some(s) if s.starts_with('-') => return Err(format!("unknown option: {s}")),
             _ => {
                 if catalog.is_some() {
@@ -81,6 +99,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
         mappings: PathMappings::new(rules),
         report,
         apply,
+        labels: labels.unwrap_or_default(),
     }))
 }
 
@@ -106,6 +125,15 @@ mod tests {
         assert!(!o.apply);
         assert_eq!(o.report, None);
         assert!(o.mappings.rules().is_empty());
+        assert_eq!(o.labels, LabelChoice::Auto);
+    }
+
+    #[test]
+    fn label_set_takes_next_argument() {
+        assert_eq!(
+            run(&["cat.lrcat", "--label-set", "de"]).labels,
+            LabelChoice::De
+        );
     }
 
     #[test]
@@ -144,6 +172,8 @@ mod tests {
         assert!(parse(&["cat.lrcat", "--report"]).is_err());
         assert!(parse(&["cat.lrcat", "--report", "a", "--report", "b"]).is_err());
         assert!(parse(&["a.lrcat", "b.lrcat"]).is_err());
+        assert!(parse(&["cat.lrcat", "--label-set"]).is_err());
+        assert!(parse(&["cat.lrcat", "--label-set", "en", "--label-set", "de"]).is_err());
     }
 
     #[test]
@@ -169,7 +199,14 @@ mod tests {
 
     #[test]
     fn usage_documents_all_options() {
-        for opt in ["--map", "--report", "--apply", "--help", "--version"] {
+        for opt in [
+            "--map",
+            "--report",
+            "--label-set",
+            "--apply",
+            "--help",
+            "--version",
+        ] {
             assert!(USAGE.contains(opt), "{opt}");
         }
     }

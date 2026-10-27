@@ -17,6 +17,8 @@ struct Row {
     rating: Value,
     /// `Adobe_images.pick`, as stored.
     pick: Value,
+    /// `Adobe_images.colorLabels` if it is non-empty text.
+    color_label: Option<String>,
     file: Option<(String, String)>,
     folder: Option<String>,
     root_row: bool,
@@ -33,6 +35,11 @@ pub struct PhotoData {
     /// neither NULL, 0, 1 nor -1. These photos carry [`Flag::None`].
     /// Ascending.
     pub unknown_flag: Vec<i64>,
+    /// `(catalog id, raw colorLabels text)` of the returned photos whose
+    /// stored label is non-empty text, kept byte for byte. Ascending by id.
+    /// The photos themselves carry no label; mapping the text needs a
+    /// label set and is left to the caller.
+    pub color_labels: Vec<(i64, String)>,
 }
 
 impl Catalog {
@@ -65,7 +72,7 @@ impl Catalog {
                 "SELECT i.id_local, i.masterImage, i.rating, i.fileFormat, \
                         f.id_local, f.baseName, f.extension, \
                         d.id_local, d.pathFromRoot, \
-                        r.id_local, r.absolutePath, i.id_global, i.pick \
+                        r.id_local, r.absolutePath, i.id_global, i.pick, i.colorLabels \
                  FROM Adobe_images i \
                  LEFT JOIN AgLibraryFile f ON f.id_local = i.rootFile \
                  LEFT JOIN AgLibraryFolder d ON d.id_local = f.folder \
@@ -83,6 +90,7 @@ impl Catalog {
                     master: row.get(1)?,
                     rating: row.get(2)?,
                     pick: row.get(12)?,
+                    color_label: text_value(row.get(13)?).filter(|t| !t.is_empty()),
                     file_format: text_value(row.get(3)?),
                     global_id: text_value(row.get(11)?),
                     file: match file_id {
@@ -107,10 +115,14 @@ impl Catalog {
             let row = row.map_err(ReadError::Query)?;
             report.read();
             let unknown_flag = flag_from_value(&row.pick).is_none();
+            let color_label = row.color_label.clone();
             match photo_from_row(row, &mut used) {
                 Ok(photo) => {
                     if unknown_flag {
                         data.unknown_flag.push(photo.lightroom_id);
+                    }
+                    if let Some(label) = color_label {
+                        data.color_labels.push((photo.lightroom_id, label));
                     }
                     data.photos.push(photo);
                 }
@@ -258,6 +270,7 @@ mod tests {
             global_id: Some("g-1".into()),
             rating: Value::Null,
             pick: Value::Null,
+            color_label: None,
             file: Some(("IMG".into(), "jpg".into())),
             folder: Some("a/".into()),
             root_row: true,

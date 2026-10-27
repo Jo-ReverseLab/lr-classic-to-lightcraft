@@ -2,11 +2,13 @@
 
 mod args;
 mod dry_run;
+mod labels;
 mod output;
 mod report_file;
 
 use anyhow::{Context, Result, bail};
 use args::{Command, RunOptions, USAGE, parse_args};
+use labels::LabelMode;
 use report_file::ReportTarget;
 use std::process::ExitCode;
 
@@ -33,7 +35,15 @@ fn main() -> ExitCode {
                 },
                 None => None,
             };
-            run_and_report(&options, target.as_ref())
+            // A bad label set is a usage error as well: nothing is read.
+            let labels = match LabelMode::load(&options.labels) {
+                Ok(mode) => mode,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return ExitCode::from(2);
+                }
+            };
+            run_and_report(&options, &labels, target.as_ref())
         }
         Err(msg) => {
             eprintln!("error: {msg}\n\n{USAGE}");
@@ -42,8 +52,12 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_and_report(options: &RunOptions, target: Option<&ReportTarget>) -> ExitCode {
-    match run(options, target) {
+fn run_and_report(
+    options: &RunOptions,
+    labels: &LabelMode,
+    target: Option<&ReportTarget>,
+) -> ExitCode {
+    match run(options, labels, target) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e:#}");
@@ -53,14 +67,14 @@ fn run_and_report(options: &RunOptions, target: Option<&ReportTarget>) -> ExitCo
 }
 
 /// Runs a conversion. Only the dry run exists so far.
-fn run(options: &RunOptions, report: Option<&ReportTarget>) -> Result<()> {
+fn run(options: &RunOptions, labels: &LabelMode, report: Option<&ReportTarget>) -> Result<()> {
     if options.apply {
         bail!(
             "--apply is not implemented yet: writing to LightCraft is not available; \
              nothing was read or written. Run without --apply for a dry run."
         );
     }
-    let outcome = dry_run::run(&options.catalog, &options.mappings)?;
+    let outcome = dry_run::run(&options.catalog, &options.mappings, labels)?;
     print!("{}", output::summary(&outcome));
     if let (Some(target), Some(given)) = (report, &options.report) {
         report_file::write(target, &output::report_json(&outcome))

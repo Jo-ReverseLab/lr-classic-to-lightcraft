@@ -67,6 +67,7 @@ const REQUIRED_SCHEMA: &[(&str, &[&str])] = &[
             "rootFile",
             "id_global",
             "pick",
+            "colorLabels",
         ],
     ),
     (
