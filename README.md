@@ -79,6 +79,13 @@ as `photos.copyrights`; photos with a creator on the line `creators: N` and
 as `photos.creators`. The texts themselves never appear. Catalogs without
 the creator tables report `creators: 0`.
 
+Photos with a title (read from the XMP data the catalog stores per photo)
+are counted on the line `titles: N` and as `photos.titles`. Photos whose
+stored XMP data cannot be read have no title; they are converted anyway and
+counted on the line `titles unreadable: N` and as `photos.titles_unreadable`.
+Titles never appear in the output. Catalogs without XMP data report
+`titles: 0`.
+
 Photos and keywords are identified by Lightroom's global id, which, unlike the
 internal row id, does not depend on the order in which rows were stored. This keeps repeated runs from creating duplicates. A photo or keyword
 without a global id is skipped with the reason `missing global id`; if

@@ -39,6 +39,10 @@ pub struct Outcome {
     pub copyrights: usize,
     /// Converted photos that carry a creator. The text is never reported.
     pub creators: usize,
+    /// Converted photos that carry a title. The text is never reported.
+    pub titles: usize,
+    /// Converted photos whose title blob cannot be read.
+    pub titles_unreadable: usize,
 }
 
 /// Number of converted photos per flag. `none` does not include `unknown`,
@@ -126,6 +130,8 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         captions,
         copyrights,
         creators,
+        titles,
+        titles_unreadable,
     ) = {
         let catalog = Catalog::open(path)?;
         let mut folders = Report::new();
@@ -185,6 +191,11 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
             count_captions(&kept_photos),
             kept_photos.iter().filter(|p| p.copyright.is_some()).count(),
             kept_photos.iter().filter(|p| p.creator.is_some()).count(),
+            kept_photos.iter().filter(|p| p.title.is_some()).count(),
+            kept_photos
+                .iter()
+                .filter(|p| photo_data.title_unreadable.contains(&p.lightroom_id))
+                .count(),
         )
     };
     let after = checksum(path).context("cannot read catalog file after the run")?;
@@ -217,6 +228,8 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         captions,
         copyrights,
         creators,
+        titles,
+        titles_unreadable,
     })
 }
 

@@ -13,7 +13,6 @@
 //!
 //! Always: dry run, catalog byte-identical, second run identical, nothing
 //! written, `--apply` still writes nothing to the catalog.
-#![cfg(any())]
 
 use lrcat_fixtures::title_edge::{self as e, Variant};
 use lrcat_fixtures::{
@@ -56,7 +55,6 @@ fn line<'a>(text: &'a str, key: &str) -> &'a str {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn counts_titles_and_unreadable_blobs() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_title_catalog_with_files(dir.path()).unwrap();
@@ -76,7 +74,6 @@ fn counts_titles_and_unreadable_blobs() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn catalog_without_titles_reports_zero() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_small_catalog_with_files(dir.path()).unwrap();
@@ -88,7 +85,6 @@ fn catalog_without_titles_reports_zero() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn missing_table_or_column_gives_zero_and_no_error() {
     for variant in [Variant::NoTable, Variant::NoColumn] {
         let dir = tempfile::tempdir().unwrap();
@@ -103,7 +99,6 @@ fn missing_table_or_column_gives_zero_and_no_error() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn no_title_text_in_any_output() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_title_catalog_with_files(dir.path()).unwrap();
@@ -117,7 +112,6 @@ fn no_title_text_in_any_output() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn catalog_unchanged_second_run_identical_and_nothing_written() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_title_catalog_with_files(dir.path()).unwrap();
@@ -141,7 +135,6 @@ fn catalog_unchanged_second_run_identical_and_nothing_written() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn apply_is_still_refused_and_writes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_title_catalog_with_files(dir.path()).unwrap();

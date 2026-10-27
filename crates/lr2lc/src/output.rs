@@ -49,6 +49,10 @@ pub struct PhotosJson<'a> {
     pub copyrights: usize,
     /// Converted photos with a creator. Names are never listed.
     pub creators: usize,
+    /// Converted photos with a title. Texts are never listed.
+    pub titles: usize,
+    /// Converted photos whose title blob cannot be read.
+    pub titles_unreadable: usize,
 }
 
 /// Converted photos per flag; the fields add up to the converted photos.
@@ -169,6 +173,8 @@ pub fn report_json(outcome: &Outcome) -> String {
             captions: outcome.captions,
             copyrights: outcome.copyrights,
             creators: outcome.creators,
+            titles: outcome.titles,
+            titles_unreadable: outcome.titles_unreadable,
         },
         collections: AreaJson::new(&outcome.collections),
         keywords: KeywordsJson {
@@ -230,6 +236,8 @@ pub fn summary(outcome: &Outcome) -> String {
     let _ = writeln!(out, "captions: {}", outcome.captions);
     let _ = writeln!(out, "copyrights: {}", outcome.copyrights);
     let _ = writeln!(out, "creators: {}", outcome.creators);
+    let _ = writeln!(out, "titles: {}", outcome.titles);
+    let _ = writeln!(out, "titles unreadable: {}", outcome.titles_unreadable);
     if outcome.labels.recommend {
         let _ = writeln!(
             out,
@@ -399,6 +407,8 @@ mod tests {
             captions: 0,
             copyrights: 0,
             creators: 0,
+            titles: 0,
+            titles_unreadable: 0,
         }
     }
 
@@ -412,6 +422,22 @@ mod tests {
         );
         let v: serde_json::Value = serde_json::from_str(&report_json(&o)).unwrap();
         assert_eq!(v["photos"]["captions"], 4);
+    }
+
+    #[test]
+    fn titles_are_in_summary_and_json() {
+        let mut o = outcome();
+        o.titles = 4;
+        o.titles_unreadable = 1;
+        let s = summary(&o);
+        assert_eq!(s.lines().filter(|l| *l == "titles: 4").count(), 1);
+        assert_eq!(
+            s.lines().filter(|l| *l == "titles unreadable: 1").count(),
+            1
+        );
+        let v: serde_json::Value = serde_json::from_str(&report_json(&o)).unwrap();
+        assert_eq!(v["photos"]["titles"], 4);
+        assert_eq!(v["photos"]["titles_unreadable"], 1);
     }
 
     #[test]
