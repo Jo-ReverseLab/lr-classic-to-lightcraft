@@ -101,14 +101,23 @@ impl Photo {
     }
 }
 
-/// A keyword with its full hierarchy path, root first, and its synonyms.
+/// A keyword with its full hierarchy path, root first, its synonyms and its
+/// attributes.
 ///
-/// Equality compares the path and the synonyms.
+/// Equality compares the path, the synonyms and the attributes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Keyword {
     path: Vec<String>,
     /// Alternative names of the keyword, in source order. Each is non-empty.
     pub synonyms: Vec<String>,
+    /// The keyword is written into exported photos.
+    pub include_on_export: bool,
+    /// Its parent keywords are exported with it.
+    pub export_containing: bool,
+    /// Its synonyms are exported with it.
+    pub export_synonyms: bool,
+    /// The keyword names a person.
+    pub person: bool,
 }
 
 impl Keyword {
@@ -116,15 +125,25 @@ impl Keyword {
     ///
     /// Returns [`ModelError::EmptyKeyword`] if `parts` is empty or any part
     /// is empty or whitespace-only; a keyword and each of its levels always
-    /// have a name. The keyword starts without synonyms.
+    /// have a name. The keyword starts without synonyms and with the default
+    /// attributes: exported with parents and synonyms, not a person.
     pub fn new(parts: Vec<String>) -> Result<Keyword, ModelError> {
         if parts.is_empty() || parts.iter().any(|p| p.trim().is_empty()) {
             return Err(ModelError::EmptyKeyword);
         }
-        Ok(Keyword {
-            path: parts,
+        Ok(Keyword::with_path(parts))
+    }
+
+    /// Builds a keyword from a path already known to be valid.
+    fn with_path(path: Vec<String>) -> Keyword {
+        Keyword {
+            path,
             synonyms: Vec::new(),
-        })
+            include_on_export: true,
+            export_containing: true,
+            export_synonyms: true,
+            person: false,
+        }
     }
 
     /// The keyword's own name (last part of the path).
@@ -144,13 +163,13 @@ impl Keyword {
     }
 
     /// The parent keyword, or `None` for a root keyword. The parent is
-    /// built from the path only, so it has no synonyms.
+    /// built from the path only, so it has no synonyms and the default
+    /// attributes.
     pub fn parent(&self) -> Option<Keyword> {
         if self.path.len() > 1 {
-            Some(Keyword {
-                path: self.path[..self.path.len() - 1].to_vec(),
-                synonyms: Vec::new(),
-            })
+            Some(Keyword::with_path(
+                self.path[..self.path.len() - 1].to_vec(),
+            ))
         } else {
             None
         }
@@ -288,6 +307,33 @@ mod tests {
         let mut k = Keyword::new(vec!["A".into(), "B".into()]).unwrap();
         k.synonyms.push("Alias".into());
         assert!(k.parent().unwrap().synonyms.is_empty());
+    }
+
+    #[test]
+    fn new_keyword_has_default_attributes() {
+        let k = Keyword::new(vec!["A".into()]).unwrap();
+        assert!(k.include_on_export && k.export_containing && k.export_synonyms);
+        assert!(!k.person);
+    }
+
+    #[test]
+    fn equality_includes_attributes() {
+        let a = Keyword::new(vec!["A".into()]).unwrap();
+        let mut b = a.clone();
+        b.person = true;
+        assert_ne!(a, b);
+        let mut c = a.clone();
+        c.include_on_export = false;
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn parent_has_default_attributes() {
+        let mut k = Keyword::new(vec!["A".into(), "B".into()]).unwrap();
+        k.person = true;
+        k.export_synonyms = false;
+        let p = k.parent().unwrap();
+        assert!(!p.person && p.export_synonyms);
     }
 
     #[test]
