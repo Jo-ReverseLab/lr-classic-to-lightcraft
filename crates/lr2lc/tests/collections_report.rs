@@ -16,7 +16,8 @@
 //! `collections: read N, would convert N, skipped N` and
 //! `collection members: read N, would convert N, skipped N`, and for each
 //! skipped item a reason below the heading `skipped collections:` or
-//! `skipped collection members:` as for the other areas. Names of
+//! `skipped collection members:` as for the other areas (reasons grouped, a
+//! leading `<word> <id>: ` removed). Names of
 //! collections appear in neither stdout, stderr nor report.json.
 //!
 //! Always: dry run, catalog byte-identical, second run identical, nothing
@@ -48,6 +49,22 @@ fn run(cat: &Path) -> (String, String, Value, String) {
         serde_json::from_str(&raw).unwrap(),
         raw,
     )
+}
+
+/// Removes a leading `word <digits>: ` such as `collection 12: `.
+fn strip_id_prefix(reason: &str) -> &str {
+    if let Some((head, rest)) = reason.split_once(": ") {
+        if let Some((word, id)) = head.split_once(' ') {
+            if !word.is_empty()
+                && word.bytes().all(|b| b.is_ascii_alphabetic())
+                && !id.is_empty()
+                && id.bytes().all(|b| b.is_ascii_digit())
+            {
+                return rest;
+            }
+        }
+    }
+    reason
 }
 
 fn has_line(text: &str, want: &str) -> bool {
@@ -197,7 +214,8 @@ fn skipped_collection_reasons_are_listed_in_stdout() {
     assert!(has_line(&out, "skipped collection members:"), "{out}");
     for area in ["collections", "collection_members"] {
         for s in v[area]["skipped"].as_array().unwrap() {
-            let reason = s["reason"].as_str().unwrap();
+            // stdout groups reasons and drops a leading `<word> <digits>: `.
+            let reason = strip_id_prefix(s["reason"].as_str().unwrap());
             assert!(out.contains(reason), "{reason:?} missing from stdout");
         }
     }
@@ -207,11 +225,7 @@ fn skipped_collection_reasons_are_listed_in_stdout() {
 fn catalog_without_collections_reports_zero() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_small_catalog_with_files(dir.path()).unwrap();
-    {
-        let c = rusqlite::Connection::open(&cat).unwrap();
-        c.execute_batch("DELETE FROM AgLibraryCollectionImage; DELETE FROM AgLibraryCollection;")
-            .unwrap();
-    }
+    lrcat_fixtures::clear_collections(&cat).unwrap();
     let (out, _err, v, _) = run(&cat);
     check(&v, "collections", 0, 0, 0);
     check(&v, "collection_members", 0, 0, 0);

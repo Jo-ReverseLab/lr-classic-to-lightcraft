@@ -1080,6 +1080,13 @@ pub fn write_collection_catalog_with_files(dir: &Path) -> Result<PathBuf> {
     Ok(catalog)
 }
 
+/// Removes every collection and every collection member from the catalog at
+/// `path`.
+pub fn clear_collections(path: &Path) -> Result<()> {
+    let c = Connection::open(path)?;
+    c.execute_batch("DELETE FROM AgLibraryCollectionImage; DELETE FROM AgLibraryCollection;")
+}
+
 fn add_collection_edges(path: &Path) -> Result<()> {
     use rusqlite::types::Value as V;
     const COLL: &str = "com.adobe.ag.library.collection";
