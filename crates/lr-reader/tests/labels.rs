@@ -24,11 +24,9 @@
 //! - Fixtures: `lrcat_fixtures::write_label_catalog_with_files`, see
 //!   `lrcat_fixtures::label_edge`.
 
-#![cfg(any())]
-
 use lr_reader::{Catalog, checksum};
 use lrcat_fixtures::label_edge::{self, Fixture};
-use lrcat_fixtures::{small, write_label_catalog_with_files, write_small_catalog};
+use lrcat_fixtures::{small, write_label_catalog_with_files};
 use model::Report;
 use std::path::{Path, PathBuf};
 
@@ -53,13 +51,13 @@ fn labels(data: &lr_reader::PhotoData) -> Vec<(i64, &str)> {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn english_labels_are_returned_raw() {
     let (_d, cat) = fixture(Fixture::En);
     let (data, _) = read(&cat);
     assert_eq!(
         labels(&data),
         [
+            (2, "Red"),
             (4, "Red"),
             (5, "Yellow"),
             (6, "Green"),
@@ -71,13 +69,13 @@ fn english_labels_are_returned_raw() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn german_labels_are_returned_raw_in_nfc() {
     let (_d, cat) = fixture(Fixture::De);
     let (data, _) = read(&cat);
     assert_eq!(
         labels(&data),
         [
+            (2, "Rot"),
             (4, "Rot"),
             (5, "Gelb"),
             (6, "Gr\u{fc}n"),
@@ -89,13 +87,13 @@ fn german_labels_are_returned_raw_in_nfc() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn odd_labels_are_not_trimmed_or_normalised() {
     let (_d, cat) = fixture(Fixture::Odd);
     let (data, _) = read(&cat);
     assert_eq!(
         labels(&data),
         [
+            (2, "Red"),
             (4, "Gru\u{308}n"),
             (5, "rot"),
             (6, "Red "),
@@ -107,7 +105,6 @@ fn odd_labels_are_not_trimmed_or_normalised() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn empty_string_and_null_mean_no_label() {
     let (_d, cat) = fixture(Fixture::Empty);
     let (data, _) = read(&cat);
@@ -123,7 +120,6 @@ fn empty_string_and_null_mean_no_label() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn skipped_photos_get_no_label_entry() {
     // Photo 2 (missing original) is still returned by the reader (the CLI
     // drops it later); photo 20 is a virtual copy and is not returned.
@@ -142,25 +138,34 @@ fn skipped_photos_get_no_label_entry() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn labels_do_not_change_photos_or_counts() {
-    let dir = tempfile::tempdir().unwrap();
-    let small_cat = dir.path().join("small.lrcat");
-    write_small_catalog(&small_cat).unwrap();
-    let (plain, plain_report) = read(&small_cat);
+    // Each fixture lives in its own temporary directory, so photo paths are
+    // compared relative to it.
+    fn relative(dir: &Path, photos: &[model::Photo]) -> Vec<model::Photo> {
+        photos
+            .iter()
+            .map(|p| {
+                let mut p = p.clone();
+                p.path = p.path.strip_prefix(dir).unwrap().to_path_buf();
+                p
+            })
+            .collect()
+    }
+    let (plain_dir, plain_cat) = fixture(Fixture::Empty);
+    let (plain, plain_report) = read(&plain_cat);
     assert!(plain.color_labels.is_empty());
+    let plain_photos = relative(plain_dir.path(), &plain.photos);
     for f in [Fixture::En, Fixture::Odd] {
-        let (_d, cat) = fixture(f);
+        let (d, cat) = fixture(f);
         let (data, report) = read(&cat);
         assert_eq!(report.read_count() as i64, small::PHOTOS);
         assert_eq!(report.skipped_count(), plain_report.skipped_count());
-        assert_eq!(data.photos, plain.photos, "{f:?}");
+        assert_eq!(relative(d.path(), &data.photos), plain_photos, "{f:?}");
         assert!(data.photos.iter().all(|p| p.label.is_none()));
     }
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn labels_stay_out_of_the_report() {
     let (_d, cat) = fixture(Fixture::Odd);
     let (_, report) = read(&cat);
@@ -171,7 +176,6 @@ fn labels_stay_out_of_the_report() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn second_read_is_identical_and_catalog_unchanged() {
     let (_d, cat) = fixture(Fixture::Odd);
     let before = checksum(&cat).unwrap();
