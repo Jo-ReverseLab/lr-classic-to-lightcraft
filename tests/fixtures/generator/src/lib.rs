@@ -29,6 +29,21 @@ pub mod small {
     /// `Adobe_images.id_local` of photos whose original is missing (incl. the
     /// virtual copy).
     pub const MISSING_PHOTO_IDS: [i64; 3] = [2, 3, 20];
+    /// Rows in `AgLibraryCollection` (all kinds together).
+    pub const COLLECTIONS: i64 = 9;
+    /// Collections with `systemOnly != 0` (ids 7 and 8; id 8 also carries the
+    /// plain collection `creationId`, so the system rule must win).
+    pub const COLLECTIONS_SYSTEM: i64 = 2;
+    /// Plain collections (ids 2, 3, 4; id 2 lies inside collection set 1).
+    pub const COLLECTIONS_PLAIN: i64 = 3;
+    /// Collection sets (id 1).
+    pub const COLLECTION_SETS: i64 = 1;
+    /// Smart collections (ids 5, 6).
+    pub const COLLECTIONS_SMART: i64 = 2;
+    /// Collections with an unknown `creationId` (id 9).
+    pub const COLLECTIONS_UNKNOWN: i64 = 1;
+    /// Rows in `AgLibraryCollectionImage`.
+    pub const COLLECTION_IMAGES: i64 = 7;
     /// Directory names of the two root folders below the target directory.
     pub const MACOS_ROOT_DIR: &str = "macos-pictures";
     pub const WINDOWS_ROOT_DIR: &str = "windows-pictures";
@@ -44,6 +59,8 @@ CREATE TABLE AgLibraryKeyword (id_local INTEGER PRIMARY KEY, id_global NOT NULL,
 CREATE TABLE AgLibraryKeywordImage (id_local INTEGER PRIMARY KEY, image INTEGER NOT NULL, tag INTEGER NOT NULL);
 CREATE TABLE Adobe_AdditionalMetadata (id_local INTEGER PRIMARY KEY, id_global, image INTEGER, xmp, embeddedXmp INTEGER, externalXmpIsDirty INTEGER);
 CREATE TABLE Adobe_imageProperties (id_local INTEGER PRIMARY KEY, id_global, image, propertiesString);
+CREATE TABLE AgLibraryCollection (id_local INTEGER PRIMARY KEY, creationId NOT NULL, genealogy NOT NULL, imageCount, name NOT NULL, parent INTEGER, systemOnly NOT NULL);
+CREATE TABLE AgLibraryCollectionImage (id_local INTEGER PRIMARY KEY, collection INTEGER NOT NULL, image INTEGER NOT NULL, pick NOT NULL, positionInCollection);
 ";
 
 fn gid(kind: &str, id: i64) -> String {
@@ -132,6 +149,76 @@ fn add_keyword(
             if parent == 0 { None } else { Some(parent) }
         ],
     )?;
+    Ok(())
+}
+
+/// Collections of the small fixture: (id, creationId, name, parent, systemOnly).
+/// Names are invented placeholders.
+const COLLECTIONS: [(i64, &str, &str, Option<i64>, i64); 9] = [
+    (1, "com.adobe.ag.library.group", "Set Alpha", None, 0),
+    (
+        2,
+        "com.adobe.ag.library.collection",
+        "Coll Beta",
+        Some(1),
+        0,
+    ),
+    (3, "com.adobe.ag.library.collection", "Coll Gamma", None, 0),
+    (4, "com.adobe.ag.library.collection", "Coll Delta", None, 0),
+    (
+        5,
+        "com.adobe.ag.library.smart_collection",
+        "Smart Epsilon",
+        None,
+        0,
+    ),
+    (
+        6,
+        "com.adobe.ag.library.smart_collection",
+        "Smart Zeta",
+        None,
+        0,
+    ),
+    (
+        7,
+        "com.adobe.ag.library.quick_collection",
+        "Sys Eta",
+        None,
+        1,
+    ),
+    (8, "com.adobe.ag.library.collection", "Sys Theta", None, 1),
+    (9, "com.example.invented", "Odd Iota", None, 0),
+];
+
+/// (collection, image) pairs of the small fixture.
+const COLLECTION_IMAGES: [(i64, i64); 7] = [(2, 1), (2, 2), (3, 3), (3, 4), (4, 5), (7, 1), (8, 6)];
+
+/// Collections of large catalogs (same row shape, no assignments of their own
+/// beyond the ones written in [`write_large_catalog`]).
+pub const LARGE_COLLECTIONS: i64 = 4;
+
+fn add_collections(
+    c: &Connection,
+    collections: &[(i64, &str, &str, Option<i64>, i64)],
+    images: &[(i64, i64)],
+) -> Result<()> {
+    for &(id, creation, name, parent, system) in collections {
+        let genealogy = match parent {
+            Some(p) => format!("/{p}/{id}"),
+            None => format!("/{id}"),
+        };
+        let count = images.iter().filter(|(c, _)| *c == id).count() as i64;
+        c.execute(
+            "INSERT INTO AgLibraryCollection (id_local, creationId, genealogy, imageCount, name, parent, systemOnly) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, creation, genealogy, count, name, parent, system],
+        )?;
+    }
+    for (pos, (coll, image)) in images.iter().enumerate() {
+        c.execute(
+            "INSERT INTO AgLibraryCollectionImage (collection, image, pick, positionInCollection) VALUES (?1, ?2, 0, ?3)",
+            params![coll, image, pos as f64],
+        )?;
+    }
     Ok(())
 }
 
@@ -308,6 +395,7 @@ fn write_small(path: &Path, mac_root: &str, win_root: &str) -> Result<()> {
             params![image, tag],
         )?;
     }
+    add_collections(&c, &COLLECTIONS, &COLLECTION_IMAGES)?;
     c.execute_batch("COMMIT")?;
     Ok(())
 }
@@ -345,6 +433,35 @@ pub fn write_large_catalog(path: &Path, images: usize) -> Result<()> {
             params![id, tag],
         )?;
     }
+    let large_images: Vec<(i64, i64)> = (1..=images.min(50) as i64).map(|i| (2, i)).collect();
+    add_collections(
+        &c,
+        &[
+            (1, "com.adobe.ag.library.group", "Set Large", None, 0),
+            (
+                2,
+                "com.adobe.ag.library.collection",
+                "Coll Large",
+                Some(1),
+                0,
+            ),
+            (
+                3,
+                "com.adobe.ag.library.smart_collection",
+                "Smart Large",
+                None,
+                0,
+            ),
+            (
+                4,
+                "com.adobe.ag.library.quick_collection",
+                "Sys Large",
+                None,
+                1,
+            ),
+        ],
+        &large_images,
+    )?;
     c.execute_batch("COMMIT")?;
     Ok(())
 }

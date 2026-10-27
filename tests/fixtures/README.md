@@ -36,6 +36,8 @@ fixed dummy values.
 | `Adobe_images` | `id_local`, `id_global`, `rootFile`, `rating` (NULL or 0-5), `pick`, `masterImage` (virtual copies), plus NOT NULL dummies |
 | `AgLibraryKeyword` | `id_local`, `id_global`, `name`, `lc_name`, `parent`, `genealogy`, `dateCreated`, include* flags |
 | `AgLibraryKeywordImage` | `id_local`, `image`, `tag` |
+| `AgLibraryCollection` | `id_local`, `creationId`, `genealogy`, `imageCount`, `name`, `parent`, `systemOnly` |
+| `AgLibraryCollectionImage` | `id_local`, `collection`, `image`, `pick`, `positionInCollection` |
 | `Adobe_AdditionalMetadata`, `Adobe_imageProperties` | one row per image (the reference reader inner-joins them) |
 
 Relationships follow the research notes: image -> file -> folder -> root folder;
@@ -58,6 +60,23 @@ assignments, ratings). Tests assert these constants. Contents:
 - one folder path longer than 260 characters
 - keywords with umlauts and emoji, a synonym-like pair, one keyword with no
   assigned photos, one keyword with an empty name
+
+## Collections in the small fixture
+
+Names are invented placeholders. Constants live in the `small` module.
+
+| Kind | Rows | Ids | Notes |
+| --- | --- | --- | --- |
+| system (`systemOnly` = 1) | 2 | 7, 8 | id 8 also has the plain `creationId`; system wins |
+| plain (`...library.collection`) | 3 | 2, 3, 4 | id 2 is inside set 1 |
+| collection set (`...library.group`) | 1 | 1 | parent of id 2 |
+| smart (`...library.smart_collection`) | 2 | 5, 6 | |
+| unknown `creationId` | 1 | 9 | |
+| total | 9 | 1-9 | `small::COLLECTIONS` |
+
+`AgLibraryCollectionImage` has 7 rows (`small::COLLECTION_IMAGES`). Large
+catalogs get 4 collections (`LARGE_COLLECTIONS`: set, plain, smart, system) and
+up to 50 assignments.
 
 ## Large catalogs
 

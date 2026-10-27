@@ -5,11 +5,12 @@
 //!   (writes report.json there; without it no file is written), `--apply`
 //!   (not implemented yet: non-zero exit, nothing written), `-h`, `-V`.
 //! - stdout contains a line `folders: read N, would convert N, skipped N`, a
-//!   line `photos: read N, would convert N, skipped N`, and the words
+//!   line `photos: read N, would convert N, skipped N`, a line
+//!   `collections: read N, would convert 0, skipped N` (P4-10), and the words
 //!   "dry run".
 //! - report.json: `{"tool_version", "catalog_version", "dry_run": true,
 //!   "catalog_unchanged": true, "folders": {"read", "converted", "skipped":
-//!   [{"reason"}]}, "photos": {same}}` with read == converted + len(skipped).
+//!   [{"reason"}]}, "photos": {same}, "collections": {same}}` with read == converted + len(skipped).
 //! - Exit 0 even when items are skipped; 1 on runtime errors (missing
 //!   catalog, pending Lightroom changes); 2 on invalid arguments.
 
@@ -17,6 +18,8 @@ use lrcat_fixtures::small;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+const COLLECTIONS: i64 = small::COLLECTIONS;
 
 const PHOTOS_OK: i64 = small::PHOTOS - small::MISSING_PHOTO_IDS.len() as i64;
 const PHOTOS_MISSING: i64 = small::MISSING_PHOTO_IDS.len() as i64;
@@ -101,6 +104,10 @@ fn dry_run_exits_zero_and_prints_counts() {
         count_line(&text, "photos", small::PHOTOS, PHOTOS_OK, PHOTOS_MISSING),
         "stdout: {text}"
     );
+    assert!(
+        count_line(&text, "collections", COLLECTIONS, 0, COLLECTIONS),
+        "stdout: {text}"
+    );
     assert!(text.to_lowercase().contains("dry run"), "stdout: {text}");
     drop(dir);
 }
@@ -122,6 +129,29 @@ fn report_file_has_documented_structure_and_balance() {
     assert_eq!(v["catalog_unchanged"], true);
     check_area(&v, "folders", small::FOLDERS, small::FOLDERS, 0);
     check_area(&v, "photos", small::PHOTOS, PHOTOS_OK, PHOTOS_MISSING);
+    // Task P4-10: every collection is read and skipped, none converted.
+    check_area(&v, "collections", COLLECTIONS, 0, COLLECTIONS);
+    let reasons: Vec<&str> = v["collections"]["skipped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["reason"].as_str().unwrap())
+        .collect();
+    assert!(reasons.contains(&"collection 1: collection set is not converted"));
+    assert!(reasons.contains(&"collection 7: system collection is not converted"));
+    assert!(reasons.contains(&"collection 9: unknown collection type is not converted"));
+    for name in [
+        "Set Alpha",
+        "Coll Beta",
+        "Smart Epsilon",
+        "Sys Eta",
+        "Odd Iota",
+    ] {
+        assert!(
+            reasons.iter().all(|r| !r.contains(name)),
+            "name {name} leaked"
+        );
+    }
     drop(dir);
 }
 

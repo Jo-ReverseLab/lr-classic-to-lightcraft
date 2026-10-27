@@ -161,3 +161,70 @@ fn large_catalog_has_exactly_requested_images() {
         2500
     );
 }
+
+#[test]
+fn small_catalog_collection_counts_match_constants() {
+    let (_d, c) = small_catalog();
+    let q = |w: &str| {
+        count(
+            &c,
+            &format!("SELECT count(*) FROM AgLibraryCollection WHERE {w}"),
+        )
+    };
+    assert_eq!(q("1=1"), small::COLLECTIONS);
+    assert_eq!(q("systemOnly <> 0"), small::COLLECTIONS_SYSTEM);
+    assert_eq!(
+        q("systemOnly = 0 AND creationId = 'com.adobe.ag.library.collection'"),
+        small::COLLECTIONS_PLAIN
+    );
+    assert_eq!(
+        q("systemOnly = 0 AND creationId = 'com.adobe.ag.library.group'"),
+        small::COLLECTION_SETS
+    );
+    assert_eq!(
+        q("systemOnly = 0 AND creationId = 'com.adobe.ag.library.smart_collection'"),
+        small::COLLECTIONS_SMART
+    );
+    assert_eq!(
+        q("systemOnly = 0 AND creationId NOT LIKE 'com.adobe.ag.library.%'"),
+        small::COLLECTIONS_UNKNOWN
+    );
+    assert_eq!(
+        small::COLLECTIONS,
+        small::COLLECTIONS_SYSTEM
+            + small::COLLECTIONS_PLAIN
+            + small::COLLECTION_SETS
+            + small::COLLECTIONS_SMART
+            + small::COLLECTIONS_UNKNOWN
+    );
+    // A plain collection lies inside the collection set.
+    assert_eq!(
+        count(
+            &c,
+            "SELECT count(*) FROM AgLibraryCollection c JOIN AgLibraryCollection p ON p.id_local = c.parent WHERE p.creationId = 'com.adobe.ag.library.group' AND c.creationId = 'com.adobe.ag.library.collection'"
+        ),
+        1
+    );
+    // A system collection that also carries the plain creationId.
+    assert_eq!(
+        q("systemOnly <> 0 AND creationId = 'com.adobe.ag.library.collection'"),
+        1
+    );
+    assert_eq!(
+        count(&c, "SELECT count(*) FROM AgLibraryCollectionImage"),
+        small::COLLECTION_IMAGES
+    );
+}
+
+#[test]
+fn large_catalog_has_collections() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("large.lrcat");
+    write_large_catalog(&path, 100).unwrap();
+    let c = open(&path);
+    assert_eq!(
+        count(&c, "SELECT count(*) FROM AgLibraryCollection"),
+        lrcat_fixtures::LARGE_COLLECTIONS
+    );
+    assert!(count(&c, "SELECT count(*) FROM AgLibraryCollectionImage") > 0);
+}
