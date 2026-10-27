@@ -104,7 +104,6 @@ fn assignment_map(r: &Read) -> BTreeMap<String, BTreeSet<String>> {
 }
 
 #[test]
-#[ignore = "waiting for P5-8"]
 fn global_ids_are_read_byte_for_byte() {
     let dir = tempfile::tempdir().unwrap();
     let path = small(dir.path());
@@ -130,7 +129,6 @@ fn global_ids_are_read_byte_for_byte() {
 }
 
 #[test]
-#[ignore = "waiting for P5-8"]
 fn unusual_global_ids_are_kept_exactly() {
     let dir = tempfile::tempdir().unwrap();
     let path = small(dir.path());
@@ -157,7 +155,6 @@ fn unusual_global_ids_are_kept_exactly() {
 }
 
 #[test]
-#[ignore = "waiting for P5-8"]
 fn same_content_in_two_catalogs_gives_same_identity() {
     let dir = tempfile::tempdir().unwrap();
     let a = dir.path().join("a.lrcat");
@@ -210,7 +207,6 @@ fn same_content_in_two_catalogs_gives_same_identity() {
 }
 
 #[test]
-#[ignore = "waiting for P5-8"]
 fn identity_survives_a_second_read_and_catalog_is_unchanged() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("a.lrcat");
@@ -226,7 +222,6 @@ fn identity_survives_a_second_read_and_catalog_is_unchanged() {
 }
 
 #[test]
-#[ignore = "waiting for P5-8"]
 fn empty_or_blank_photo_global_id_is_skipped() {
     let dir = tempfile::tempdir().unwrap();
     let path = small(dir.path());
@@ -269,7 +264,6 @@ fn empty_or_blank_photo_global_id_is_skipped() {
 }
 
 #[test]
-#[ignore = "waiting for P5-8"]
 fn duplicate_photo_global_id_skips_later_rows() {
     let dir = tempfile::tempdir().unwrap();
     let path = small(dir.path());
@@ -297,7 +291,6 @@ fn duplicate_photo_global_id_skips_later_rows() {
 }
 
 #[test]
-#[ignore = "waiting for P5-8"]
 fn empty_keyword_global_id_skips_keyword_and_subtree() {
     let dir = tempfile::tempdir().unwrap();
     let path = small(dir.path());
@@ -338,7 +331,6 @@ fn empty_keyword_global_id_skips_keyword_and_subtree() {
 }
 
 #[test]
-#[ignore = "waiting for P5-8"]
 fn duplicate_keyword_global_id_skips_later_row_and_subtree() {
     let dir = tempfile::tempdir().unwrap();
     let path = small(dir.path());
@@ -385,13 +377,11 @@ fn expect_missing_column(table: &str) {
 }
 
 #[test]
-#[ignore = "waiting for P5-8"]
 fn photo_global_id_column_is_required() {
     expect_missing_column("Adobe_images");
 }
 
 #[test]
-#[ignore = "waiting for P5-8"]
 fn keyword_global_id_column_is_required() {
     expect_missing_column("AgLibraryKeyword");
 }

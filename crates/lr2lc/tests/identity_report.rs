@@ -49,7 +49,6 @@ fn reasons(v: &serde_json::Value, area: &str) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "waiting for P5-8"]
 fn global_ids_never_appear_in_output() {
     let dir = tempfile::tempdir().unwrap();
     let cat = lrcat_fixtures::write_small_catalog_with_files(dir.path()).unwrap();
@@ -88,7 +87,6 @@ fn global_ids_never_appear_in_output() {
 }
 
 #[test]
-#[ignore = "waiting for P5-8"]
 fn numbers_add_up_and_catalog_is_unchanged() {
     let dir = tempfile::tempdir().unwrap();
     let cat = lrcat_fixtures::write_small_catalog_with_files(dir.path()).unwrap();

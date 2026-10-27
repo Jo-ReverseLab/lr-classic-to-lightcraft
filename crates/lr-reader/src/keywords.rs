@@ -86,6 +86,8 @@ struct KeywordRow {
     /// `None` if the name is NULL.
     name: Option<String>,
     parent: Option<i64>,
+    /// `id_global` if it is text; any other value counts as missing.
+    global_id: Option<String>,
     attributes: Attributes,
 }
 
@@ -184,7 +186,7 @@ impl Catalog {
             .conn
             .prepare(
                 "SELECT id_local, name, parent, includeOnExport, includeParents, \
-                 includeSynonyms, keywordType FROM AgLibraryKeyword ORDER BY id_local",
+                 includeSynonyms, keywordType, id_global FROM AgLibraryKeyword ORDER BY id_local",
             )
             .map_err(ReadError::Query)?;
         let rows = stmt
@@ -193,6 +195,10 @@ impl Catalog {
                     id: row.get(0)?,
                     name: value_as_text(row.get(1)?),
                     parent: row.get(2)?,
+                    global_id: match row.get(7)? {
+                        Value::Text(t) => Some(t),
+                        _ => None,
+                    },
                     attributes: Attributes {
                         include_on_export: value_as_flag(&row.get(3)?),
                         export_containing: value_as_flag(&row.get(4)?),
@@ -296,11 +302,14 @@ enum Top {
 
 /// Builds the full path of every keyword row except `root`, in row order.
 ///
-/// A keyword is skipped if its name is empty or contains `|`, or if its
-/// parent is skipped, missing or part of a cycle; the parent reason wins.
+/// A keyword is skipped if its parent is skipped, missing or part of a
+/// cycle, if its global id is missing or a duplicate (see
+/// [`global_ids`]), or if its name is empty or contains `|`; checked in
+/// this order. A converted keyword carries its global id.
 fn resolve_keywords(rows: &[KeywordRow], root: Option<i64>) -> Vec<(i64, Result<Keyword, String>)> {
     let index: HashMap<i64, &KeywordRow> = rows.iter().map(|r| (r.id, r)).collect();
     let mut done: HashMap<i64, Result<Keyword, String>> = HashMap::new();
+    let mut ids = global_ids(rows, root);
 
     for row in rows {
         if Some(row.id) == root || done.contains_key(&row.id) {
@@ -340,14 +349,17 @@ fn resolve_keywords(rows: &[KeywordRow], root: Option<i64>) -> Vec<(i64, Result<
                     "keyword {}: parent keyword {p} is skipped",
                     current.id
                 )),
-                Ok(mut path) => own_name(current).map(|name| {
-                    path.push(name);
-                    path
-                }),
-            }
-            .and_then(|path| {
-                Keyword::new(path).map_err(|_| format!("keyword {}: name is empty", current.id))
-            });
+                Ok(mut path) => ids
+                    .remove(&current.id)
+                    .expect("every row except the root has an id result")
+                    .and_then(|global_id| {
+                        let name = own_name(current)?;
+                        path.push(name);
+                        Keyword::new(path)
+                            .map(|k| k.with_global_id(global_id))
+                            .map_err(|_| format!("keyword {}: name is empty", current.id))
+                    }),
+            };
             parent = match &result {
                 Ok(k) => Ok(k.path().to_vec()),
                 Err(_) => Err(current.id),
@@ -360,6 +372,35 @@ fn resolve_keywords(rows: &[KeywordRow], root: Option<i64>) -> Vec<(i64, Result<
         .filter(|r| Some(r.id) != root)
         .map(|r| (r.id, done.remove(&r.id).expect("every row is resolved")))
         .collect()
+}
+
+/// The global id of every row except `root`, or the reason it cannot be
+/// used: NULL, not text, empty or whitespace-only is missing; a value
+/// already held by an earlier row in `id_local` order is a duplicate.
+///
+/// Unlike photos, the first row with a usable value owns it even if that
+/// row is later skipped for another reason (its name or its parent): a
+/// keyword's fate depends on its ancestors, which may come later in
+/// `id_local` order, so ownership is decided on the rows alone.
+fn global_ids(rows: &[KeywordRow], root: Option<i64>) -> HashMap<i64, Result<String, String>> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut out = HashMap::new();
+    let mut sorted: Vec<&KeywordRow> = rows.iter().filter(|r| Some(r.id) != root).collect();
+    sorted.sort_by_key(|r| r.id);
+    for row in sorted {
+        let result = match row.global_id.as_deref() {
+            Some(g) if !g.trim().is_empty() => {
+                if seen.insert(g) {
+                    Ok(g.to_owned())
+                } else {
+                    Err(format!("keyword {}: duplicate global id", row.id))
+                }
+            }
+            _ => Err(format!("keyword {}: missing global id", row.id)),
+        };
+        out.insert(row.id, result);
+    }
+    out
 }
 
 /// The keyword's own name, or the reason it cannot be used.
@@ -452,12 +493,18 @@ mod tests {
             id,
             name: name.map(str::to_owned),
             parent,
+            global_id: Some(format!("g{id}")),
             attributes: Attributes::default(),
         }
     }
 
     fn kw(parts: &[&str]) -> Keyword {
         Keyword::new(parts.iter().map(|s| s.to_string()).collect()).unwrap()
+    }
+
+    fn with_gid(mut r: KeywordRow, g: Option<&str>) -> KeywordRow {
+        r.global_id = g.map(str::to_owned);
+        r
     }
 
     fn reasons(resolved: &[(i64, Result<Keyword, String>)]) -> Vec<String> {
@@ -476,14 +523,17 @@ mod tests {
         ];
         let resolved = resolve_keywords(&rows, Some(1));
         assert_eq!(resolved.len(), 2);
-        assert_eq!(resolved[0], (3, Ok(kw(&["Top", "Child"]))));
-        assert_eq!(resolved[1], (2, Ok(kw(&["Top"]))));
+        assert_eq!(
+            resolved[0],
+            (3, Ok(kw(&["Top", "Child"]).with_global_id("g3")))
+        );
+        assert_eq!(resolved[1], (2, Ok(kw(&["Top"]).with_global_id("g2"))));
     }
 
     #[test]
     fn keyword_without_parent_is_top_level() {
         let resolved = resolve_keywords(&[row(5, Some("A"), None)], Some(1));
-        assert_eq!(resolved, vec![(5, Ok(kw(&["A"])))]);
+        assert_eq!(resolved, vec![(5, Ok(kw(&["A"]).with_global_id("g5")))]);
     }
 
     #[test]
@@ -515,6 +565,78 @@ mod tests {
                 "keyword 4: parent keyword 3 is skipped",
             ]
         );
+    }
+
+    #[test]
+    fn missing_global_id_skips_keyword_and_subtree() {
+        let rows = [
+            with_gid(row(2, Some("A"), Some(1)), None),
+            with_gid(row(3, Some("B"), Some(1)), Some(" \t")),
+            with_gid(row(4, Some("C"), Some(1)), Some("")),
+            row(5, Some("Below"), Some(2)),
+        ];
+        assert_eq!(
+            reasons(&resolve_keywords(&rows, Some(1))),
+            vec![
+                "keyword 2: missing global id",
+                "keyword 3: missing global id",
+                "keyword 4: missing global id",
+                "keyword 5: parent keyword 2 is skipped",
+            ]
+        );
+    }
+
+    #[test]
+    fn duplicate_global_id_follows_id_order_not_row_order() {
+        // Row 3 comes first in the slice but row 2 has the lower id.
+        let rows = [
+            with_gid(row(3, Some("B"), Some(1)), Some("same")),
+            with_gid(row(2, Some("A"), Some(1)), Some("same")),
+        ];
+        let resolved = resolve_keywords(&rows, Some(1));
+        assert_eq!(reasons(&resolved), vec!["keyword 3: duplicate global id"]);
+        assert_eq!(
+            resolved[1].1.as_ref().unwrap().global_id.as_deref(),
+            Some("same")
+        );
+    }
+
+    #[test]
+    fn skipped_keyword_still_owns_its_global_id() {
+        let rows = [
+            with_gid(row(2, Some(""), Some(1)), Some("same")),
+            with_gid(row(3, Some("B"), Some(1)), Some("same")),
+        ];
+        assert_eq!(
+            reasons(&resolve_keywords(&rows, Some(1))),
+            vec!["keyword 2: name is empty", "keyword 3: duplicate global id"]
+        );
+    }
+
+    #[test]
+    fn keyword_check_order() {
+        // Parent reason before global id, global id before the name.
+        let rows = [
+            with_gid(row(2, Some("A"), Some(99)), None),
+            with_gid(row(3, Some("a|b"), Some(1)), None),
+        ];
+        assert_eq!(
+            reasons(&resolve_keywords(&rows, Some(1))),
+            vec![
+                "keyword 2: parent keyword 99 is skipped",
+                "keyword 3: missing global id",
+            ]
+        );
+    }
+
+    #[test]
+    fn root_global_id_is_ignored() {
+        let rows = [
+            with_gid(row(1, None, None), Some("same")),
+            with_gid(row(2, Some("A"), Some(1)), Some("same")),
+        ];
+        let resolved = resolve_keywords(&rows, Some(1));
+        assert!(resolved[0].1.is_ok());
     }
 
     #[test]

@@ -5,12 +5,15 @@ use crate::catalog::{Catalog, ReadError};
 use crate::folders::join_folder_path;
 use model::{Photo, Rating, Report};
 use rusqlite::types::Value;
+use std::collections::HashSet;
 
 /// One joined row; `None` means the referenced row does not exist.
 struct Row {
     image_id: i64,
     master: Option<i64>,
     file_format: Option<String>,
+    /// `Adobe_images.id_global` if it is text.
+    global_id: Option<String>,
     rating: Value,
     file: Option<(String, String)>,
     folder: Option<String>,
@@ -22,8 +25,9 @@ impl Catalog {
     /// Reads all photos, ordered by their catalog id.
     ///
     /// Every `Adobe_images` row is counted with [`Report::read`]. Rows that
-    /// cannot become a photo (virtual copies, videos, missing file, folder or
-    /// root folder rows, ratings outside 0..=5) are recorded with
+    /// cannot become a photo (virtual copies, videos, missing or duplicate
+    /// global id, missing file, folder or root folder rows, ratings outside
+    /// 0..=5) are recorded with
     /// [`Report::skipped`] and left out. Paths are assembled from stored
     /// strings only; the file system is never accessed. Nothing is marked
     /// converted here.
@@ -34,7 +38,7 @@ impl Catalog {
                 "SELECT i.id_local, i.masterImage, i.rating, i.fileFormat, \
                         f.id_local, f.baseName, f.extension, \
                         d.id_local, d.pathFromRoot, \
-                        r.id_local, r.absolutePath \
+                        r.id_local, r.absolutePath, i.id_global \
                  FROM Adobe_images i \
                  LEFT JOIN AgLibraryFile f ON f.id_local = i.rootFile \
                  LEFT JOIN AgLibraryFolder d ON d.id_local = f.folder \
@@ -52,6 +56,7 @@ impl Catalog {
                     master: row.get(1)?,
                     rating: row.get(2)?,
                     file_format: text_value(row.get(3)?),
+                    global_id: text_value(row.get(11)?),
                     file: match file_id {
                         Some(_) => Some((
                             row.get::<_, Option<String>>(5)?.unwrap_or_default(),
@@ -69,10 +74,11 @@ impl Catalog {
             })
             .map_err(ReadError::Query)?;
         let mut photos = Vec::new();
+        let mut used = HashSet::new();
         for row in rows {
             let row = row.map_err(ReadError::Query)?;
             report.read();
-            match photo_from_row(row) {
+            match photo_from_row(row, &mut used) {
                 Ok(photo) => photos.push(photo),
                 Err(reason) => report.skipped(reason),
             }
@@ -83,8 +89,15 @@ impl Catalog {
 
 /// Turns a joined row into a photo, or returns the reason it is skipped.
 ///
-/// Reasons name the photo's catalog id but never paths or file names.
-fn photo_from_row(row: Row) -> Result<Photo, String> {
+/// Reasons name the photo's catalog id but never paths, file names or the
+/// global id. The checks run in this order: virtual copy, video, missing
+/// or duplicate global id, file, folder and root folder rows, rating.
+///
+/// `used` holds the global ids of the photos converted so far (rows are
+/// read in `id_local` order). Only a converted photo adds its global id, so
+/// a row skipped for any reason does not block a later row with the same
+/// global id.
+fn photo_from_row(row: Row, used: &mut HashSet<String>) -> Result<Photo, String> {
     let id = row.image_id;
     if let Some(master) = row.master {
         return Err(format!(
@@ -94,6 +107,13 @@ fn photo_from_row(row: Row) -> Result<Photo, String> {
     let ext = row.file.as_ref().map(|(_, ext)| ext.as_str());
     if is_video(row.file_format.as_deref(), ext) {
         return Err(format!("photo {id}: {VIDEO_SKIP_REASON}"));
+    }
+    let global_id = match row.global_id {
+        Some(g) if !g.trim().is_empty() => g,
+        _ => return Err(format!("photo {id}: missing global id")),
+    };
+    if used.contains(&global_id) {
+        return Err(format!("photo {id}: duplicate global id"));
     }
     let (base, ext) = row
         .file
@@ -110,11 +130,11 @@ fn photo_from_row(row: Row) -> Result<Photo, String> {
     let rating = rating_from_value(&row.rating)
         .ok_or_else(|| format!("photo {id}: rating is not a whole number in 0..=5"))?;
     let folder = join_folder_path(&root, &rel);
-    Ok(Photo::new(
-        join_file_path(&folder, &file_name(&base, &ext)),
-        id,
-        rating,
-    ))
+    used.insert(global_id.clone());
+    Ok(
+        Photo::new(join_file_path(&folder, &file_name(&base, &ext)), id, rating)
+            .with_global_id(global_id),
+    )
 }
 
 /// Skip reason of a video, after the `photo {id}: ` prefix.
@@ -134,6 +154,7 @@ fn is_video(file_format: Option<&str>, extension: Option<&str>) -> bool {
 }
 
 /// A stored value as text if it is text; any other type is `None`.
+/// A global id that is not text therefore counts as missing.
 fn text_value(value: Value) -> Option<String> {
     match value {
         Value::Text(t) => Some(t),
@@ -183,6 +204,7 @@ mod tests {
             image_id: 1,
             master: None,
             file_format: Some("JPG".into()),
+            global_id: Some("g-1".into()),
             rating: Value::Null,
             file: Some(("IMG".into(), "jpg".into())),
             folder: Some("a/".into()),
@@ -219,24 +241,107 @@ mod tests {
 
     #[test]
     fn valid_row_becomes_photo() {
-        let p = photo_from_row(row()).unwrap();
+        let p = photo_from_row(row(), &mut HashSet::new()).unwrap();
         assert_eq!(p.path, std::path::PathBuf::from("/r/a/IMG.jpg"));
         assert_eq!(p.lightroom_id, 1);
         assert_eq!(p.rating.get(), 0);
     }
 
     #[test]
+    fn global_id_is_kept_byte_for_byte() {
+        let mut r = row();
+        r.global_id = Some(" a\u{1F305} ".into());
+        let p = photo_from_row(r, &mut HashSet::new()).unwrap();
+        assert_eq!(p.global_id.as_deref(), Some(" a\u{1F305} "));
+    }
+
+    #[test]
+    fn missing_or_blank_global_id_is_skipped() {
+        for g in [None, Some(""), Some(" \t\n")] {
+            let mut r = row();
+            r.global_id = g.map(str::to_owned);
+            assert_eq!(
+                photo_from_row(r, &mut HashSet::new()).unwrap_err(),
+                "photo 1: missing global id"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_global_id_is_skipped_without_naming_it() {
+        let mut used = HashSet::new();
+        assert!(photo_from_row(row(), &mut used).is_ok());
+        let mut r = row();
+        r.image_id = 2;
+        assert_eq!(
+            photo_from_row(r, &mut used).unwrap_err(),
+            "photo 2: duplicate global id"
+        );
+    }
+
+    #[test]
+    fn skipped_photo_does_not_use_its_global_id() {
+        // Lead decision: only a converted photo claims its global id, so a
+        // later row with the same id is converted instead.
+        let mut used = HashSet::new();
+        let mut bad = row();
+        bad.rating = Value::Integer(9);
+        assert!(photo_from_row(bad, &mut used).is_err());
+        let mut copy = row();
+        copy.master = Some(5);
+        assert!(photo_from_row(copy, &mut used).is_err());
+        assert!(used.is_empty());
+        let mut later = row();
+        later.image_id = 2;
+        assert_eq!(photo_from_row(later, &mut used).unwrap().lightroom_id, 2);
+    }
+
+    #[test]
+    fn global_id_check_order() {
+        // Virtual copy and video come before the global id check ...
+        let mut r = row();
+        r.global_id = None;
+        r.master = Some(3);
+        assert!(
+            photo_from_row(r, &mut HashSet::new())
+                .unwrap_err()
+                .contains("virtual copy")
+        );
+        let mut r = row();
+        r.global_id = None;
+        r.file_format = Some("VIDEO".into());
+        assert!(
+            photo_from_row(r, &mut HashSet::new())
+                .unwrap_err()
+                .contains(VIDEO_SKIP_REASON)
+        );
+        // ... missing rows and the rating after it.
+        let mut r = row();
+        r.global_id = None;
+        r.file = None;
+        r.rating = Value::Integer(9);
+        assert_eq!(
+            photo_from_row(r, &mut HashSet::new()).unwrap_err(),
+            "photo 1: missing global id"
+        );
+    }
+
+    #[test]
     fn root_folder_without_path_is_skipped() {
         let mut r = row();
         r.root_path = None;
-        assert!(photo_from_row(r).unwrap_err().contains("root"));
+        assert!(
+            photo_from_row(r, &mut HashSet::new())
+                .unwrap_err()
+                .contains("root")
+        );
     }
 
     #[test]
     fn skip_reasons_do_not_leak_names() {
         let mut r = row();
         r.rating = Value::Integer(9);
-        let reason = photo_from_row(r).unwrap_err();
+        let reason = photo_from_row(r, &mut HashSet::new()).unwrap_err();
         assert!(!reason.contains("IMG") && !reason.contains("/r/"));
     }
 
@@ -244,7 +349,7 @@ mod tests {
     fn virtual_copy_reason_does_not_say_missing() {
         let mut r = row();
         r.master = Some(7);
-        let reason = photo_from_row(r).unwrap_err();
+        let reason = photo_from_row(r, &mut HashSet::new()).unwrap_err();
         assert!(reason.contains("virtual copy") && !reason.contains("missing"));
     }
 
@@ -275,7 +380,7 @@ mod tests {
         r.image_id = 4;
         r.file = Some(("clip".into(), "MOV".into()));
         assert_eq!(
-            photo_from_row(r).unwrap_err(),
+            photo_from_row(r, &mut HashSet::new()).unwrap_err(),
             format!("photo 4: {VIDEO_SKIP_REASON}")
         );
     }
@@ -286,7 +391,11 @@ mod tests {
         r.file_format = Some("VIDEO".into());
         r.file = None;
         r.rating = Value::Integer(9);
-        assert!(photo_from_row(r).unwrap_err().contains(VIDEO_SKIP_REASON));
+        assert!(
+            photo_from_row(r, &mut HashSet::new())
+                .unwrap_err()
+                .contains(VIDEO_SKIP_REASON)
+        );
     }
 
     #[test]
@@ -294,7 +403,7 @@ mod tests {
         let mut r = row();
         r.file_format = Some("VIDEO".into());
         r.master = Some(4);
-        let reason = photo_from_row(r).unwrap_err();
+        let reason = photo_from_row(r, &mut HashSet::new()).unwrap_err();
         assert!(reason.contains("virtual copy") && !reason.contains("video"));
     }
 
@@ -302,6 +411,6 @@ mod tests {
     fn base_name_with_video_suffix_is_not_a_video() {
         let mut r = row();
         r.file = Some(("clip.mp4".into(), "jpg".into()));
-        assert!(photo_from_row(r).is_ok());
+        assert!(photo_from_row(r, &mut HashSet::new()).is_ok());
     }
 }

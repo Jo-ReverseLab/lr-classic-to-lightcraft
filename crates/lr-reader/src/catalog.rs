@@ -65,6 +65,7 @@ const REQUIRED_SCHEMA: &[(&str, &[&str])] = &[
             "rating",
             "fileFormat",
             "rootFile",
+            "id_global",
         ],
     ),
     (
@@ -90,6 +91,7 @@ const REQUIRED_SCHEMA: &[(&str, &[&str])] = &[
             "includeParents",
             "includeSynonyms",
             "keywordType",
+            "id_global",
         ],
     ),
     ("AgLibraryKeywordImage", &["id_local", "image", "tag"]),
