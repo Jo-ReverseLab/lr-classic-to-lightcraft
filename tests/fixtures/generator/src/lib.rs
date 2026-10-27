@@ -99,6 +99,30 @@ pub mod keyword_edge {
     ];
 }
 
+/// Counts and ids of the video fixture ([`write_video_catalog_with_files`]).
+pub mod video_edge {
+    /// `Adobe_images` rows: the 20 of the small fixture plus virtual copy 21.
+    pub const PHOTOS: i64 = 21;
+    /// Videos: 2 (`fileFormat` VIDEO, original missing), 4 (`fileFormat`
+    /// VIDEO, `.mov`), 5 (`fileFormat` JPG but extension `MP4`, upper case).
+    pub const VIDEO_IDS: [i64; 3] = [2, 4, 5];
+    /// Photo 2 is a video whose original does not exist; it counts as a video.
+    pub const VIDEO_MISSING_ID: i64 = 2;
+    /// Photo 5 is recognised by its upper-case extension only.
+    pub const VIDEO_BY_EXTENSION_ID: i64 = 5;
+    /// Not videos although they look similar: 6 (extension `mpo`, a still
+    /// image format) and 7 (base name `clip.mp4`, extension `jpg`).
+    pub const LOOKALIKE_IDS: [i64; 2] = [6, 7];
+    /// Virtual copies: 20 (of photo 3) and 21 (of video 4). They keep the
+    /// virtual copy reason and are not counted as videos.
+    pub const VIRTUAL_COPY_IDS: [i64; 2] = [20, 21];
+    /// Photos with a missing original that are not videos: only photo 3.
+    pub const MISSING_ORIGINAL_IDS: [i64; 1] = [3];
+    pub const CONVERTED: i64 = 15;
+    /// Skipped photos: 3 videos + 1 missing + 2 virtual copies.
+    pub const SKIPPED: i64 = 6;
+}
+
 const SCHEMA: &str = "
 CREATE TABLE Adobe_variablesTable (id_local INTEGER PRIMARY KEY, id_global NOT NULL, name, type, value NOT NULL);
 CREATE TABLE AgLibraryRootFolder (id_local INTEGER PRIMARY KEY, id_global NOT NULL, absolutePath NOT NULL, name NOT NULL, relativePathFromCatalog);
@@ -370,6 +394,68 @@ fn add_keyword_edges(path: &Path) -> Result<()> {
             params![id, keyword, name.map(str::to_lowercase), name],
         )?;
     }
+    c.execute_batch("COMMIT")?;
+    Ok(())
+}
+
+/// Writes the small fixture plus videos as `dir/videos.lrcat` with placeholder
+/// originals (counts in [`video_edge`]). Returns the catalog path.
+///
+/// - photo 2: `fileFormat` VIDEO, extension `mov`, original missing
+/// - photo 4: `fileFormat` VIDEO, extension `mov`
+/// - photo 5: `fileFormat` JPG, extension `MP4` (video by extension only)
+/// - photo 6: `fileFormat` JPG, extension `mpo` (not a video)
+/// - photo 7: base name `clip.mp4`, extension `jpg` (not a video)
+/// - photo 21: virtual copy of video 4, `fileFormat` VIDEO
+///
+/// Photo 3 stays a non-video with a missing original.
+pub fn write_video_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("videos.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_video_edges(&catalog)?;
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+/// Number of keyword assignments (`AgLibraryKeywordImage` rows) of `photo`
+/// in the catalog at `path`. Opened read-only.
+pub fn assignments_to_photo(path: &Path, photo: i64) -> Result<i64> {
+    let c = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    c.query_row(
+        "SELECT COUNT(*) FROM AgLibraryKeywordImage WHERE image = ?1",
+        [photo],
+        |r| r.get(0),
+    )
+}
+
+fn add_video_edges(path: &Path) -> Result<()> {
+    let c = Connection::open(path)?;
+    c.execute_batch("BEGIN")?;
+    // (photo id, base name, extension, fileFormat). Photo ids equal file ids
+    // for photos 1..=19 in the small fixture.
+    for (id, base, ext, format) in [
+        (2, "IMG_0001", "mov", "VIDEO"),
+        (4, "IMG_0004", "mov", "VIDEO"),
+        (5, "IMG_0005", "MP4", "JPG"),
+        (6, "IMG_0006", "mpo", "JPG"),
+        (7, "clip.mp4", "jpg", "JPG"),
+    ] {
+        let name = format!("{base}.{ext}");
+        c.execute(
+            "UPDATE AgLibraryFile SET baseName = ?2, extension = ?3, idx_filename = ?4, \
+             lc_idx_filename = ?5, lc_idx_filenameExtension = ?6, originalFilename = ?4 \
+             WHERE id_local = ?1",
+            params![id, base, ext, name, name.to_lowercase(), ext.to_lowercase()],
+        )?;
+        c.execute(
+            "UPDATE Adobe_images SET fileFormat = ?2 WHERE id_local = ?1",
+            params![id, format],
+        )?;
+    }
+    // Virtual copy of video 4; it shares the file of photo 4.
+    add_photo(&c, 21, "IMG_0004", 4, Some(2), Some(4), 4)?;
+    c.execute_batch("UPDATE Adobe_images SET fileFormat = 'VIDEO' WHERE id_local = 21;")?;
     c.execute_batch("COMMIT")?;
     Ok(())
 }
