@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! Acceptance tests for the report of an aborted `--apply` (task P5-4d),
 //! against the stateful fake LightCraft in `tests/support`.
 //!

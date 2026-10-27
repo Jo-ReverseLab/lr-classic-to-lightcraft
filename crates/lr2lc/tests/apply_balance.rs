@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! CLI acceptance tests for the photo balance in EVERY run (task P5-4d,
 //! extension), against the stateful fake LightCraft.
 //!

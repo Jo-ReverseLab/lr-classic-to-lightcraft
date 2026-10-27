@@ -4,7 +4,7 @@
 use crate::dry_run::Converted;
 use crate::output::{ReasonJson, group_reasons};
 use anyhow::{Context, Result};
-use lc_writer::apply::{ApplySummary, apply};
+use lc_writer::apply::{Aborted, ApplySummary, apply_partial};
 use lc_writer::control::{ControlClient, WriteError, preflight};
 use lc_writer::plan::{Plan, Step, WriteInput};
 use lc_writer::state::{State, state_path};
@@ -28,20 +28,29 @@ pub enum WriterJson {
         keywords_created: usize,
         photos_imported: usize,
         photos_existing: usize,
+        photos_updated: usize,
+        photos_unchanged: usize,
         updates: usize,
         not_saved: usize,
         photos_skipped: Vec<ReasonJson>,
         photos_incomplete: Vec<ReasonJson>,
         keywords_skipped: Vec<ReasonJson>,
+        /// Why the run stopped early; absent after a complete run.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        aborted: Option<String>,
     },
 }
 
-/// Number of planned commands by kind.
+/// Number of planned commands by kind, and the known photos with and
+/// without updates. Every converted photo counts once in `photos`,
+/// `photos_updated`, `photos_unchanged` or the writer's skipped photos.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct PlannedJson {
     pub keywords: usize,
     pub photos: usize,
     pub updates: usize,
+    pub photos_updated: usize,
+    pub photos_unchanged: usize,
 }
 
 /// The writer input from the converted elements of the catalog.
@@ -64,7 +73,11 @@ pub fn load_state(library: Option<&Path>) -> Result<State> {
 
 /// Counts the steps of a plan by kind.
 pub fn planned(plan: &Plan) -> PlannedJson {
-    let mut out = PlannedJson::default();
+    let mut out = PlannedJson {
+        photos_updated: plan.photos_updated(),
+        photos_unchanged: plan.photos_unchanged(),
+        ..PlannedJson::default()
+    };
     for step in &plan.steps {
         match step {
             Step::CreateKeyword { .. } => out.keywords += 1,
@@ -84,17 +97,21 @@ pub fn planned_json(plan: &Plan) -> WriterJson {
     }
 }
 
-/// The report section of an applied run.
-pub fn applied_json(s: &ApplySummary) -> WriterJson {
+/// The report section of an applied run; `aborted` is the error that
+/// stopped it early.
+pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJson {
     WriterJson::Applied {
         keywords_created: s.keywords_created,
         photos_imported: s.photos_imported,
         photos_existing: s.photos_existing,
+        photos_updated: s.photos_updated,
+        photos_unchanged: s.photos_unchanged,
         updates: s.updates,
         not_saved: s.not_saved,
         photos_skipped: reasons(&s.photos_skipped),
         photos_incomplete: reasons(&s.photos_incomplete),
         keywords_skipped: reasons(&s.keywords_skipped),
+        aborted: aborted.map(WriteError::short_reason),
     }
 }
 
@@ -123,8 +140,14 @@ pub fn planned_summary(plan: &Plan) -> String {
 pub fn applied_summary(s: &ApplySummary) -> String {
     let mut out = format!(
         "written: keywords created {}, photos imported {}, photos already in the library {}, \
-         updates {}, not yet saved by LightCraft {}\n",
-        s.keywords_created, s.photos_imported, s.photos_existing, s.updates, s.not_saved
+         photos updated {}, photos unchanged {}, updates {}, not yet saved by LightCraft {}\n",
+        s.keywords_created,
+        s.photos_imported,
+        s.photos_existing,
+        s.photos_updated,
+        s.photos_unchanged,
+        s.updates,
+        s.not_saved
     );
     let _ = writeln!(
         out,
@@ -157,23 +180,34 @@ pub struct Target<'a> {
     pub allow_xmp: bool,
 }
 
-/// Connects, runs the pre-flight checks and writes `input`.
-pub fn write(target: &Target<'_>, input: &WriteInput, mut state: State) -> Result<ApplySummary> {
+/// Connects, runs the pre-flight checks and writes `input`. A run that
+/// stops hands back the numbers up to the stop; they are all 0 when the
+/// connection or the pre-flight checks fail.
+pub fn write(
+    target: &Target<'_>,
+    input: &WriteInput,
+    mut state: State,
+) -> Result<ApplySummary, Aborted> {
+    let before_writing = |error| Aborted {
+        error,
+        summary: Box::default(),
+    };
     let state_file = state_path(target.library);
-    let result = ControlClient::connect(target.port).and_then(|mut client| {
-        preflight(&mut client, target.library, target.allow_xmp)?;
-        apply(&mut client, input, &mut state, &state_file)
-    });
-    result.map_err(|e| {
-        let hint = match &e {
-            WriteError::ConnectionLost { .. } => {
-                "; outcome unknown, run again; lr2lc re-checks the state"
-            }
-            WriteError::Connect { .. } => "; is LightCraft running with the control port enabled?",
-            _ => "",
-        };
-        anyhow::anyhow!("writing to LightCraft stopped: {e}{hint}")
-    })
+    let mut client = ControlClient::connect(target.port).map_err(before_writing)?;
+    preflight(&mut client, target.library, target.allow_xmp).map_err(before_writing)?;
+    apply_partial(&mut client, input, &mut state, &state_file)
+}
+
+/// The error message of a run that stopped, with a hint what to do.
+pub fn stop_error(e: &WriteError) -> anyhow::Error {
+    let hint = match e {
+        WriteError::ConnectionLost { .. } => {
+            "; outcome unknown, run again; lr2lc re-checks the state"
+        }
+        WriteError::Connect { .. } => "; is LightCraft running with the control port enabled?",
+        _ => "",
+    };
+    anyhow::anyhow!("writing to LightCraft stopped: {e}{hint}")
 }
 
 #[cfg(test)]
@@ -201,7 +235,8 @@ mod tests {
             PlannedJson {
                 keywords: 0,
                 photos: 2,
-                updates: 1
+                updates: 1,
+                ..PlannedJson::default()
             }
         );
         let text = planned_summary(&p);
@@ -215,7 +250,8 @@ mod tests {
         assert_eq!(
             v,
             serde_json::json!({
-                "planned": {"keywords": 0, "photos": 0, "updates": 0},
+                "planned": {"keywords": 0, "photos": 0, "updates": 0,
+                        "photos_updated": 0, "photos_unchanged": 0},
                 "photos_skipped": [],
                 "keywords_skipped": [],
             })
@@ -226,10 +262,55 @@ mod tests {
             }],
             ..ApplySummary::default()
         };
-        let v = serde_json::to_value(applied_json(&s)).unwrap();
+        let v = serde_json::to_value(applied_json(&s, None)).unwrap();
         assert_eq!(v["photos_incomplete"][0]["reason"], "photo 3: x");
         assert_eq!(v["not_saved"], 0);
+        assert_eq!(v["photos_updated"], 0);
+        assert_eq!(v["photos_unchanged"], 0);
         assert!(v["keywords_skipped"].is_array());
+        assert!(v.get("aborted").is_none());
+    }
+
+    #[test]
+    fn aborted_run_has_a_short_reason() {
+        let lost = WriteError::ConnectionLost {
+            command: "library.import".into(),
+        };
+        let v = serde_json::to_value(applied_json(&ApplySummary::default(), Some(&lost))).unwrap();
+        assert_eq!(
+            v["aborted"],
+            "connection lost during library.import; outcome unknown"
+        );
+    }
+
+    #[test]
+    fn dry_run_counts_known_photos_once() {
+        let photos = vec![
+            Photo::new("a.jpg", 1, Rating::new(2).unwrap()).with_global_id("a"),
+            Photo::new("b.jpg", 2, Rating::default()).with_global_id("b"),
+            Photo::new("c.jpg", 3, Rating::default()).with_global_id("c"),
+            Photo::new("d.jpg", 4, Rating::default()),
+        ];
+        let mut state = State::default();
+        let fresh = lc_writer::state::PhotoFields::imported_default();
+        state.record("a", 1, serde_json::json!(1), fresh.clone());
+        state.record("b", 2, serde_json::json!(2), fresh);
+        let input = WriteInput {
+            photos,
+            ..WriteInput::default()
+        };
+        let plan = lc_writer::plan::plan(&input, &state, &Default::default());
+        let p = planned(&plan);
+        assert_eq!((p.photos, p.photos_updated, p.photos_unchanged), (1, 1, 1));
+        let skipped = plan.photo_skips().len();
+        assert_eq!(
+            p.photos + p.photos_updated + p.photos_unchanged + skipped,
+            input.photos.len()
+        );
+        assert!(
+            planned_summary(&plan)
+                .starts_with("writer: keywords to create 0, photos to import 1, updates 1\n")
+        );
     }
 
     #[test]

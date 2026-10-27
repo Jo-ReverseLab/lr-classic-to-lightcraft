@@ -99,7 +99,7 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
             .with_context(|| format!("cannot write script to {}", given.display()))?;
     }
 
-    let (text, json) = match (&options.library, options.apply) {
+    let (text, json, stop) = match (&options.library, options.apply) {
         (Some(library), true) => {
             if !outcome.catalog_unchanged {
                 bail!(
@@ -113,15 +113,24 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
                 port: options.port,
                 allow_xmp: options.allow_xmp,
             };
-            let summary = writer::write(&target, &input, state)?;
+            // A run that stops still reports what it did (Principle 4).
+            let (summary, stop) = match writer::write(&target, &input, state) {
+                Ok(summary) => (summary, None),
+                Err(aborted) => (*aborted.summary, Some(aborted.error)),
+            };
             (
                 writer::applied_summary(&summary),
-                writer::applied_json(&summary),
+                writer::applied_json(&summary, stop.as_ref()),
+                stop,
             )
         }
         _ => {
             print!("{}", output::summary_with(&outcome, true));
-            (writer::planned_summary(&plan), writer::planned_json(&plan))
+            (
+                writer::planned_summary(&plan),
+                writer::planned_json(&plan),
+                None,
+            )
         }
     };
     print!("{text}");
@@ -133,6 +142,9 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
         let report = output::report_json_with(&outcome, !options.apply, Some(&json));
         report_file::write(target, &report)
             .with_context(|| format!("cannot write report to {}", given.display()))?;
+    }
+    if let Some(e) = stop {
+        return Err(writer::stop_error(&e));
     }
     if !outcome.catalog_unchanged {
         bail!("the catalog changed during the run (checksum differs); is Lightroom running?");
