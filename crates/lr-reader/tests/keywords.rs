@@ -81,6 +81,10 @@ fn kw(parts: &[&str]) -> Keyword {
     Keyword::new(parts.iter().map(|s| s.to_string()).collect()).unwrap()
 }
 
+fn paths(keywords: &[Keyword]) -> Vec<Vec<String>> {
+    keywords.iter().map(|k| k.path().to_vec()).collect()
+}
+
 fn reasons(report: &Report) -> Vec<String> {
     report
         .skipped_items()
@@ -155,7 +159,8 @@ fn keywords_have_full_paths_root_first() {
         kw(&["Family"]),                               // 13
         kw(&["Alice Example"]),                        // 19 (person)
     ];
-    assert_eq!(r.data.keywords, expected);
+    // Compare paths only: synonyms are tested in keyword_synonyms.rs.
+    assert_eq!(paths(&r.data.keywords), paths(&expected));
     let max_depth = r.data.keywords.iter().map(|k| k.path().len()).max();
     assert_eq!(max_depth, Some(small::KEYWORD_MAX_DEPTH as usize));
 }
@@ -263,25 +268,32 @@ fn skipped_photo_has_no_keyword_entry() {
 fn photos_get_their_keyword_lists() {
     let dir = tempfile::tempdir().unwrap();
     let r = run(&edge_fixture(dir.path()));
-    let a = &r.data.assignments;
-    assert_eq!(a[&1], vec![kw(&["Travel"]), kw(&["Travel", "Italy"])]);
+    // Compare paths only: keyword 3 (Italy) carries synonyms in this fixture.
+    let a: std::collections::BTreeMap<i64, Vec<Vec<String>>> = r
+        .data
+        .assignments
+        .iter()
+        .map(|(photo, list)| (*photo, paths(list)))
+        .collect();
+    let p = |parts: &[&str]| kw(parts).path().to_vec();
+    assert_eq!(a[&1], vec![p(&["Travel"]), p(&["Travel", "Italy"])]);
     assert_eq!(
         a[&5],
         vec![
-            kw(&["Travel", "Italy", "Rome"]),
-            kw(&["Travel", "Italy", "Rome", "Colosseum"]),
-            kw(&["Alice Example"]),
+            p(&["Travel", "Italy", "Rome"]),
+            p(&["Travel", "Italy", "Rome", "Colosseum"]),
+            p(&["Alice Example"]),
         ]
     );
     assert_eq!(
         a[&2],
         vec![
-            kw(&["Travel", "Italy", "Rome", "Colosseum"]),
-            kw(&["Travel", "Köln"])
+            p(&["Travel", "Italy", "Rome", "Colosseum"]),
+            p(&["Travel", "Köln"])
         ]
     );
     // Photo 4: Family (kept), the empty keyword 12 is dropped.
-    assert_eq!(a[&4], vec![kw(&["Family"]), kw(&["Travel"])]);
+    assert_eq!(a[&4], vec![p(&["Family"]), p(&["Travel"])]);
 }
 
 #[test]
