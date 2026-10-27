@@ -1,6 +1,7 @@
 //! Reads Lightroom Classic catalogs into the neutral model.
 
 mod catalog;
+mod collections;
 mod folders;
 mod originals;
 mod photos;
