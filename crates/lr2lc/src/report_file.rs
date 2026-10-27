@@ -124,7 +124,15 @@ fn identity(path: &Path) -> Option<(u64, u64)> {
 fn identity(path: &Path) -> Option<String> {
     fs::canonicalize(path)
         .ok()
-        .map(|p| p.to_string_lossy().to_lowercase())
+        .map(|p| case_insensitive_key(&p))
+}
+
+/// Comparison key for a path on a case-insensitive file system: the same
+/// file spelled with different letter case yields the same key. Compiled on
+/// every platform for tests, used by `identity` outside Unix.
+#[cfg(any(not(unix), test))]
+fn case_insensitive_key(path: &Path) -> String {
+    path.to_string_lossy().to_lowercase()
 }
 
 /// True if the existing file `path` is the same file as one of the existing
@@ -219,6 +227,31 @@ mod tests {
         let cat = dir.path().join("cat.lrcat");
         fs::write(&cat, b"SQLite format 3\0").unwrap();
         (dir, cat)
+    }
+
+    #[test]
+    fn case_insensitive_key_ignores_letter_case() {
+        assert_eq!(
+            case_insensitive_key(Path::new(r"C:\Data\Cat.lrcat")),
+            case_insensitive_key(Path::new(r"c:\data\cat.LRCAT"))
+        );
+        assert_eq!(
+            case_insensitive_key(Path::new("/Data/Cat.lrcat-WAL")),
+            case_insensitive_key(Path::new("/data/cat.lrcat-wal"))
+        );
+    }
+
+    #[test]
+    fn case_insensitive_key_keeps_different_files_apart() {
+        let cat = case_insensitive_key(Path::new(r"C:\Data\Cat.lrcat"));
+        for other in [
+            r"C:\Data\Cat.lrcat-wal",
+            r"C:\Data\Cat2.lrcat",
+            r"D:\Data\Cat.lrcat",
+            r"C:\Other\Cat.lrcat",
+        ] {
+            assert_ne!(cat, case_insensitive_key(Path::new(other)), "{other}");
+        }
     }
 
     #[test]
