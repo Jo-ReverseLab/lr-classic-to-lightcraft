@@ -2,7 +2,7 @@
 
 lr2lc converts Adobe Lightroom Classic catalogs (`.lrcat`) into LightCraft libraries. It is a Rust command-line tool. It is not affiliated with Adobe.
 
-First release (MVP): folders, photos (as references to the existing files), keywords including hierarchy, and star ratings (0–5). Development settings follow in a later phase and are the project's main differentiator.
+First release (MVP): folders, photos (as references to the existing files; videos are skipped with a reason because LightCraft cannot read them), keywords including hierarchy, synonyms and keyword attributes, star ratings (0–5), pick/reject flags, color labels (mapped via a label set), collections as albums and collection sets as album folders, smart collections as smart albums (untranslatable rules are reported, never half-translated), stacks, the quick collection, title and caption, stable identity via Lightroom's global ids, and a safe re-sync that only adds and never silently overwrites (including removed and renamed items). Development settings follow in a later phase and are the project's main differentiator.
 
 ## Principles
 
@@ -15,7 +15,7 @@ These rules decide every design question. Code that breaks one of them is not me
 5. **Idempotent.** A second run creates no duplicate photos or keywords. Every photo carries its Lightroom id as provenance.
 6. **Runs everywhere.** macOS, Linux and Windows. Platform-neutral paths (`std::path`), nothing hard-coded. A path mapping (old prefix → new prefix) handles moved catalogs and photo folders.
 7. **Three separate parts.** Reader (Lightroom) → neutral model → writer (LightCraft). Each side is tested on its own and can be replaced.
-8. **Use LightCraft's official interfaces** (engine or CLI) rather than writing to its library directly, if the research phase confirms this is possible.
+8. **Use LightCraft's official interfaces** rather than writing to its library directly: import through the control port of the running app by default, with `lightcraft-cli` as fallback.
 9. **User data stays private.** Real catalogs and anything extracted from them never enter the repository. Tests use generated test catalogs; a generator produces large catalogs for performance tests.
 10. **Small and readable.** Rust stable, `cargo fmt`, `cargo clippy -- -D warnings`, no `unsafe`, few dependencies.
 11. **Ready to publish from the first commit.** English everywhere (code, comments, docs, commit messages). No personal paths, names or data in code or history. "Lightroom" only as a compatibility statement, never in the project name.
