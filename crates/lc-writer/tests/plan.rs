@@ -2,11 +2,11 @@
 //!
 //! API under test (see also `tests/state.rs`):
 //! - `WriteInput { photos, keywords, photo_keywords: BTreeMap<i64, Vec<Keyword>> }`
-//!   (key = `Photo::lightroom_id`; parent keywords are listed in `keywords`);
+//!   (key = `Photo::lightroom_id`; missing ancestors are created implicitly);
 //! - `plan(&WriteInput, &State, &BTreeSet<String>) -> Plan` with
 //!   `Plan { steps, skipped }`, `Step::{CreateKeyword{path,params},
 //!   Import{global_id,path}, Update{global_id,command,params}}`,
-//!   `Skipped { reason: String }`;
+//!   `model::Skipped { reason: String }` (no own type);
 //! - `Plan::to_script(&self, &State) -> String`: one JSON line per step,
 //!   `{"method":"engine.execute","params":{"command":..,"params":..}}`; an
 //!   update carries `ids` (`[<lightcraft_id>]` if known, else `["lr:<gid>"]`).
@@ -872,4 +872,61 @@ fn planning_does_not_modify_the_state() {
     let before = state.clone();
     let _ = plan(&inp, &state, &none());
     assert_eq!(state, before);
+}
+
+#[test]
+fn missing_ancestors_are_created_implicitly_with_default_attributes() {
+    let child = kw(&["a", "b"]);
+    let inp = WriteInput {
+        photos: vec![photo("g1", 1, 0)],
+        keywords: vec![],
+        photo_keywords: BTreeMap::from([(1, vec![child])]),
+    };
+    let p = plan(&inp, &State::default(), &none());
+    let created: Vec<(&str, &Value)> = p
+        .steps
+        .iter()
+        .filter_map(|s| match s {
+            Step::CreateKeyword { path, params } => Some((path.as_str(), params)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(created.len(), 2);
+    assert_eq!(created[0].0, "a");
+    assert_eq!(created[1].0, "a|b");
+    assert_eq!(
+        created[0].1,
+        &json!({
+            "name": "a",
+            "parent": null,
+            "synonyms": [],
+            "includeOnExport": true,
+            "exportContaining": true,
+            "exportSynonyms": true,
+            "person": false
+        })
+    );
+    assert_eq!(created[1].1["parent"], json!("a"));
+}
+
+#[test]
+fn ancestor_known_to_the_library_or_state_is_not_created_again() {
+    let inp = WriteInput {
+        photos: vec![],
+        keywords: vec![],
+        photo_keywords: BTreeMap::from([(1, vec![kw(&["a", "b", "c"])])]),
+    };
+    let existing: BTreeSet<String> = ["a".to_string()].into();
+    let mut state = State::default();
+    state.record_keyword(&kw(&["a", "b"]));
+    let p = plan(&inp, &state, &existing);
+    let paths: Vec<&str> = p
+        .steps
+        .iter()
+        .filter_map(|s| match s {
+            Step::CreateKeyword { path, .. } => Some(path.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(paths, vec!["a|b|c"]);
 }
