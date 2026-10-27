@@ -12,7 +12,7 @@ only to describe compatibility.
 Early development. The dry run reads folders and photos from a catalog,
 applies path mappings and checks that the original files exist. It also
 reads keywords with their hierarchy and synonyms, their assignments to
-photos and the star ratings. Collections are read and counted, but not converted yet: each
+photos, the star ratings and the pick/reject flags. Collections are read and counted, but not converted yet: each
 one is listed as skipped.
 Writing to LightCraft (`--apply`) is not implemented yet.
 
@@ -38,8 +38,9 @@ many folders, photos, collections, keywords, keyword assignments and keyword
 synonyms it read,
 how many it would convert and how many it skips, with the reasons grouped.
 A line `videos: skipped N` follows, then a line with keyword attribute
-counts, and a last line shows how many of the converted photos have 0 to 5
-stars (unrated photos count as 0):
+counts, a line shows how many of the converted photos have 0 to 5
+stars (unrated photos count as 0), and a last line counts their pick/reject
+flags:
 
 ```text
 keywords: read 12, would convert 11, skipped 1
@@ -48,6 +49,7 @@ keyword synonyms: read 4, would convert 3, skipped 1
 videos: skipped 2
 keyword attributes: persons 0, not exported 0, no parents on export 0, no synonyms on export 0, unknown type 0, unused 1
 ratings: 0: 6, 1: 3, 2: 2, 3: 3, 4: 2, 5: 1
+flags: pick 4, reject 2, none 11, unknown 0
 ```
 
 LightCraft cannot read videos, so they are skipped with the reason
@@ -55,6 +57,11 @@ LightCraft cannot read videos, so they are skipped with the reason
 Lightroom stores its format as `VIDEO` or its file extension is one of mov,
 mp4, m4v, avi, mts, m2ts, 3gp, mpg, mpeg, wmv or mkv (any letter case).
 Virtual copies keep their own reason, even of a video.
+
+Each photo keeps its flag: picked, rejected or none. A stored flag value
+other than pick, reject or none is converted as no flag and counted as
+`unknown`; the photo itself is still converted. The four flag counts add up
+to the converted photos.
 
 Photos and keywords are identified by Lightroom's global id, which, unlike the
 internal row id, does not depend on the order in which rows were stored. This keeps repeated runs from creating duplicates. A photo or keyword
@@ -115,7 +122,8 @@ Writes a machine-readable report to `FILE` after the run:
     "read": 3,
     "converted": 2,
     "skipped": [{ "reason": "photo 7: original file is missing" }],
-    "videos": 0
+    "videos": 0,
+    "flags": { "pick": 1, "reject": 0, "none": 1, "unknown": 0 }
   },
   "collections": {
     "read": 1,
@@ -151,7 +159,9 @@ For each area, `read` equals `converted` plus the number of `skipped`
 entries. Reasons name the catalog id, never a file path, a collection
 name, a keyword or a synonym. `ratings` always has the keys `"0"` to `"5"`; the
 counts add up to `photos.converted`. `photos.videos` is the number of
-skipped videos; they are also listed in `photos.skipped`. The six attribute
+skipped videos; they are also listed in `photos.skipped`. `photos.flags`
+counts the converted photos per flag; `none` does not include `unknown`, so
+the four counts add up to `photos.converted`. The six attribute
 counts in `keywords` cover converted keywords only, like the summary line.
 
 To protect the catalog and your files, `FILE` is checked before anything is
