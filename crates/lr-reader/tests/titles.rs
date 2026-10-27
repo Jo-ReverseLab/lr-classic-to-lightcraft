@@ -117,7 +117,6 @@ fn broken_blobs_give_none_keep_the_photo_and_are_listed() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn photos_and_counts_are_unchanged_by_titles() {
     let (_d, _c, data, report) = read();
     let plain_dir = tempfile::tempdir().unwrap();
@@ -131,8 +130,12 @@ fn photos_and_counts_are_unchanged_by_titles() {
     assert!(plain_data.title_unreadable.is_empty());
     let with = data.photos.iter().filter(|p| p.title.is_some()).count();
     assert_eq!(with as i64, e::TITLES + 1); // photo 2 is returned by the reader; only the CLI skips it (missing file)
-    for id in e::SKIPPED_IDS {
-        assert!(title(&data, id).is_none() || id == 2 || id == 3);
+    for p in data
+        .photos
+        .iter()
+        .filter(|p| e::SKIPPED_IDS.contains(&p.lightroom_id))
+    {
+        assert!(p.title.is_none() || p.lightroom_id == 2 || p.lightroom_id == 3);
     }
 }
 
