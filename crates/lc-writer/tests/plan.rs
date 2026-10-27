@@ -720,7 +720,6 @@ fn update_params_never_contain_ids() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4e: the script has a library.select line"]
 fn script_has_one_valid_json_line_per_step() {
     let inp = input(vec![full_photo()], vec![(1, vec![kw(&["A", "B"])])]);
     let state = State::default();
@@ -739,7 +738,6 @@ fn script_has_one_valid_json_line_per_step() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4e: the script has a library.select line"]
 fn script_uses_a_placeholder_id_for_new_photos() {
     let inp = input(vec![full_photo()], vec![]);
     let state = State::default();
@@ -757,7 +755,6 @@ fn script_uses_a_placeholder_id_for_new_photos() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4e: the script has a library.select line"]
 fn script_uses_the_real_id_for_known_photos() {
     let inp = input(vec![full_photo()], vec![]);
     let state = recorded(&inp);

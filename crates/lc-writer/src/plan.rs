@@ -101,15 +101,32 @@ impl Plan {
     }
 
     /// The plan as a script: one JSON line per step, each an
-    /// `engine.execute` request. Photo updates carry `ids`: the known
-    /// LightCraft id, or the placeholder `lr:<global id>` for a photo that
-    /// is imported by this plan.
+    /// `engine.execute` request, plus one `library.select` line before the
+    /// updates of each photo (LightCraft runs photo commands only on a
+    /// selection). Selects and updates carry `ids`: the known LightCraft
+    /// id, or the placeholder `lr:<global id>` for a photo that is imported
+    /// by this plan.
     pub fn to_script(&self, state: &State) -> String {
         let mut out = String::new();
+        let mut push = |command: &str, params: Value| {
+            let line = json!({
+                "method": "engine.execute",
+                "params": {"command": command, "params": params},
+            });
+            out.push_str(&line.to_string());
+            out.push('\n');
+        };
+        let mut selected: Option<&str> = None;
         for step in &self.steps {
-            let (command, params) = match step {
-                Step::CreateKeyword { params, .. } => ("keyword.create", params.clone()),
-                Step::Import { path, .. } => ("library.import", import_params(path)),
+            match step {
+                Step::CreateKeyword { params, .. } => {
+                    selected = None;
+                    push("keyword.create", params.clone());
+                }
+                Step::Import { path, .. } => {
+                    selected = None;
+                    push("library.import", import_params(path));
+                }
                 Step::Update {
                     global_id,
                     command,
@@ -119,19 +136,17 @@ impl Plan {
                         || Value::String(format!("lr:{global_id}")),
                         |e| e.lightcraft_id.clone(),
                     );
+                    if selected != Some(global_id.as_str()) {
+                        selected = Some(global_id);
+                        push("library.select", select_params(&id));
+                    }
                     let mut params = params.clone();
                     if let Value::Object(map) = &mut params {
                         map.insert("ids".to_string(), json!([id]));
                     }
-                    (command.as_str(), params)
+                    push(command, params);
                 }
-            };
-            let line = json!({
-                "method": "engine.execute",
-                "params": {"command": command, "params": params},
-            });
-            out.push_str(&line.to_string());
-            out.push('\n');
+            }
         }
         out
     }
@@ -142,6 +157,12 @@ impl Plan {
 pub fn import_params(path: &std::path::Path) -> Value {
     // The plan only creates imports for paths that are valid UTF-8.
     json!({"paths": [path.to_string_lossy()], "mode": "add"})
+}
+
+/// The parameters that select exactly one photo and make it the active
+/// one; LightCraft runs `photo.*` commands only on a selection.
+pub fn select_params(id: &Value) -> Value {
+    json!({"ids": [id], "active": id})
 }
 
 /// Computes the commands that bring the library up to date.
@@ -478,13 +499,75 @@ mod tests {
             }],
             ..Plan::default()
         };
-        let line: Value = serde_json::from_str(plan.to_script(&State::default()).trim()).unwrap();
+        let script = plan.to_script(&State::default());
+        let lines: Vec<Value> = script
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
         assert_eq!(
-            line,
-            json!({"method": "engine.execute", "params": {
-                "command": "photo.rate",
-                "params": {"rating": 1, "ids": ["lr:g"]}
-            }})
+            lines,
+            [
+                json!({"method": "engine.execute", "params": {
+                    "command": "library.select",
+                    "params": {"ids": ["lr:g"], "active": "lr:g"}
+                }}),
+                json!({"method": "engine.execute", "params": {
+                    "command": "photo.rate",
+                    "params": {"rating": 1, "ids": ["lr:g"]}
+                }}),
+            ]
         );
+    }
+
+    #[test]
+    fn script_selects_once_per_photo_before_its_updates() {
+        let update = |gid: &str, command: &str| Step::Update {
+            global_id: gid.into(),
+            command: command.into(),
+            params: json!({}),
+        };
+        let plan = Plan {
+            steps: vec![
+                update("a", "photo.rate"),
+                update("a", "photo.flag"),
+                Step::Import {
+                    global_id: "b".into(),
+                    path: PathBuf::from("b.jpg"),
+                },
+                update("b", "photo.rate"),
+                update("c", "photo.label"),
+            ],
+            ..Plan::default()
+        };
+        let mut state = State::default();
+        state.record("a", 1, json!(7), PhotoFields::imported_default());
+        let commands: Vec<(String, Value)> = plan
+            .to_script(&state)
+            .lines()
+            .map(|l| {
+                let v: Value = serde_json::from_str(l).unwrap();
+                (
+                    v["params"]["command"].as_str().unwrap().to_string(),
+                    v["params"]["params"]["ids"].clone(),
+                )
+            })
+            .collect();
+        let names: Vec<&str> = commands.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "library.select",
+                "photo.rate",
+                "photo.flag",
+                "library.import",
+                "library.select",
+                "photo.rate",
+                "library.select",
+                "photo.label",
+            ]
+        );
+        assert_eq!(commands[0].1, json!([7]));
+        assert_eq!(commands[4].1, json!(["lr:b"]));
+        assert_eq!(commands[6].1, json!(["lr:c"]));
     }
 }
