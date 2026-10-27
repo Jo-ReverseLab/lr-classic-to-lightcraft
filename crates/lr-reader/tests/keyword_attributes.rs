@@ -54,14 +54,12 @@ fn flags(k: &Keyword) -> (bool, bool, bool, bool) {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn new_keyword_has_lightroom_defaults() {
     let k = Keyword::new(vec!["A".into()]).unwrap();
     assert_eq!(flags(&k), (true, true, true, false));
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn all_eight_flag_combinations_are_read() {
     let (_d, data) = attr();
     for n in 0..8_i64 {
@@ -72,7 +70,6 @@ fn all_eight_flag_combinations_are_read() {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn person_keywords_are_marked() {
     let (_d, data) = attr();
     assert_eq!(flags(by_id(&data, 22)), (true, true, true, true));
@@ -80,7 +77,6 @@ fn person_keywords_are_marked() {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn unknown_types_are_converted_without_person_flag() {
     let (_d, data) = attr();
     // Wrong case is not a person.
@@ -89,7 +85,6 @@ fn unknown_types_are_converted_without_person_flag() {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn unknown_type_count_covers_converted_keywords_only() {
     let (_d, data) = attr();
     // 24 and 25 count; the skipped keyword 28 (type `weird`) does not.
@@ -97,7 +92,6 @@ fn unknown_type_count_covers_converted_keywords_only() {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn non_zero_flag_values_mean_true() {
     let (_d, data) = attr();
     assert_eq!(flags(by_id(&data, 26)), (true, true, true, false));
@@ -116,7 +110,6 @@ fn skipped_keyword_is_not_in_the_result() {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn counts_over_the_result_match_the_fixture_constants() {
     let (_d, data) = attr();
     let n = |f: &dyn Fn(&Keyword) -> bool| data.keywords.iter().filter(|k| f(k)).count() as i64;
@@ -127,7 +120,6 @@ fn counts_over_the_result_match_the_fixture_constants() {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn small_fixture_keywords_have_defaults() {
     // The small fixture has NULL types and all flags 1.
     let dir = tempfile::tempdir().unwrap();
@@ -155,7 +147,6 @@ fn reading_leaves_the_catalog_unchanged() {
 }
 
 #[test]
-#[ignore = "waiting for P5-7"]
 fn missing_attribute_columns_are_reported() {
     for column in [
         "includeOnExport",

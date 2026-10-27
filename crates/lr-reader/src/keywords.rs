@@ -24,6 +24,50 @@ pub struct KeywordData {
     /// converted; the converted synonyms are those in
     /// [`Keyword::synonyms`] of [`KeywordData::keywords`].
     pub synonym_report: Report,
+    /// Number of converted keywords whose `keywordType` is neither NULL nor
+    /// `person`. They are converted without the person attribute.
+    pub unknown_type: usize,
+}
+
+/// The kind of a keyword (`AgLibraryKeyword.keywordType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeywordType {
+    /// NULL: an ordinary keyword.
+    Plain,
+    /// Exactly `person`.
+    Person,
+    /// Any other value.
+    Unknown,
+}
+
+/// The attributes of one `AgLibraryKeyword` row.
+#[derive(Debug, Clone, Copy)]
+struct Attributes {
+    include_on_export: bool,
+    export_containing: bool,
+    export_synonyms: bool,
+    kind: KeywordType,
+}
+
+impl Default for Attributes {
+    fn default() -> Self {
+        Attributes {
+            include_on_export: true,
+            export_containing: true,
+            export_synonyms: true,
+            kind: KeywordType::Plain,
+        }
+    }
+}
+
+impl Attributes {
+    /// Copies the attributes onto a converted keyword.
+    fn apply(&self, keyword: &mut Keyword) {
+        keyword.include_on_export = self.include_on_export;
+        keyword.export_containing = self.export_containing;
+        keyword.export_synonyms = self.export_synonyms;
+        keyword.person = self.kind == KeywordType::Person;
+    }
 }
 
 /// One `AgLibraryKeywordSynonym` row.
@@ -42,6 +86,7 @@ struct KeywordRow {
     /// `None` if the name is NULL.
     name: Option<String>,
     parent: Option<i64>,
+    attributes: Attributes,
 }
 
 /// One `AgLibraryKeywordImage` row.
@@ -73,6 +118,8 @@ impl Catalog {
         let resolved = resolve_keywords(&rows, root);
 
         let known: HashSet<i64> = rows.iter().map(|r| r.id).collect();
+        let attributes: HashMap<i64, Attributes> =
+            rows.iter().map(|r| (r.id, r.attributes)).collect();
         let mut synonym_report = Report::new();
         let mut synonyms = group_synonyms(
             &self.synonym_rows()?,
@@ -83,11 +130,17 @@ impl Catalog {
 
         let mut keywords = Vec::new();
         let mut by_id = HashMap::new();
+        let mut unknown_type = 0;
         for (id, result) in resolved {
             keyword_report.read();
             match result {
                 Ok(mut keyword) => {
                     keyword.synonyms = synonyms.remove(&id).unwrap_or_default();
+                    let attrs = attributes[&id];
+                    attrs.apply(&mut keyword);
+                    if attrs.kind == KeywordType::Unknown {
+                        unknown_type += 1;
+                    }
                     by_id.insert(id, keyword.clone());
                     keywords.push(keyword);
                 }
@@ -106,6 +159,7 @@ impl Catalog {
             keywords,
             assignments,
             synonym_report,
+            unknown_type,
         })
     }
 
@@ -128,7 +182,10 @@ impl Catalog {
     fn keyword_rows(&self) -> Result<Vec<KeywordRow>, ReadError> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id_local, name, parent FROM AgLibraryKeyword ORDER BY id_local")
+            .prepare(
+                "SELECT id_local, name, parent, includeOnExport, includeParents, \
+                 includeSynonyms, keywordType FROM AgLibraryKeyword ORDER BY id_local",
+            )
             .map_err(ReadError::Query)?;
         let rows = stmt
             .query_map([], |row| {
@@ -136,6 +193,12 @@ impl Catalog {
                     id: row.get(0)?,
                     name: value_as_text(row.get(1)?),
                     parent: row.get(2)?,
+                    attributes: Attributes {
+                        include_on_export: value_as_flag(&row.get(3)?),
+                        export_containing: value_as_flag(&row.get(4)?),
+                        export_synonyms: value_as_flag(&row.get(5)?),
+                        kind: value_as_type(&row.get(6)?),
+                    },
                 })
             })
             .map_err(ReadError::Query)?;
@@ -186,6 +249,27 @@ fn value_as_id(value: &Value) -> Option<i64> {
         Value::Real(f) if f.fract() == 0.0 => Some(*f as i64),
         Value::Text(t) => t.trim().parse().ok(),
         _ => None,
+    }
+}
+
+/// Reads an export flag: zero is false; any other number and NULL are true,
+/// as is a value that is not a number.
+fn value_as_flag(value: &Value) -> bool {
+    match value {
+        Value::Integer(n) => *n != 0,
+        Value::Real(f) => *f != 0.0,
+        Value::Text(t) => t.trim().parse::<f64>() != Ok(0.0),
+        Value::Null | Value::Blob(_) => true,
+    }
+}
+
+/// Reads `keywordType`: NULL is a plain keyword, exactly `person` a person,
+/// anything else unknown.
+fn value_as_type(value: &Value) -> KeywordType {
+    match value {
+        Value::Null => KeywordType::Plain,
+        Value::Text(t) if t == "person" => KeywordType::Person,
+        _ => KeywordType::Unknown,
     }
 }
 
@@ -368,6 +452,7 @@ mod tests {
             id,
             name: name.map(str::to_owned),
             parent,
+            attributes: Attributes::default(),
         }
     }
 
@@ -612,6 +697,64 @@ mod tests {
                 assert!(!reason.contains(text), "{reason}");
             }
         }
+    }
+
+    #[test]
+    fn flag_values() {
+        assert!(!value_as_flag(&Value::Integer(0)));
+        assert!(value_as_flag(&Value::Integer(1)));
+        assert!(value_as_flag(&Value::Integer(-1)));
+        assert!(value_as_flag(&Value::Integer(7)));
+        assert!(!value_as_flag(&Value::Real(0.0)));
+        assert!(value_as_flag(&Value::Real(0.5)));
+        assert!(!value_as_flag(&Value::Text(" 0 ".into())));
+        assert!(value_as_flag(&Value::Text("2".into())));
+        assert!(value_as_flag(&Value::Text("x".into())));
+        assert!(value_as_flag(&Value::Null));
+    }
+
+    #[test]
+    fn type_values() {
+        assert_eq!(value_as_type(&Value::Null), KeywordType::Plain);
+        assert_eq!(
+            value_as_type(&Value::Text("person".into())),
+            KeywordType::Person
+        );
+        for other in [
+            Value::Text("Person".into()),
+            Value::Text(" person".into()),
+            Value::Text(String::new()),
+            Value::Integer(1),
+        ] {
+            assert_eq!(value_as_type(&other), KeywordType::Unknown);
+        }
+    }
+
+    #[test]
+    fn attributes_are_applied() {
+        let mut k = kw(&["A"]);
+        Attributes {
+            include_on_export: false,
+            export_containing: true,
+            export_synonyms: false,
+            kind: KeywordType::Person,
+        }
+        .apply(&mut k);
+        assert_eq!(
+            (
+                k.include_on_export,
+                k.export_containing,
+                k.export_synonyms,
+                k.person
+            ),
+            (false, true, false, true)
+        );
+        Attributes {
+            kind: KeywordType::Unknown,
+            ..Attributes::default()
+        }
+        .apply(&mut k);
+        assert!(!k.person && k.include_on_export && k.export_synonyms);
     }
 
     #[test]

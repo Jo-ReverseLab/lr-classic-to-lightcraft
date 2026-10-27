@@ -80,7 +80,18 @@ const REQUIRED_SCHEMA: &[(&str, &[&str])] = &[
         "AgLibraryCollection",
         &["id_local", "creationId", "systemOnly"],
     ),
-    ("AgLibraryKeyword", &["id_local", "name", "parent"]),
+    (
+        "AgLibraryKeyword",
+        &[
+            "id_local",
+            "name",
+            "parent",
+            "includeOnExport",
+            "includeParents",
+            "includeSynonyms",
+            "keywordType",
+        ],
+    ),
     ("AgLibraryKeywordImage", &["id_local", "image", "tag"]),
     ("AgLibraryKeywordSynonym", &["id_local", "keyword", "name"]),
 ];
