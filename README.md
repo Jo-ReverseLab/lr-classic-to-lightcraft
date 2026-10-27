@@ -12,7 +12,7 @@ only to describe compatibility.
 Early development. The dry run reads folders and photos from a catalog,
 applies path mappings and checks that the original files exist. It also
 reads keywords with their hierarchy and synonyms, their assignments to
-photos, the star ratings and the pick/reject flags. Collections are read and counted, but not converted yet: each
+photos, the star ratings, the pick/reject flags and the colour labels. Collections are read and counted, but not converted yet: each
 one is listed as skipped.
 Writing to LightCraft (`--apply`) is not implemented yet.
 
@@ -63,6 +63,14 @@ other than pick, reject or none is converted as no flag and counted as
 `unknown`; the photo itself is still converted. The four flag counts add up
 to the converted photos.
 
+Colour labels are counted on their own line, for example
+`labels: red 2, yellow 1, green 1, blue 1, purple 1, none 11, custom 0, set en`.
+Lightroom stores a label as text in the language of its interface, so the
+names are mapped with a label set (see `--label-set`). A label that is not
+in the set is a custom label: the photo is still converted, without a
+label, and counted as `custom`. The seven counts add up to the converted
+photos. Label names never appear in the output or in the report.
+
 Photos and keywords are identified by Lightroom's global id, which, unlike the
 internal row id, does not depend on the order in which rows were stored. This keeps repeated runs from creating duplicates. A photo or keyword
 without a global id is skipped with the reason `missing global id`; if
@@ -107,6 +115,20 @@ lr2lc --map '/Users/example/Pictures=D:\Photos' catalog.lrcat
 Matching works on the text only and never touches the file system, so it
 behaves the same on every platform.
 
+### `--label-set SET`
+
+Chooses the names of the colour labels: `en` (Red, Yellow, Green, Blue,
+Purple), `de` (Rot, Gelb, Grün, Blau, Lila), `auto` (default) or the path
+of a JSON file such as `{"My red": "red", "Todo": "yellow"}` whose values
+are `red`, `yellow`, `green`, `blue` or `purple`. Names are compared exactly,
+including letter case, spaces and Unicode form.
+
+With `auto`, the English or German set is used if every label of the
+converted photos belongs to it. Otherwise nothing is guessed: the set is
+`none`, every label is custom, and a hint suggests choosing a set with
+`--label-set`. A missing or invalid file is a command-line error (exit
+code 2).
+
 ### `--report FILE`
 
 Writes a machine-readable report to `FILE` after the run:
@@ -123,7 +145,12 @@ Writes a machine-readable report to `FILE` after the run:
     "converted": 2,
     "skipped": [{ "reason": "photo 7: original file is missing" }],
     "videos": 0,
-    "flags": { "pick": 1, "reject": 0, "none": 1, "unknown": 0 }
+    "flags": { "pick": 1, "reject": 0, "none": 1, "unknown": 0 },
+    "labels": {
+      "red": 1, "yellow": 0, "green": 0, "blue": 0, "purple": 0,
+      "none": 0, "custom": 1, "label_set": "en",
+      "custom_reasons": [{ "reason": "photo 5: custom label not in label set" }]
+    }
   },
   "collections": {
     "read": 1,
@@ -161,7 +188,10 @@ name, a keyword or a synonym. `ratings` always has the keys `"0"` to `"5"`; the
 counts add up to `photos.converted`. `photos.videos` is the number of
 skipped videos; they are also listed in `photos.skipped`. `photos.flags`
 counts the converted photos per flag; `none` does not include `unknown`, so
-the four counts add up to `photos.converted`. The six attribute
+the four counts add up to `photos.converted`. `photos.labels` counts the
+converted photos per colour label, names the label set (`en`, `de`, `file`
+or `none`) and lists each photo with a custom label; its seven counts add
+up to `photos.converted`. The six attribute
 counts in `keywords` cover converted keywords only, like the summary line.
 
 To protect the catalog and your files, `FILE` is checked before anything is
@@ -186,7 +216,7 @@ error and reads or writes nothing.
 | --- | --- |
 | 0 | Success (also for `--help` and `--version`) |
 | 1 | The run failed: catalog cannot be opened or read, unsupported version, required table or column missing, pending `-wal`/`-journal` changes, report cannot be written, catalog changed during the run, or `--apply` given |
-| 2 | Invalid command line (unknown option, missing value, invalid `--map`, refused `--report` file); nothing is read or written |
+| 2 | Invalid command line (unknown option, missing value, invalid `--map`, invalid `--label-set`, refused `--report` file); nothing is read or written |
 
 ## License
 
