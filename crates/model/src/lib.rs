@@ -101,10 +101,14 @@ impl Photo {
     }
 }
 
-/// A keyword with its full hierarchy path, root first.
+/// A keyword with its full hierarchy path, root first, and its synonyms.
+///
+/// Equality compares the path and the synonyms.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Keyword {
     path: Vec<String>,
+    /// Alternative names of the keyword, in source order. Each is non-empty.
+    pub synonyms: Vec<String>,
 }
 
 impl Keyword {
@@ -112,12 +116,15 @@ impl Keyword {
     ///
     /// Returns [`ModelError::EmptyKeyword`] if `parts` is empty or any part
     /// is empty or whitespace-only; a keyword and each of its levels always
-    /// have a name.
+    /// have a name. The keyword starts without synonyms.
     pub fn new(parts: Vec<String>) -> Result<Keyword, ModelError> {
         if parts.is_empty() || parts.iter().any(|p| p.trim().is_empty()) {
             return Err(ModelError::EmptyKeyword);
         }
-        Ok(Keyword { path: parts })
+        Ok(Keyword {
+            path: parts,
+            synonyms: Vec::new(),
+        })
     }
 
     /// The keyword's own name (last part of the path).
@@ -136,11 +143,13 @@ impl Keyword {
         self.path.len()
     }
 
-    /// The parent keyword, or `None` for a root keyword.
+    /// The parent keyword, or `None` for a root keyword. The parent is
+    /// built from the path only, so it has no synonyms.
     pub fn parent(&self) -> Option<Keyword> {
         if self.path.len() > 1 {
             Some(Keyword {
                 path: self.path[..self.path.len() - 1].to_vec(),
+                synonyms: Vec::new(),
             })
         } else {
             None
@@ -257,6 +266,28 @@ mod tests {
     #[test]
     fn empty_keyword_error_has_message() {
         assert!(!ModelError::EmptyKeyword.to_string().is_empty());
+    }
+
+    #[test]
+    fn new_keyword_has_no_synonyms() {
+        let k = Keyword::new(vec!["A".into()]).unwrap();
+        assert!(k.synonyms.is_empty());
+    }
+
+    #[test]
+    fn equality_includes_synonyms() {
+        let a = Keyword::new(vec!["A".into()]).unwrap();
+        let mut b = a.clone();
+        assert_eq!(a, b);
+        b.synonyms.push("Alias".into());
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn parent_has_no_synonyms() {
+        let mut k = Keyword::new(vec!["A".into(), "B".into()]).unwrap();
+        k.synonyms.push("Alias".into());
+        assert!(k.parent().unwrap().synonyms.is_empty());
     }
 
     #[test]
