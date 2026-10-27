@@ -6,8 +6,11 @@
 //! the field values that were last imported, so a later run only sends what
 //! changed in Lightroom since then. Keywords are kept under their path text
 //! (`a|b|c`) together with the attributes they were created with.
+//! Collections are kept under their Lightroom id with the LightCraft id of
+//! the album or album folder, the name and parent they were created with,
+//! and the members lr2lc added.
 
-use model::{ColorLabel, Flag, Keyword, Photo};
+use model::{CollectionKind, ColorLabel, Flag, Keyword, Photo};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -131,19 +134,58 @@ impl KeywordEntry {
     }
 }
 
+/// What a collection became in LightCraft.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EntryKind {
+    /// An album (Lightroom: collection).
+    Album,
+    /// An album folder (Lightroom: collection set).
+    Folder,
+}
+
+impl From<CollectionKind> for EntryKind {
+    fn from(kind: CollectionKind) -> EntryKind {
+        match kind {
+            CollectionKind::Album => EntryKind::Album,
+            CollectionKind::Folder => EntryKind::Folder,
+        }
+    }
+}
+
+/// One collection created in the library as an album or album folder.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CollectionEntry {
+    /// The album's id in LightCraft, exactly as the app returned it.
+    pub lightcraft_id: Value,
+    /// Album or album folder.
+    pub kind: EntryKind,
+    /// The name sent on creation (the app may have trimmed it).
+    pub name: String,
+    /// The Lightroom id of the parent at creation; `None` on top level.
+    pub parent: Option<i64>,
+    /// Global ids of the photos lr2lc added and did not remove, sorted and
+    /// without duplicates.
+    pub members: Vec<String>,
+}
+
 /// The content of the mapping file.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct State {
     photos: BTreeMap<String, PhotoEntry>,
     keywords: BTreeMap<String, KeywordEntry>,
+    collections: BTreeMap<i64, CollectionEntry>,
 }
 
 /// The file layout; `version` is checked before this is parsed.
+/// `collections` came later and may be missing in older files.
 #[derive(Serialize, Deserialize)]
 struct StateFile {
     version: u64,
     photos: BTreeMap<String, PhotoEntry>,
     keywords: BTreeMap<String, KeywordEntry>,
+    #[serde(default)]
+    collections: BTreeMap<i64, CollectionEntry>,
 }
 
 impl State {
@@ -179,6 +221,7 @@ impl State {
         Ok(State {
             photos: file.photos,
             keywords: file.keywords,
+            collections: file.collections,
         })
     }
 
@@ -189,6 +232,7 @@ impl State {
             version: VERSION,
             photos: self.photos.clone(),
             keywords: self.keywords.clone(),
+            collections: self.collections.clone(),
         };
         let mut text = serde_json::to_string_pretty(&file).map_err(|source| StateError::Parse {
             path: path.to_path_buf(),
@@ -233,6 +277,24 @@ impl State {
     pub fn record_keyword(&mut self, keyword: &Keyword) {
         self.keywords
             .insert(keyword_text(keyword), KeywordEntry::of(keyword));
+    }
+
+    /// Records a collection as created, replacing an earlier entry for the
+    /// same Lightroom id. `members` is sorted and freed of duplicates.
+    pub fn record_collection(&mut self, lightroom_id: i64, mut entry: CollectionEntry) {
+        entry.members.sort();
+        entry.members.dedup();
+        self.collections.insert(lightroom_id, entry);
+    }
+
+    /// The entry of a collection, by Lightroom id.
+    pub fn collection(&self, lightroom_id: i64) -> Option<&CollectionEntry> {
+        self.collections.get(&lightroom_id)
+    }
+
+    /// All recorded collections, ordered by Lightroom id.
+    pub fn collections(&self) -> impl Iterator<Item = (i64, &CollectionEntry)> {
+        self.collections.iter().map(|(k, v)| (*k, v))
     }
 
     /// The entry of a photo, by Lightroom global id.
@@ -401,6 +463,50 @@ mod tests {
         let path = dir.path().join("missing").join("s.lr2lc.json");
         assert!(State::default().save(&path).is_err());
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    fn collection_entry(members: &[&str]) -> CollectionEntry {
+        CollectionEntry {
+            lightcraft_id: Value::from(7),
+            kind: EntryKind::Album,
+            name: "A".to_string(),
+            parent: Some(1),
+            members: members.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn collections_round_trip_with_text_keys_and_lowercase_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.lr2lc.json");
+        let mut s = State::default();
+        s.record_collection(12, collection_entry(&["b", "a", "b"]));
+        s.save(&path).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            v["collections"]["12"],
+            serde_json::json!({"lightcraft_id": 7, "kind": "album", "name": "A",
+                "parent": 1, "members": ["a", "b"]})
+        );
+        assert_eq!(State::load(&path).unwrap(), s);
+    }
+
+    #[test]
+    fn missing_collections_load_as_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.lr2lc.json");
+        std::fs::write(&path, r#"{"version":1,"photos":{},"keywords":{}}"#).unwrap();
+        assert_eq!(State::load(&path).unwrap().collections().count(), 0);
+    }
+
+    #[test]
+    fn unknown_collection_kind_is_a_parse_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.lr2lc.json");
+        let text = r#"{"version":1,"photos":{},"keywords":{},"collections":{"1":
+            {"lightcraft_id":1,"kind":"smart","name":"x","parent":null,"members":[]}}}"#;
+        std::fs::write(&path, text).unwrap();
+        assert!(matches!(State::load(&path), Err(StateError::Parse { .. })));
     }
 
     #[test]
