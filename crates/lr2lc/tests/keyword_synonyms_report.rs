@@ -1,16 +1,16 @@
 //! Acceptance tests for keyword synonyms in the CLI dry run (task P5-3,
 //! mapping F-009: synonyms are counted, not converted).
 //!
-//! Expected behaviour of `lr2lc <CATALOG> [--report FILE]`:
+//! Expected behaviour of `lr2lc <CATALOG> [--report FILE]` (user decision:
+//! synonyms are converted with their keyword):
 //! - report.json gains `keyword_synonyms` (`{"read", "converted", "skipped":
 //!   [{"reason"}]}`, read == converted + len(skipped)).
-//! - Keyword edge catalog: read 4, converted 0, skipped 4 with the reasons
-//!   `synonym N of keyword K: synonyms are not converted` (N 1, 2, 3 for
-//!   keywords 3, 3, 16) and `synonym 4: keyword 999 is unknown`.
+//! - Keyword edge catalog: read 6, converted 2 (both on keyword 3), skipped 4:
+//!   `synonym 3: keyword 16 is skipped`, `synonym 4: keyword 999 is unknown`,
+//!   `synonym 5: name is empty`, `synonym 6: name is empty`.
 //! - Small catalog: 0 / 0 / 0.
-//! - stdout has `keyword synonyms: read N, would convert 0, skipped N` and,
-//!   if N > 0, a group `skipped keyword synonyms:` (not shown when N = 0 is
-//!   not required either way).
+//! - stdout has `keyword synonyms: read N, would convert M, skipped K` and,
+//!   if K > 0, a group `skipped keyword synonyms:`.
 //! - Neither stdout nor report.json contains synonym texts.
 //! - Other areas stay unchanged.
 
@@ -59,23 +59,23 @@ fn reasons(v: &serde_json::Value) -> Vec<String> {
 }
 
 #[test]
-fn report_counts_synonyms_as_skipped() {
+fn report_counts_converted_and_skipped_synonyms() {
     let (_dir, cat) = edge();
     let (_, v, _) = run_report(&cat);
     let a = &v["keyword_synonyms"];
     assert_eq!(a["read"], keyword_edge::SYNONYMS);
-    assert_eq!(a["converted"], 0);
+    assert_eq!(a["converted"], keyword_edge::SYNONYMS_CONVERTED);
     assert_eq!(
         a["skipped"].as_array().unwrap().len() as i64,
-        keyword_edge::SYNONYMS
+        keyword_edge::SYNONYMS - keyword_edge::SYNONYMS_CONVERTED
     );
     assert_eq!(
         reasons(&v),
         vec![
-            "synonym 1 of keyword 3: synonyms are not converted",
-            "synonym 2 of keyword 3: synonyms are not converted",
-            "synonym 3 of keyword 16: synonyms are not converted",
+            "synonym 3: keyword 16 is skipped",
             "synonym 4: keyword 999 is unknown",
+            "synonym 5: name is empty",
+            "synonym 6: name is empty",
         ]
     );
 }
@@ -101,8 +101,10 @@ fn text_output_shows_counts_and_skipped_group() {
     let (_dir, cat) = edge();
     let (text, _, _) = run_report(&cat);
     let want = format!(
-        "keyword synonyms: read {n}, would convert 0, skipped {n}",
-        n = keyword_edge::SYNONYMS
+        "keyword synonyms: read {}, would convert {}, skipped {}",
+        keyword_edge::SYNONYMS,
+        keyword_edge::SYNONYMS_CONVERTED,
+        keyword_edge::SYNONYMS - keyword_edge::SYNONYMS_CONVERTED
     );
     assert!(text.lines().any(|l| l.trim() == want), "stdout: {text}");
     assert!(text.contains("skipped keyword synonyms:"), "stdout: {text}");

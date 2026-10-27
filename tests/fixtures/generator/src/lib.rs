@@ -73,15 +73,27 @@ pub mod keyword_edge {
     pub const ASSIGNMENTS_SKIPPED: [i64; 7] = [20, 31, 32, 33, 34, 35, 36];
     pub const ASSIGNMENTS_CONVERTED: i64 = 30;
     /// Rows in `AgLibraryKeywordSynonym` (small fixture: none). Ids 1 and 2
-    /// belong to keyword 3, id 3 to the skipped keyword 16, id 4 points to the
-    /// non-existent keyword 999.
-    pub const SYNONYMS: i64 = 4;
-    /// `(synonym id, keyword id)` of the rows above.
-    pub const SYNONYM_ROWS: [(i64, i64); 4] = [(1, 3), (2, 3), (3, 16), (4, 999)];
-    /// Synonym texts, in id order. They must never appear in any output.
+    /// belong to keyword 3 (id 1 sorts after id 2 alphabetically, so id order
+    /// matters), id 3 to the skipped keyword 16, id 4 to the non-existent
+    /// keyword 999, ids 5 (empty text) and 6 (NULL text) to keyword 2.
+    pub const SYNONYMS: i64 = 6;
+    /// Synonyms of converted keywords with a text (ids 1 and 2).
+    pub const SYNONYMS_CONVERTED: i64 = 2;
+    /// `(synonym id, keyword id, name)` of the rows above.
+    pub const SYNONYM_ROWS: [(i64, i64, Option<&str>); 6] = [
+        (1, 3, Some("Zyx-Synonym-Bär")),
+        (2, 3, Some("Zyx-Synonym-Alpha")),
+        (3, 16, Some("Zyx-Synonym-Gamma")),
+        (4, 999, Some("Zyx-Synonym-Orphan")),
+        (5, 2, Some("")),
+        (6, 2, None),
+    ];
+    /// Synonyms of keyword 3, in `id_local` order.
+    pub const KEYWORD_3_SYNONYMS: [&str; 2] = ["Zyx-Synonym-Bär", "Zyx-Synonym-Alpha"];
+    /// All non-empty synonym texts; they must never appear in any output.
     pub const SYNONYM_TEXTS: [&str; 4] = [
-        "Zyx-Synonym-Alpha",
         "Zyx-Synonym-Bär",
+        "Zyx-Synonym-Alpha",
         "Zyx-Synonym-Gamma",
         "Zyx-Synonym-Orphan",
     ];
@@ -352,11 +364,10 @@ fn add_keyword_edges(path: &Path) -> Result<()> {
             params![image, tag],
         )?;
     }
-    for (i, (id, keyword)) in keyword_edge::SYNONYM_ROWS.iter().enumerate() {
-        let name = keyword_edge::SYNONYM_TEXTS[i];
+    for (id, keyword, name) in keyword_edge::SYNONYM_ROWS {
         c.execute(
             "INSERT INTO AgLibraryKeywordSynonym (id_local, keyword, lc_name, name) VALUES (?1, ?2, ?3, ?4)",
-            params![id, keyword, name.to_lowercase(), name],
+            params![id, keyword, name.map(str::to_lowercase), name],
         )?;
     }
     c.execute_batch("COMMIT")?;
