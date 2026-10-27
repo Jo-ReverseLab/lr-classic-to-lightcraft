@@ -11,8 +11,8 @@ only to describe compatibility.
 
 Early development. The dry run reads folders and photos from a catalog,
 applies path mappings and checks that the original files exist. It also
-reads keywords with their hierarchy, their assignments to photos and the
-star ratings. Collections are read and counted, but not converted yet: each
+reads keywords with their hierarchy and synonyms, their assignments to
+photos and the star ratings. Collections are read and counted, but not converted yet: each
 one is listed as skipped.
 Writing to LightCraft (`--apply`) is not implemented yet.
 
@@ -34,7 +34,8 @@ checksum before and after the run proves it was not changed.
 ### Dry run (default)
 
 Without `--apply`, lr2lc only reads the catalog and prints a summary: how
-many folders, photos, collections, keywords and keyword assignments it read,
+many folders, photos, collections, keywords, keyword assignments and keyword
+synonyms it read,
 how many it would convert and how many it skips, with the reasons grouped.
 A last line shows how many of the converted photos have 0 to 5 stars
 (unrated photos count as 0):
@@ -42,12 +43,14 @@ A last line shows how many of the converted photos have 0 to 5 stars
 ```text
 keywords: read 12, would convert 11, skipped 1
 keyword assignments: read 30, would convert 25, skipped 5
+keyword synonyms: read 4, would convert 3, skipped 1
 ratings: 0: 6, 1: 3, 2: 2, 3: 3, 4: 2, 5: 1
 ```
 
 Keywords are only assigned to photos that are converted, so assignments to
-skipped photos are skipped too. Nothing is written except the optional
-report file.
+skipped photos are skipped too. Synonyms are converted together with their
+keyword; a synonym of a skipped or unknown keyword, or one without text, is
+skipped. Nothing is written except the optional report file.
 
 ### `--map OLD=NEW`
 
@@ -105,13 +108,18 @@ Writes a machine-readable report to `FILE` after the run:
     "converted": 1,
     "skipped": [{ "reason": "assignment 5: photo 7 is skipped or unknown" }]
   },
+  "keyword_synonyms": {
+    "read": 2,
+    "converted": 1,
+    "skipped": [{ "reason": "synonym 3: keyword 9 is skipped" }]
+  },
   "ratings": { "0": 1, "1": 0, "2": 0, "3": 1, "4": 0, "5": 0 }
 }
 ```
 
 For each area, `read` equals `converted` plus the number of `skipped`
 entries. Reasons name the catalog id, never a file path, a collection
-name or a keyword. `ratings` always has the keys `"0"` to `"5"`; the
+name, a keyword or a synonym. `ratings` always has the keys `"0"` to `"5"`; the
 counts add up to `photos.converted`.
 
 To protect the catalog and your files, `FILE` is checked before anything is
