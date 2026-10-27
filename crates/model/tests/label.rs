@@ -17,8 +17,6 @@
 //!     for byte. No case folding, no trimming, no Unicode normalisation, no
 //!     fallback to another set. Unknown names and the empty string give None.
 
-#![cfg(any())]
-
 use model::{ColorLabel, LabelSet, Photo, Rating};
 use std::collections::HashMap;
 
@@ -35,13 +33,11 @@ fn photo() -> Photo {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn new_photo_has_no_label() {
     assert_eq!(photo().label, None);
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn with_label_sets_the_label_and_keeps_the_rest() {
     let base = photo().with_global_id("g-1");
     for label in ALL {
@@ -53,7 +49,6 @@ fn with_label_sets_the_label_and_keeps_the_rest() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn photos_with_different_labels_differ() {
     assert_ne!(photo().with_label(ColorLabel::Red), photo());
     assert_ne!(
@@ -67,7 +62,6 @@ fn photos_with_different_labels_differ() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn english_set_resolves_exact_names() {
     let s = LabelSet::en();
     for (name, want) in ["Red", "Yellow", "Green", "Blue", "Purple"].iter().zip(ALL) {
@@ -76,7 +70,6 @@ fn english_set_resolves_exact_names() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn german_set_resolves_exact_names() {
     let s = LabelSet::de();
     for (name, want) in ["Rot", "Gelb", "Gr\u{fc}n", "Blau", "Lila"].iter().zip(ALL) {
@@ -85,7 +78,6 @@ fn german_set_resolves_exact_names() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn sets_do_not_fall_back_to_each_other() {
     assert_eq!(LabelSet::en().resolve("Rot"), None);
     assert_eq!(LabelSet::de().resolve("Red"), None);
@@ -93,7 +85,6 @@ fn sets_do_not_fall_back_to_each_other() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn lookup_is_byte_exact() {
     let en = LabelSet::en();
     for name in ["red", "RED", "Red ", " Red", "Red\n", "", "Rd", "red "] {
@@ -108,7 +99,6 @@ fn lookup_is_byte_exact() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn custom_set_uses_only_its_own_names() {
     let mut m = HashMap::new();
     m.insert("Zyx-Label-Custom".to_string(), ColorLabel::Purple);
@@ -125,7 +115,6 @@ fn custom_set_uses_only_its_own_names() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-2"]
 fn empty_custom_set_resolves_nothing() {
     let s = LabelSet::custom(HashMap::new());
     assert_eq!(s.resolve("Red"), None);

@@ -1,13 +1,15 @@
 //! Neutral data model shared by the reader and the writer.
 //!
 //! The model knows nothing about Lightroom's or LightCraft's storage.
-//! It only describes folders, photos, keywords, ratings, flags and the run report.
+//! It only describes folders, photos, keywords, ratings, flags, colour labels and the run report.
 
 use std::fmt;
 use std::path::PathBuf;
 
+pub mod label;
 pub mod mapping;
 
+pub use label::{ColorLabel, LabelSet};
 pub use mapping::{PathMapping, PathMappings};
 
 /// Errors raised when building model values.
@@ -106,6 +108,8 @@ pub struct Photo {
     pub global_id: Option<String>,
     /// Pick/reject flag.
     pub flag: Flag,
+    /// Colour label, if any.
+    pub label: Option<ColorLabel>,
 }
 
 impl Photo {
@@ -117,6 +121,7 @@ impl Photo {
             rating,
             global_id: None,
             flag: Flag::None,
+            label: None,
         }
     }
 
@@ -129,6 +134,12 @@ impl Photo {
     /// Returns the photo with its global id set.
     pub fn with_global_id(mut self, global_id: impl Into<String>) -> Self {
         self.global_id = Some(global_id.into());
+        self
+    }
+
+    /// Returns the photo with its colour label set.
+    pub fn with_label(mut self, label: ColorLabel) -> Self {
+        self.label = Some(label);
         self
     }
 }
