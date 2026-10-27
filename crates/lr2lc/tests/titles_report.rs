@@ -12,7 +12,7 @@
 //! without the table or column reports 0 and 0 without an error.
 //!
 //! Always: dry run, catalog byte-identical, second run identical, nothing
-//! written, `--apply` still writes nothing to the catalog.
+//! written, `--apply` without `--library` exits 2 and writes nothing.
 
 use lrcat_fixtures::title_edge::{self as e, Variant};
 use lrcat_fixtures::{
@@ -135,7 +135,7 @@ fn catalog_unchanged_second_run_identical_and_nothing_written() {
 }
 
 #[test]
-fn apply_is_still_refused_and_writes_nothing() {
+fn apply_without_library_is_refused_and_writes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_title_catalog_with_files(dir.path()).unwrap();
     let before = fs::read(&cat).unwrap();

@@ -10,7 +10,7 @@
 //! in stdout, stderr or report.json. Photo balance unchanged.
 //!
 //! Always: dry run, catalog byte-identical, second run identical, nothing
-//! written, `--apply` writes nothing to the catalog.
+//! written, `--apply` without `--library` exits 2 and writes nothing.
 
 use lrcat_fixtures::caption_edge as e;
 use lrcat_fixtures::{write_caption_catalog_with_files, write_small_catalog_with_files};
@@ -109,7 +109,7 @@ fn catalog_unchanged_second_run_identical_and_nothing_written() {
 }
 
 #[test]
-fn apply_is_still_refused_and_writes_nothing() {
+fn apply_without_library_is_refused_and_writes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_caption_catalog_with_files(dir.path()).unwrap();
     let before = fs::read(&cat).unwrap();

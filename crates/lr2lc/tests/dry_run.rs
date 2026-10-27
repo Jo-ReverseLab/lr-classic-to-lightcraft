@@ -3,7 +3,7 @@
 //! Expected behaviour of `lr2lc [OPTIONS] <CATALOG>`:
 //! - Options: `--map OLD=NEW` (repeatable, invalid -> exit 2), `--report FILE`
 //!   (writes report.json there; without it no file is written), `--apply`
-//!   (not implemented yet: non-zero exit, nothing written), `-h`, `-V`.
+//!   (needs `--library`; without it: exit 2, nothing read or written), `-h`, `-V`.
 //! - stdout contains a line `folders: read N, would convert N, skipped N`, a
 //!   line `photos: read N, would convert N, skipped N`, a line
 //!   `collections: read N, would convert 0, skipped N` (P4-10), and the words
@@ -211,7 +211,7 @@ fn second_run_gives_identical_numbers() {
 }
 
 #[test]
-fn apply_fails_and_writes_nothing() {
+fn apply_without_library_fails_and_writes_nothing() {
     let (dir, cat) = with_files();
     let cwd = tempfile::tempdir().unwrap();
     let report = cwd.path().join("report.json");
@@ -225,7 +225,7 @@ fn apply_fails_and_writes_nothing() {
             report.as_os_str(),
         ],
     );
-    assert!(!out.status.success(), "--apply must fail for now");
+    assert!(!out.status.success(), "--apply without --library must fail");
     assert!(
         !stderr(&out).trim().is_empty(),
         "needs an explanatory message"

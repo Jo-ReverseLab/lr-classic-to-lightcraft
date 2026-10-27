@@ -234,7 +234,7 @@ fn catalog_unchanged_second_run_identical_and_nothing_written() {
 }
 
 #[test]
-fn apply_is_still_refused_and_writes_nothing() {
+fn apply_without_library_is_refused_and_writes_nothing() {
     let (_d, cat) = fixture();
     let before = fs::read(&cat).unwrap();
     let cwd = tempfile::tempdir().unwrap();
