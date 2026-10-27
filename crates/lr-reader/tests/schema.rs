@@ -135,3 +135,12 @@ fn missing_pick_column_is_reported() {
     let path = damaged(dir.path(), "Adobe_images", Some("pick"));
     expect_missing(&path, "Adobe_images", Some("pick"));
 }
+
+#[test]
+#[ignore = "waiting for P5b-2"]
+fn missing_color_labels_column_is_reported() {
+    // P5b-2: Adobe_images.colorLabels is required.
+    let dir = tempfile::tempdir().unwrap();
+    let path = damaged(dir.path(), "Adobe_images", Some("colorLabels"));
+    expect_missing(&path, "Adobe_images", Some("colorLabels"));
+}
