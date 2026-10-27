@@ -1,0 +1,414 @@
+//! The mapping file: what lr2lc has already written into a LightCraft
+//! library.
+//!
+//! The file lives next to the library folder as `<folder name>.lr2lc.json`.
+//! It maps each photo's Lightroom global id to its LightCraft id and keeps
+//! the field values that were last imported, so a later run only sends what
+//! changed in Lightroom since then. Keywords are kept under their path text
+//! (`a|b|c`) together with the attributes they were created with.
+
+use model::{ColorLabel, Flag, Keyword, Photo};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::ffi::OsString;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+/// The only file format version this code reads and writes.
+pub const VERSION: u64 = 1;
+
+/// Suffix appended to the library folder name.
+const SUFFIX: &str = ".lr2lc.json";
+
+/// Errors while reading or writing the mapping file.
+#[derive(Debug, thiserror::Error)]
+pub enum StateError {
+    /// The file could not be read or written.
+    #[error("cannot access the mapping file {}: {source}", path.display())]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    /// The file is not valid JSON or does not have the expected shape.
+    #[error("the mapping file {} is damaged: {source}", path.display())]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    /// The file has no `version` or one this program does not know.
+    #[error(
+        "the mapping file {} has an unsupported version ({found}); expected {VERSION}",
+        path.display()
+    )]
+    Version { path: PathBuf, found: String },
+}
+
+/// The last imported value of each field of a photo.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PhotoFields {
+    /// Stars, 0 to 5.
+    pub rating: u8,
+    /// `none`, `pick` or `reject`.
+    pub flag: String,
+    /// `red`, `yellow`, `green`, `blue`, `purple`, or `None` without label.
+    pub label: Option<String>,
+    /// Title; never an empty string.
+    pub title: Option<String>,
+    /// Caption; never an empty string.
+    pub caption: Option<String>,
+    /// Copyright notice; never an empty string.
+    pub copyright: Option<String>,
+    /// Creator; never an empty string.
+    pub creator: Option<String>,
+    /// Keyword path texts (`a|b|c`), sorted and without duplicates.
+    pub keywords: Vec<String>,
+}
+
+impl PhotoFields {
+    /// The fields of a photo as LightCraft creates it on import: no stars,
+    /// no flag, no label, no texts, no keywords.
+    pub fn imported_default() -> PhotoFields {
+        PhotoFields {
+            flag: flag_text(Flag::None).to_string(),
+            ..PhotoFields::default()
+        }
+    }
+}
+
+/// One photo written to the library.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PhotoEntry {
+    /// The photo's id in the Lightroom catalog (provenance).
+    pub lightroom_id: i64,
+    /// The photo's id in LightCraft, exactly as the app returned it.
+    pub lightcraft_id: Value,
+    /// The field values last written.
+    pub fields: PhotoFields,
+}
+
+/// One keyword created in the library, with the attributes it was created
+/// with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeywordEntry {
+    /// Lightroom's global id of the keyword, if known (provenance).
+    pub global_id: Option<String>,
+    /// Synonyms in source order.
+    pub synonyms: Vec<String>,
+    /// Written into exported photos.
+    pub include_on_export: bool,
+    /// Parents exported with it.
+    pub export_containing: bool,
+    /// Synonyms exported with it.
+    pub export_synonyms: bool,
+    /// Names a person.
+    pub person: bool,
+}
+
+impl KeywordEntry {
+    /// The entry for a keyword.
+    pub fn of(keyword: &Keyword) -> KeywordEntry {
+        KeywordEntry {
+            global_id: keyword.global_id.clone(),
+            synonyms: keyword.synonyms.clone(),
+            include_on_export: keyword.include_on_export,
+            export_containing: keyword.export_containing,
+            export_synonyms: keyword.export_synonyms,
+            person: keyword.person,
+        }
+    }
+
+    /// True if the keyword's synonyms and attributes equal the recorded
+    /// ones. The global id is not compared.
+    pub fn same_attributes(&self, keyword: &Keyword) -> bool {
+        self.synonyms == keyword.synonyms
+            && self.include_on_export == keyword.include_on_export
+            && self.export_containing == keyword.export_containing
+            && self.export_synonyms == keyword.export_synonyms
+            && self.person == keyword.person
+    }
+}
+
+/// The content of the mapping file.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct State {
+    photos: BTreeMap<String, PhotoEntry>,
+    keywords: BTreeMap<String, KeywordEntry>,
+}
+
+/// The file layout; `version` is checked before this is parsed.
+#[derive(Serialize, Deserialize)]
+struct StateFile {
+    version: u64,
+    photos: BTreeMap<String, PhotoEntry>,
+    keywords: BTreeMap<String, KeywordEntry>,
+}
+
+impl State {
+    /// Reads the mapping file. A missing file gives the empty state; a file
+    /// that cannot be parsed or has an unknown version is an error. The file
+    /// is never changed.
+    pub fn load(path: &Path) -> Result<State, StateError> {
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(State::default()),
+            Err(source) => {
+                return Err(StateError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                });
+            }
+        };
+        let parse_error = |source| StateError::Parse {
+            path: path.to_path_buf(),
+            source,
+        };
+        let value: Value = serde_json::from_str(&text).map_err(parse_error)?;
+        match value.get("version") {
+            Some(v) if v.as_u64() == Some(VERSION) => {}
+            other => {
+                return Err(StateError::Version {
+                    path: path.to_path_buf(),
+                    found: other.map_or_else(|| "missing".to_string(), Value::to_string),
+                });
+            }
+        }
+        let file: StateFile = serde_json::from_value(value).map_err(parse_error)?;
+        Ok(State {
+            photos: file.photos,
+            keywords: file.keywords,
+        })
+    }
+
+    /// Writes the mapping file atomically: the content goes into a
+    /// temporary file in the same folder, which then replaces the target.
+    pub fn save(&self, path: &Path) -> Result<(), StateError> {
+        let file = StateFile {
+            version: VERSION,
+            photos: self.photos.clone(),
+            keywords: self.keywords.clone(),
+        };
+        let mut text = serde_json::to_string_pretty(&file).map_err(|source| StateError::Parse {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        text.push('\n');
+        let tmp = temporary_path(path);
+        let io_error = |source| StateError::Io {
+            path: path.to_path_buf(),
+            source,
+        };
+        let written =
+            write_and_sync(&tmp, text.as_bytes()).and_then(|()| std::fs::rename(&tmp, path));
+        if let Err(e) = written {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(io_error(e));
+        }
+        Ok(())
+    }
+
+    /// Records a photo as written with the given field values, replacing an
+    /// earlier entry for the same global id.
+    pub fn record(
+        &mut self,
+        global_id: impl Into<String>,
+        lightroom_id: i64,
+        lightcraft_id: Value,
+        fields: PhotoFields,
+    ) {
+        self.photos.insert(
+            global_id.into(),
+            PhotoEntry {
+                lightroom_id,
+                lightcraft_id,
+                fields,
+            },
+        );
+    }
+
+    /// Records a keyword as present in the library, with its current
+    /// attributes.
+    pub fn record_keyword(&mut self, keyword: &Keyword) {
+        self.keywords
+            .insert(keyword_text(keyword), KeywordEntry::of(keyword));
+    }
+
+    /// The entry of a photo, by Lightroom global id.
+    pub fn photo(&self, global_id: &str) -> Option<&PhotoEntry> {
+        self.photos.get(global_id)
+    }
+
+    /// The entry of a keyword, by path text (`a|b|c`).
+    pub fn keyword(&self, path: &str) -> Option<&KeywordEntry> {
+        self.keywords.get(path)
+    }
+
+    /// All recorded photos, ordered by global id.
+    pub fn photos(&self) -> impl Iterator<Item = (&str, &PhotoEntry)> {
+        self.photos.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// All recorded keywords, ordered by path text.
+    pub fn keywords(&self) -> impl Iterator<Item = (&str, &KeywordEntry)> {
+        self.keywords.iter().map(|(k, v)| (k.as_str(), v))
+    }
+}
+
+/// Where the mapping file of a library lives: next to the library folder,
+/// named `<folder name>.lr2lc.json`.
+pub fn state_path(library: &Path) -> PathBuf {
+    match (library.parent(), library.file_name()) {
+        (Some(parent), Some(name)) => {
+            let mut file = name.to_os_string();
+            file.push(SUFFIX);
+            parent.join(file)
+        }
+        // No folder name (e.g. a root): append to the path as given.
+        _ => {
+            let mut file = library.as_os_str().to_os_string();
+            file.push(SUFFIX);
+            PathBuf::from(file)
+        }
+    }
+}
+
+/// The field values of a photo with its keywords, as the plan compares
+/// them and as they are recorded after writing.
+pub fn snapshot(photo: &Photo, keywords: &[Keyword]) -> PhotoFields {
+    let mut texts: Vec<String> = keywords.iter().map(keyword_text).collect();
+    texts.sort();
+    texts.dedup();
+    PhotoFields {
+        rating: photo.rating.get(),
+        flag: flag_text(photo.flag).to_string(),
+        label: photo.label.map(|l| label_text(l).to_string()),
+        title: non_empty(&photo.title),
+        caption: non_empty(&photo.caption),
+        copyright: non_empty(&photo.copyright),
+        creator: non_empty(&photo.creator),
+        keywords: texts,
+    }
+}
+
+/// The path text of a keyword as LightCraft expects it: `a|b|c`.
+pub fn keyword_text(keyword: &Keyword) -> String {
+    keyword.path().join("|")
+}
+
+/// LightCraft's spelling of a flag.
+pub fn flag_text(flag: Flag) -> &'static str {
+    match flag {
+        Flag::None => "none",
+        Flag::Pick => "pick",
+        Flag::Reject => "reject",
+    }
+}
+
+/// LightCraft's spelling of a colour label.
+pub fn label_text(label: ColorLabel) -> &'static str {
+    match label {
+        ColorLabel::Red => "red",
+        ColorLabel::Yellow => "yellow",
+        ColorLabel::Green => "green",
+        ColorLabel::Blue => "blue",
+        ColorLabel::Purple => "purple",
+    }
+}
+
+fn non_empty(text: &Option<String>) -> Option<String> {
+    text.as_ref().filter(|t| !t.is_empty()).cloned()
+}
+
+/// A temporary file next to `path`, unique per process.
+fn temporary_path(path: &Path) -> PathBuf {
+    let mut name: OsString = path.file_name().map(OsString::from).unwrap_or_default();
+    name.push(format!(".tmp-{}", std::process::id()));
+    path.with_file_name(name)
+}
+
+fn write_and_sync(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use model::Rating;
+
+    fn kw(parts: &[&str]) -> Keyword {
+        Keyword::new(parts.iter().map(|s| s.to_string()).collect()).unwrap()
+    }
+
+    #[test]
+    fn snapshot_of_a_plain_photo_is_the_import_default() {
+        let p = Photo::new("a.jpg", 1, Rating::default());
+        assert_eq!(snapshot(&p, &[]), PhotoFields::imported_default());
+    }
+
+    #[test]
+    fn snapshot_treats_empty_text_as_missing() {
+        let p = Photo::new("a.jpg", 1, Rating::default()).with_title("");
+        assert_eq!(snapshot(&p, &[]).title, None);
+    }
+
+    #[test]
+    fn snapshot_drops_duplicate_keywords() {
+        let p = Photo::new("a.jpg", 1, Rating::default());
+        let f = snapshot(&p, &[kw(&["A"]), kw(&["A"])]);
+        assert_eq!(f.keywords, vec!["A".to_string()]);
+    }
+
+    #[test]
+    fn keyword_text_joins_the_path() {
+        assert_eq!(keyword_text(&kw(&["a", "b", "c"])), "a|b|c");
+    }
+
+    #[test]
+    fn same_attributes_ignores_the_global_id() {
+        let entry = KeywordEntry::of(&kw(&["A"]).with_global_id("x"));
+        assert!(entry.same_attributes(&kw(&["A"])));
+        let mut other = kw(&["A"]);
+        other.person = true;
+        assert!(!entry.same_attributes(&other));
+    }
+
+    #[test]
+    fn version_as_text_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.lr2lc.json");
+        std::fs::write(&path, r#"{"version":"1","photos":{},"keywords":{}}"#).unwrap();
+        assert!(matches!(
+            State::load(&path),
+            Err(StateError::Version { .. })
+        ));
+    }
+
+    #[test]
+    fn wrong_shape_is_a_parse_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.lr2lc.json");
+        std::fs::write(&path, r#"{"version":1,"photos":[]}"#).unwrap();
+        assert!(matches!(State::load(&path), Err(StateError::Parse { .. })));
+    }
+
+    #[test]
+    fn save_into_a_missing_folder_fails_and_leaves_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing").join("s.lr2lc.json");
+        assert!(State::default().save(&path).is_err());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn record_replaces_an_earlier_entry() {
+        let mut s = State::default();
+        s.record("g", 1, Value::from(1), PhotoFields::imported_default());
+        s.record("g", 1, Value::from(2), PhotoFields::imported_default());
+        assert_eq!(s.photos().count(), 1);
+        assert_eq!(s.photo("g").unwrap().lightcraft_id, Value::from(2));
+    }
+}
