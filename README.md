@@ -315,7 +315,9 @@ holds the last updated photo. A select is not counted as an update.
 
 After all photos, lr2lc creates the missing album folders (for collection
 sets, parents first) and albums (for collections) with `album.create`,
-sending only the name, `folder` and the parent folder. Then it adds the
+sending only the name, `folder` and the parent folder; before the first
+of them it reads `albums.list` once to find albums that already exist
+(see [Mapping file](#mapping-file)). Then it adds the
 members of each album with `album.addPhotos`, in Lightroom's order, and
 removes photos that it added earlier but that are no longer in the
 collection with `album.removePhotos`. LightCraft changes album members only
@@ -346,7 +348,9 @@ the `writer` section:
 - `photos_skipped`, `photos_incomplete` (an update or the select before
   it failed; the next run sends the updates again) and `keywords_skipped`, each with reasons;
 - `folders_created`, `albums_created` and `collections_known` (already in
-  the mapping file, no `album.create`);
+  the mapping file, no `album.create`), and `collections_existing` (missing
+  from the mapping file but found in the library and taken over, see
+  [Mapping file](#mapping-file));
 - `members_added` and `members_removed` (photos added to or removed from
   albums);
 - `collections_renamed`, `collections_moved` and `collections_removed`
@@ -363,9 +367,9 @@ Every converted photo counts once, in every run: `photos.converted` equals
 or found as a duplicate in this run counts only there. The incomplete
 photos are among the imported, existing or updated ones. Every converted
 collection counts once, too: `collections.converted` equals
-`folders_created` plus `albums_created` plus `collections_known` plus the
-entries of `collections_skipped`. The incomplete collections are among the
-created or known ones.
+`folders_created` plus `albums_created` plus `collections_known` plus
+`collections_existing` plus the entries of `collections_skipped`. The
+incomplete collections are among the created, known or taken over ones.
 
 If the run stops after it started (no connection, a failed pre-flight
 check, a lost connection, an unexpected reply, or the mapping file cannot
@@ -391,9 +395,21 @@ id: `{"lightcraft_id": ..., "kind": "album" | "folder", "name": ...,
 "parent": <Lightroom id> | null, "members": [...]}`, with the name and
 parent at creation and the sorted global ids of the photos lr2lc added.
 Files from older versions without `collections` still load; the file
-version stays 1. Albums cannot be found again without the mapping file
-(LightCraft allows equal names), so if it is lost, the next run creates
-the albums a second time.
+version stays 1. If the file is lost, the next run reads the library's
+album tree (`albums.list`) once before it would create an album, and looks
+for each collection missing from the file for an album or album folder
+with the same name (trimmed as LightCraft does on create, otherwise byte
+for byte), the same kind and the same parent (top level, or the folder
+lr2lc knows or just found or created for the Lightroom parent). Smart
+albums and albums already in the mapping file never match. With exactly
+one match for exactly one collection, lr2lc takes that album over
+(`collections_existing`), creates nothing and adds the members as usual
+(adding is idempotent). Without a match it creates the album. Otherwise
+(LightCraft allows equal names, so several albums can match, or several
+collections can want the same album) lr2lc does not guess: the
+collections are skipped with the reason `ambiguous: N albums with the same
+name and parent in LightCraft`, together with everything below them, and
+nothing is created for them.
 
 ### Exit codes
 

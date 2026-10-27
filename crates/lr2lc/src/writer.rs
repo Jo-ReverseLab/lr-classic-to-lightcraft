@@ -39,6 +39,7 @@ pub enum WriterJson {
         folders_created: usize,
         albums_created: usize,
         collections_known: usize,
+        collections_existing: usize,
         members_added: usize,
         members_removed: usize,
         collections_renamed: usize,
@@ -145,6 +146,7 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         folders_created: s.folders_created,
         albums_created: s.albums_created,
         collections_known: s.collections_known,
+        collections_existing: s.collections_existing,
         members_added: s.members_added,
         members_removed: s.members_removed,
         collections_renamed: s.collections_renamed,
@@ -201,10 +203,11 @@ pub fn applied_summary(s: &ApplySummary) -> String {
     let _ = writeln!(
         out,
         "written collections: folders created {}, albums created {}, already in the library {}, \
-         album members added {}, album members removed {}",
+         found in the library and adopted {}, album members added {}, album members removed {}",
         s.folders_created,
         s.albums_created,
         s.collections_known,
+        s.collections_existing,
         s.members_added,
         s.members_removed
     );
@@ -356,6 +359,7 @@ mod tests {
             "folders_created",
             "albums_created",
             "collections_known",
+            "collections_existing",
             "members_added",
             "members_removed",
             "collections_renamed",

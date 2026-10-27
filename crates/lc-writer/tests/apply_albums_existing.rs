@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! Acceptance tests for recovering collections after the mapping file was
 //! lost (task P5b-3c, principle 5), module `lc_writer::apply`, against the
 //! stateful fake LightCraft with pre-existing albums (`Config::albums`).

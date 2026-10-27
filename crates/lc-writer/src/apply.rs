@@ -9,8 +9,12 @@
 //!    update of a photo, `library.select {ids: [id], active: id}` selects
 //!    exactly that photo, because LightCraft runs `photo.*` commands only
 //!    on a selection (the selection is left on the last updated photo);
-//! 4. then the collections: album folders and albums are created (parents
-//!    first), then members are added and removed album by album, each call
+//! 4. then the collections: before the first `album.create`, `albums.list {}`
+//!    is read once (only if the plan creates a collection; an answer in an
+//!    unknown shape stops the run); album folders and albums missing from
+//!    the mapping file are adopted when the library has exactly one
+//!    matching node (see [`crate::albums`]), else created (parents first);
+//!    then members are added and removed album by album, each call
 //!    directly after `library.select {ids, active: first}` of exactly its
 //!    photos, because LightCraft changes album members only on a selection.
 //!
@@ -27,8 +31,11 @@
 //!   below it; a rejected select or member change makes the collection
 //!   incomplete, its members are not recorded and the next run sends them
 //!   again; albums are never renamed, moved or deleted;
+//! - a collection that matches several nodes, or whose one node several
+//!   collections match, is skipped as ambiguous with its descendants;
+//!   nothing is created for it;
 //! - every input collection counts exactly once: created as folder or
-//!   album, known, or skipped;
+//!   album, known, adopted (existing), or skipped;
 //! - every input photo counts exactly once: imported, existing, updated,
 //!   unchanged or skipped; a stopped run hands back the numbers up to the
 //!   stop ([`Aborted`]);
@@ -36,6 +43,7 @@
 //!   messages (which may quote file paths); they name the command and, for
 //!   photos and collections, the Lightroom id; never a collection name.
 
+use crate::albums::{Decision, Existing, parse_album_list};
 use crate::control::{ControlClient, Outcome, WriteError};
 use crate::plan::{Step, WriteInput, import_params, members_select_params, plan, select_params};
 use crate::state::{CollectionEntry, PhotoFields, State, keyword_text, snapshot};
@@ -80,6 +88,10 @@ pub struct ApplySummary {
     /// Input collections already in the mapping file. Together with the
     /// created and skipped ones every input collection counts once.
     pub collections_known: usize,
+    /// Input collections missing from the mapping file that the library
+    /// already had (exactly one node with the same name, kind and parent);
+    /// adopted instead of created.
+    pub collections_existing: usize,
     /// Photos added to albums.
     pub members_added: usize,
     /// Photos removed from albums (only ones lr2lc added before).
@@ -169,6 +181,8 @@ pub fn apply_partial(
             .map(|c| (c.lightroom_id, c))
             .collect(),
         incomplete: BTreeSet::new(),
+        existing: None,
+        wanting: wanting(input, &plan.steps),
     };
     match run.steps(&plan.steps) {
         Ok(()) => Ok(run.summary),
@@ -218,6 +232,39 @@ struct Run<'a> {
     collections: BTreeMap<i64, &'a Collection>,
     /// Lightroom ids of the collections already reported as incomplete.
     incomplete: BTreeSet<i64>,
+    /// The library's albums that may be adopted, read before the first
+    /// `album.create`.
+    existing: Option<Existing>,
+    /// The number of collections to create per trimmed name, folder flag
+    /// and Lightroom parent.
+    wanting: BTreeMap<CollectionKey, usize>,
+}
+
+/// Trimmed name, folder flag and Lightroom parent of a collection.
+type CollectionKey = (String, bool, Option<i64>);
+
+fn collection_key(c: &Collection) -> CollectionKey {
+    (
+        c.name.trim().to_string(),
+        c.kind == CollectionKind::Folder,
+        c.parent,
+    )
+}
+
+/// Counts the collections the plan creates by [`collection_key`].
+fn wanting(input: &WriteInput, steps: &[Step]) -> BTreeMap<CollectionKey, usize> {
+    let mut out = BTreeMap::new();
+    for step in steps {
+        if let Step::CreateAlbum { collection_id, .. } = step
+            && let Some(c) = input
+                .collections
+                .iter()
+                .find(|c| c.lightroom_id == *collection_id)
+        {
+            *out.entry(collection_key(c)).or_insert(0) += 1;
+        }
+    }
+    out
 }
 
 impl Run<'_> {
@@ -287,8 +334,32 @@ impl Run<'_> {
         }
     }
 
-    /// Creates one album or album folder. The parent's LightCraft id is
-    /// taken from the mapping file, so a parent created earlier in this run
+    /// Reads `albums.list` once, before the first `album.create`; the
+    /// nodes already in the mapping file are left out.
+    fn load_existing(&mut self) -> Result<(), WriteError> {
+        if self.existing.is_some() {
+            return Ok(());
+        }
+        let nodes = match self.client.execute("albums.list", json!({}))? {
+            Outcome::Applied(value) => parse_album_list(&value)?,
+            Outcome::AppliedNotSaved(_) => {
+                return Err(WriteError::Protocol(
+                    "albums.list answered like a writing command".into(),
+                ));
+            }
+        };
+        let claimed: Vec<Value> = self
+            .state
+            .collections()
+            .map(|(_, e)| e.lightcraft_id.clone())
+            .collect();
+        self.existing = Some(Existing::new(nodes, &claimed));
+        Ok(())
+    }
+
+    /// Creates one album or album folder, or adopts the one node the
+    /// library already has for it. The parent's LightCraft id is taken from
+    /// the mapping file, so a parent created or adopted earlier in this run
     /// replaces its placeholder; a parent that was not created skips the
     /// collection.
     fn create_album(&mut self, collection_id: i64, params: &Value) -> Result<(), WriteError> {
@@ -296,10 +367,15 @@ impl Run<'_> {
             // Not reachable: the plan only creates input collections.
             return Ok(());
         };
+        self.load_existing()?;
         let mut params = params.clone();
+        let mut parent_id = None;
         if let Some(parent) = c.parent {
             match self.state.collection(parent) {
-                Some(entry) => params["parent"] = entry.lightcraft_id.clone(),
+                Some(entry) => {
+                    params["parent"] = entry.lightcraft_id.clone();
+                    parent_id = Some(entry.lightcraft_id.clone());
+                }
                 None => {
                     self.skip_collection(
                         collection_id,
@@ -307,6 +383,29 @@ impl Run<'_> {
                     );
                     return Ok(());
                 }
+            }
+        }
+        let key = collection_key(c);
+        let wanting = self.wanting.get(&key).copied().unwrap_or(1);
+        let decision = self.existing.as_ref().map_or(Decision::Create, |e| {
+            e.decide(&c.name, key.1, parent_id.as_ref(), wanting)
+        });
+        match decision {
+            Decision::Create => {}
+            Decision::Adopt(id) => {
+                self.summary.collections_existing += 1;
+                self.record_created(collection_id, c, id)?;
+                return Ok(());
+            }
+            Decision::Ambiguous(n) => {
+                self.skip_collection(
+                    collection_id,
+                    &format!(
+                        "ambiguous: {n} albums with the same name and parent in LightCraft; \
+                         nothing was created or adopted"
+                    ),
+                );
+                return Ok(());
             }
         }
         match self.client.execute("album.create", params) {
@@ -319,16 +418,7 @@ impl Run<'_> {
                     CollectionKind::Folder => self.summary.folders_created += 1,
                     CollectionKind::Album => self.summary.albums_created += 1,
                 }
-                let entry = CollectionEntry {
-                    lightcraft_id: id,
-                    kind: c.kind.into(),
-                    name: c.name.clone(),
-                    parent: c.parent,
-                    members: Vec::new(),
-                };
-                self.state.record_collection(collection_id, entry);
-                self.state.save(self.state_file)?;
-                Ok(())
+                self.record_created(collection_id, c, id)
             }
             Ok(Outcome::AppliedNotSaved(_)) => {
                 self.summary.not_saved += 1;
@@ -345,6 +435,25 @@ impl Run<'_> {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// Records a created or adopted collection, without members.
+    fn record_created(
+        &mut self,
+        collection_id: i64,
+        c: &Collection,
+        id: Value,
+    ) -> Result<(), WriteError> {
+        let entry = CollectionEntry {
+            lightcraft_id: id,
+            kind: c.kind.into(),
+            name: c.name.clone(),
+            parent: c.parent,
+            members: Vec::new(),
+        };
+        self.state.record_collection(collection_id, entry);
+        self.state.save(self.state_file)?;
+        Ok(())
     }
 
     fn skip_collection(&mut self, collection_id: i64, why: &str) {

@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! CLI acceptance tests for recovering albums after the mapping file was lost
 //! (task P5b-3c, principle 5), with the generator fixture `collection_edge`,
 //! against the stateful fake LightCraft.
