@@ -147,10 +147,8 @@ fn photos_and_counts_are_unchanged_by_rights_data() {
     assert_eq!(ids(&data), ids(&plain_data));
     assert_eq!(report.read_count(), plain_report.read_count());
     assert_eq!(report.skipped_count(), plain_report.skipped_count());
-    for id in e::SKIPPED_IDS {
-        // Values of skipped photos are never returned.
-        assert!(!ids(&data).contains(&id) || id == 2 || id == 3);
-    }
+    // Virtual copy 20 is not returned, whatever its values.
+    assert!(!ids(&data).contains(&20));
     assert!(
         plain_data
             .photos
