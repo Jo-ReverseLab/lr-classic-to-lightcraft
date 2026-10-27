@@ -231,11 +231,16 @@ writer: keywords to create 11, photos to import 17, updates 23
 ```
 
 `report.json` then has a `writer` section with `planned` (`keywords`,
-`photos`, `updates`), `photos_skipped` and `keywords_skipped` (each a list
-of `{"reason": ...}`). Converted photos are either planned for import or
-skipped by the writer. With `--library DIR` the dry run reads the mapping
-file of that library (see below), so it only plans what is still missing;
-it never connects to LightCraft and writes nothing next to the library.
+`photos`, `updates`, `photos_updated`, `photos_unchanged`),
+`photos_skipped` and `keywords_skipped` (each a list of `{"reason": ...}`).
+`planned.photos` counts the imports, `photos_updated` the photos from the
+mapping file with at least one update and `photos_unchanged` those that
+need no command. Every converted photo counts once:
+`photos.converted` equals `planned.photos` plus `planned.photos_updated`
+plus `planned.photos_unchanged` plus the photos skipped by the writer.
+With `--library DIR` the dry run reads the mapping file of that library
+(see below), so it only plans what is still missing; it never connects to
+LightCraft and writes nothing next to the library.
 
 `--script FILE` also writes the plan as JSON lines, one `engine.execute`
 request per command; photos that are not imported yet are named
@@ -270,13 +275,33 @@ stops at once and never repeats the command: its outcome is unknown, so run
 lr2lc again; it re-checks the state and finds photos LightCraft already
 has. The catalog checksum is checked again after writing.
 
-The summary and `report.json` (`dry_run: false`) show what was written:
-`keywords_created`, `photos_imported`, `photos_existing` (already in the
-library), `updates`, `not_saved` (applied but not yet saved to disk by
-LightCraft), and `photos_skipped`, `photos_incomplete` (an update failed;
-the next run sends it again) and `keywords_skipped` with reasons. On a
-first run, `photos.converted` equals `photos_imported` plus
-`photos_existing` plus the photos skipped by the writer.
+The summary and `report.json` (`dry_run: false`) show what was written in
+the `writer` section:
+
+- `keywords_created`;
+- `photos_imported`, and `photos_existing` (found in the library as
+  duplicates on import);
+- `photos_updated` (known from the mapping file, at least one update sent)
+  and `photos_unchanged` (known, no command needed);
+- `updates` (field updates applied) and `not_saved` (applied but not yet
+  saved to disk by LightCraft);
+- `photos_skipped`, `photos_incomplete` (an update failed; the next run
+  sends it again) and `keywords_skipped`, each with reasons.
+
+Every converted photo counts once, in every run: `photos.converted` equals
+`photos_imported` plus `photos_existing` plus `photos_updated` plus
+`photos_unchanged` plus the photos skipped by the writer. A photo imported
+or found as a duplicate in this run counts only there. The incomplete
+photos are among the imported, existing or updated ones.
+
+If the run stops after it started (no connection, a failed pre-flight
+check, a lost connection, an unexpected reply, or the mapping file cannot
+be written), lr2lc still writes `report.json` when `--report` is given and
+exits with code 1. The `writer` section then holds the numbers up to the
+stop (a command without a reply counts nowhere; all are 0 if the
+connection or the pre-flight check failed) and `aborted`, a short reason
+without paths, e.g. `connection lost during library.import; outcome
+unknown`. After a complete run `aborted` is absent.
 
 ### Mapping file
 
