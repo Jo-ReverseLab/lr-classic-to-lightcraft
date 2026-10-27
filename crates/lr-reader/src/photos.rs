@@ -22,6 +22,13 @@ struct Row {
     /// `AgLibraryIPTC.caption` of the row with the smallest `id_local` for
     /// this image, if it is non-empty text.
     caption: Option<String>,
+    /// `AgLibraryIPTC.copyright` of the same row as the caption, if it is
+    /// non-empty text.
+    copyright: Option<String>,
+    /// `AgInternedIptcCreator.value` referenced by the
+    /// `AgHarvestedIptcMetadata` row with the smallest `id_local` for this
+    /// image, if it is non-empty text.
+    creator: Option<String>,
     file: Option<(String, String)>,
     folder: Option<String>,
     root_row: bool,
@@ -46,6 +53,25 @@ pub struct PhotoData {
 }
 
 impl Catalog {
+    /// Whether the optional creator tables `AgHarvestedIptcMetadata`
+    /// (`id_local`, `image`, `creatorRef`) and `AgInternedIptcCreator`
+    /// (`id_local`, `value`) exist with the columns the reader uses.
+    /// Without them every photo has no creator.
+    fn has_creator_tables(&self) -> Result<bool, ReadError> {
+        let present: i64 = self
+            .conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM pragma_table_info('AgHarvestedIptcMetadata') \
+                         WHERE name IN ('id_local', 'image', 'creatorRef')) \
+                      + (SELECT count(*) FROM pragma_table_info('AgInternedIptcCreator') \
+                         WHERE name IN ('id_local', 'value'))",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(ReadError::Query)?;
+        Ok(present == 5)
+    }
+
     /// Reads all photos, ordered by their catalog id.
     ///
     /// Same as [`Catalog::photo_data`] without the extra facts.
@@ -69,22 +95,30 @@ impl Catalog {
     /// count the same). Any other value also gives [`Flag::None`]; the photo
     /// is kept and its id is listed in [`PhotoData::unknown_flag`].
     pub fn photo_data(&self, report: &mut Report) -> Result<PhotoData, ReadError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT i.id_local, i.masterImage, i.rating, i.fileFormat, \
-                        f.id_local, f.baseName, f.extension, \
-                        d.id_local, d.pathFromRoot, \
-                        r.id_local, r.absolutePath, i.id_global, i.pick, i.colorLabels, \
-                        (SELECT c.caption FROM AgLibraryIPTC c \
-                         WHERE c.image = i.id_local ORDER BY c.id_local LIMIT 1) \
-                 FROM Adobe_images i \
-                 LEFT JOIN AgLibraryFile f ON f.id_local = i.rootFile \
-                 LEFT JOIN AgLibraryFolder d ON d.id_local = f.folder \
-                 LEFT JOIN AgLibraryRootFolder r ON r.id_local = d.rootFolder \
-                 ORDER BY i.id_local",
-            )
-            .map_err(ReadError::Query)?;
+        let creator = if self.has_creator_tables()? {
+            "(SELECT n.value FROM AgHarvestedIptcMetadata h \
+              LEFT JOIN AgInternedIptcCreator n ON n.id_local = h.creatorRef \
+              WHERE h.image = i.id_local ORDER BY h.id_local LIMIT 1)"
+        } else {
+            "NULL"
+        };
+        let sql = format!(
+            "SELECT i.id_local, i.masterImage, i.rating, i.fileFormat, \
+                    f.id_local, f.baseName, f.extension, \
+                    d.id_local, d.pathFromRoot, \
+                    r.id_local, r.absolutePath, i.id_global, i.pick, i.colorLabels, \
+                    (SELECT c.caption FROM AgLibraryIPTC c \
+                     WHERE c.image = i.id_local ORDER BY c.id_local LIMIT 1), \
+                    (SELECT c.copyright FROM AgLibraryIPTC c \
+                     WHERE c.image = i.id_local ORDER BY c.id_local LIMIT 1), \
+                    {creator} \
+             FROM Adobe_images i \
+             LEFT JOIN AgLibraryFile f ON f.id_local = i.rootFile \
+             LEFT JOIN AgLibraryFolder d ON d.id_local = f.folder \
+             LEFT JOIN AgLibraryRootFolder r ON r.id_local = d.rootFolder \
+             ORDER BY i.id_local"
+        );
+        let mut stmt = self.conn.prepare(&sql).map_err(ReadError::Query)?;
         let rows = stmt
             .query_map([], |row| {
                 let file_id: Option<i64> = row.get(4)?;
@@ -97,6 +131,8 @@ impl Catalog {
                     pick: row.get(12)?,
                     color_label: text_value(row.get(13)?).filter(|t| !t.is_empty()),
                     caption: text_value(row.get(14)?).filter(|t| !t.is_empty()),
+                    copyright: text_value(row.get(15)?).filter(|t| !t.is_empty()),
+                    creator: text_value(row.get(16)?).filter(|t| !t.is_empty()),
                     file_format: text_value(row.get(3)?),
                     global_id: text_value(row.get(11)?),
                     file: match file_id {
@@ -187,8 +223,16 @@ fn photo_from_row(row: Row, used: &mut HashSet<String>) -> Result<Photo, String>
     let photo = Photo::new(join_file_path(&folder, &file_name(&base, &ext)), id, rating)
         .with_global_id(global_id)
         .with_flag(flag);
-    Ok(match row.caption {
+    let photo = match row.caption {
         Some(caption) => photo.with_caption(caption),
+        None => photo,
+    };
+    let photo = match row.copyright {
+        Some(copyright) => photo.with_copyright(copyright),
+        None => photo,
+    };
+    Ok(match row.creator {
+        Some(creator) => photo.with_creator(creator),
         None => photo,
     })
 }
@@ -280,6 +324,8 @@ mod tests {
             pick: Value::Null,
             color_label: None,
             caption: None,
+            copyright: None,
+            creator: None,
             file: Some(("IMG".into(), "jpg".into())),
             folder: Some("a/".into()),
             root_row: true,
@@ -321,6 +367,18 @@ mod tests {
         assert_eq!(p.caption.as_deref(), Some(" a "));
         let p = photo_from_row(row(), &mut HashSet::new()).unwrap();
         assert_eq!(p.caption, None);
+    }
+
+    #[test]
+    fn copyright_and_creator_of_the_row_are_carried_by_the_photo() {
+        let mut r = row();
+        r.copyright = Some(" c ".into());
+        r.creator = Some(" a ".into());
+        let p = photo_from_row(r, &mut HashSet::new()).unwrap();
+        assert_eq!(p.copyright.as_deref(), Some(" c "));
+        assert_eq!(p.creator.as_deref(), Some(" a "));
+        let p = photo_from_row(row(), &mut HashSet::new()).unwrap();
+        assert_eq!((p.copyright, p.creator), (None, None));
     }
 
     #[test]

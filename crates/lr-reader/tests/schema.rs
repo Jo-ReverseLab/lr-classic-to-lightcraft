@@ -167,7 +167,6 @@ fn missing_iptc_image_column_is_reported() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn missing_iptc_copyright_column_is_reported() {
     // P5b-7b: AgLibraryIPTC.copyright is required (the creator tables are not).
     let dir = tempfile::tempdir().unwrap();

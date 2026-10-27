@@ -98,7 +98,10 @@ const REQUIRED_SCHEMA: &[(&str, &[&str])] = &[
     ),
     ("AgLibraryKeywordImage", &["id_local", "image", "tag"]),
     ("AgLibraryKeywordSynonym", &["id_local", "keyword", "name"]),
-    ("AgLibraryIPTC", &["id_local", "image", "caption"]),
+    (
+        "AgLibraryIPTC",
+        &["id_local", "image", "caption", "copyright"],
+    ),
 ];
 
 /// Suffixes SQLite appends to the full catalog file name for side files

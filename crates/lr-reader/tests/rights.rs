@@ -20,7 +20,6 @@
 //!
 //! Fixtures: `lrcat_fixtures::write_rights_catalog_with_files` and
 //! `write_copyright_only_catalog_with_files`, see `lrcat_fixtures::rights_edge`.
-#![cfg(any())]
 
 use lr_reader::{Catalog, PhotoData, checksum};
 use lrcat_fixtures::rights_edge as e;
@@ -53,7 +52,6 @@ fn photo(data: &PhotoData, id: i64) -> &model::Photo {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn copyright_is_returned_byte_for_byte() {
     let (_d, _c, data, _) = read();
     assert_eq!(
@@ -67,7 +65,6 @@ fn copyright_is_returned_byte_for_byte() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn copyright_empty_null_missing_and_non_text_give_none() {
     let (_d, _c, data, _) = read();
     for id in [
@@ -83,7 +80,6 @@ fn copyright_empty_null_missing_and_non_text_give_none() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn copyright_smallest_id_local_wins() {
     let (_d, _c, data, _) = read();
     assert_eq!(
@@ -94,7 +90,6 @@ fn copyright_smallest_id_local_wins() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn creator_is_resolved_through_the_interned_table() {
     let (_d, _c, data, _) = read();
     assert_eq!(
@@ -107,7 +102,6 @@ fn creator_is_resolved_through_the_interned_table() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn creator_smallest_harvested_id_local_wins() {
     let (_d, _c, data, _) = read();
     assert_eq!(
@@ -119,7 +113,6 @@ fn creator_smallest_harvested_id_local_wins() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn creator_null_dangling_empty_non_text_and_missing_give_none_without_skipping() {
     let (_d, _c, data, _) = read();
     // 5: creatorRef NULL, 6: dangling ref, 10: empty value, 11: integer value,
@@ -137,7 +130,6 @@ fn creator_null_dangling_empty_non_text_and_missing_give_none_without_skipping()
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn photos_and_counts_are_unchanged_by_rights_data() {
     let (_d, _c, data, report) = read();
     let plain_dir = tempfile::tempdir().unwrap();
@@ -158,7 +150,6 @@ fn photos_and_counts_are_unchanged_by_rights_data() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn missing_creator_tables_are_not_an_error() {
     let dir = tempfile::tempdir().unwrap();
     let cat = lrcat_fixtures::write_copyright_only_catalog_with_files(dir.path()).unwrap();
@@ -175,7 +166,6 @@ fn missing_creator_tables_are_not_an_error() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn rights_text_stays_out_of_the_report() {
     let (_d, _c, _data, report) = read();
     for item in report.skipped_items() {
@@ -186,7 +176,6 @@ fn rights_text_stays_out_of_the_report() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn second_read_is_identical() {
     let (_d, cat, a, _) = read();
     let (b, _) = read_at(&cat);
