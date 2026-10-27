@@ -1,21 +1,19 @@
-//! Acceptance tests for reading collections (task P4-10).
+#![cfg(any())] // waiting for P5b-3a: remove this line when `collection_data` exists
+//! Acceptance tests for reading collections from the small fixture
+//! (task P5b-3a; replaces the P4-10 tests, which expected every collection
+//! to be skipped).
 //!
-//! Expected API: `Catalog::collections(&self, report: &mut model::Report)
-//! -> Result<(), ReadError>`. Every `AgLibraryCollection` row calls
-//! `report.read()` and `report.skipped(reason)`; the reader never calls
-//! `report.converted()` (user decision F-002: all collections count as
-//! skipped). Reasons (exact, never containing the collection name):
-//! - `systemOnly != 0` (wins over creationId):
-//!   "collection {id}: system collection is not converted"
-//! - `com.adobe.ag.library.collection`: "collection {id}: collection is not converted"
-//! - `com.adobe.ag.library.group`: "collection {id}: collection set is not converted"
-//! - `com.adobe.ag.library.smart_collection`:
-//!   "collection {id}: smart collection is not converted"
-//! - anything else: "collection {id}: unknown collection type is not converted"
+//! Expected API (see `collection_edge.rs` for the full rules):
+//! `Catalog::collection_data(&self, photos: &[model::Photo])
+//!  -> Result<CollectionData, ReadError>`.
+//!
+//! Small fixture: set 1 holds album 2; albums 3 and 4 are on top level;
+//! 5 and 6 are smart, 7 and 8 are `systemOnly` (quick), 9 has an unknown
+//! kind. Member rows: (2,1) (2,2) (3,3) (3,4) (4,5) (7,1) (8,6).
 
-use lr_reader::{Catalog, checksum};
+use lr_reader::{Catalog, CollectionData, checksum};
 use lrcat_fixtures::small;
-use model::Report;
+use model::{CollectionKind, Report};
 use std::path::{Path, PathBuf};
 
 fn small_fixture(dir: &Path) -> PathBuf {
@@ -24,92 +22,81 @@ fn small_fixture(dir: &Path) -> PathBuf {
     path
 }
 
-fn read_collections(path: &Path) -> Report {
+fn read(path: &Path) -> CollectionData {
     let catalog = Catalog::open(path).unwrap();
-    let mut report = Report::new();
-    catalog.collections(&mut report).expect("read collections");
-    report
+    let photos = catalog.photos(&mut Report::new()).unwrap();
+    catalog.collection_data(&photos).expect("read collections")
 }
 
 fn reasons(report: &Report) -> Vec<String> {
     report
         .skipped_items()
         .iter()
-        .map(|s| s.reason.clone())
+        .map(|s| s.reason.to_lowercase())
         .collect()
 }
 
-fn count_of(report: &Report, reason: &str) -> usize {
-    reasons(report).iter().filter(|r| *r == reason).count()
-}
-
 #[test]
-fn all_collections_are_read_and_skipped() {
+fn small_fixture_collections_are_converted_or_skipped() {
     let dir = tempfile::tempdir().unwrap();
-    let report = read_collections(&small_fixture(dir.path()));
-    assert_eq!(report.read_count() as i64, small::COLLECTIONS);
-    assert_eq!(report.converted_count(), 0);
-    assert_eq!(report.skipped_count() as i64, small::COLLECTIONS);
-    assert!(report.is_balanced());
+    let d = read(&small_fixture(dir.path()));
+    assert_eq!(d.report.read_count() as i64, small::COLLECTIONS);
+    assert_eq!(d.collections.len(), 4);
+    assert_eq!(d.report.skipped_count(), 5);
+    assert_eq!(
+        d.report.read_count(),
+        d.collections.len() + d.report.skipped_count()
+    );
+    let folders: Vec<i64> = d
+        .collections
+        .iter()
+        .filter(|c| c.kind == CollectionKind::Folder)
+        .map(|c| c.lightroom_id)
+        .collect();
+    assert_eq!(folders, vec![1]);
+    let mut albums: Vec<i64> = d
+        .collections
+        .iter()
+        .filter(|c| c.kind == CollectionKind::Album)
+        .map(|c| c.lightroom_id)
+        .collect();
+    albums.sort();
+    assert_eq!(albums, vec![2, 3, 4]);
 }
 
 #[test]
-fn skip_reasons_are_exact_per_kind() {
+fn small_fixture_parents_and_members() {
     let dir = tempfile::tempdir().unwrap();
-    let report = read_collections(&small_fixture(dir.path()));
-    // System collections: ids 7 and 8 (8 has the plain creationId; system wins).
-    for id in [7, 8] {
-        let r = format!("collection {id}: system collection is not converted");
-        assert_eq!(count_of(&report, &r), 1, "{r}");
-    }
-    for id in [2, 3, 4] {
-        let r = format!("collection {id}: collection is not converted");
-        assert_eq!(count_of(&report, &r), 1, "{r}");
-    }
-    assert_eq!(
-        count_of(&report, "collection 1: collection set is not converted"),
-        1
-    );
-    for id in [5, 6] {
-        let r = format!("collection {id}: smart collection is not converted");
-        assert_eq!(count_of(&report, &r), 1, "{r}");
-    }
-    assert_eq!(
-        count_of(
-            &report,
-            "collection 9: unknown collection type is not converted"
-        ),
-        1
-    );
+    let d = read(&small_fixture(dir.path()));
+    let get = |id: i64| d.collections.iter().find(|c| c.lightroom_id == id).unwrap();
+    assert_eq!(get(1).parent, None);
+    assert_eq!(get(2).parent, Some(1));
+    assert_eq!(get(3).parent, None);
+    assert_eq!(get(2).members, vec![1, 2]);
+    assert_eq!(get(3).members, vec![3, 4]);
+    assert_eq!(get(4).members, vec![5]);
+    assert!(get(1).members.is_empty());
 }
 
 #[test]
-fn reason_totals_match_fixture_constants() {
+fn small_fixture_member_balance() {
     let dir = tempfile::tempdir().unwrap();
-    let report = read_collections(&small_fixture(dir.path()));
-    let all = reasons(&report);
-    let n = |suffix: &str| all.iter().filter(|r| r.ends_with(suffix)).count() as i64;
-    assert_eq!(
-        n(": system collection is not converted"),
-        small::COLLECTIONS_SYSTEM
-    );
-    assert_eq!(n(": collection is not converted"), small::COLLECTIONS_PLAIN);
-    assert_eq!(
-        n(": collection set is not converted"),
-        small::COLLECTION_SETS
-    );
-    assert_eq!(
-        n(": smart collection is not converted"),
-        small::COLLECTIONS_SMART
-    );
-    assert_eq!(
-        n(": unknown collection type is not converted"),
-        small::COLLECTIONS_UNKNOWN
+    let d = read(&small_fixture(dir.path()));
+    let kept: usize = d.collections.iter().map(|c| c.members.len()).sum();
+    assert_eq!(d.members.read_count() as i64, small::COLLECTION_IMAGES);
+    assert_eq!(kept, 5);
+    // (7,1) and (8,6) belong to skipped collections.
+    assert_eq!(d.members.skipped_count(), 2);
+    assert_eq!(d.members.read_count(), kept + d.members.skipped_count());
+    assert!(
+        reasons(&d.members)
+            .iter()
+            .all(|r| r.contains("collection skipped"))
     );
 }
 
 #[test]
-fn no_collection_name_appears_in_any_reason() {
+fn small_fixture_names_do_not_appear_in_any_reason() {
     let dir = tempfile::tempdir().unwrap();
     let path = small_fixture(dir.path());
     let names: Vec<String> = {
@@ -120,13 +107,12 @@ fn no_collection_name_appears_in_any_reason() {
             .map(Result::unwrap)
             .collect()
     };
-    assert_eq!(names.len() as i64, small::COLLECTIONS);
-    let report = read_collections(&path);
-    for reason in reasons(&report) {
+    let d = read(&path);
+    for reason in reasons(&d.report).into_iter().chain(reasons(&d.members)) {
         for name in &names {
             assert!(
-                !reason.contains(name.as_str()),
-                "reason {reason:?} has name"
+                !reason.contains(&name.to_lowercase()),
+                "{reason:?} has name"
             );
         }
     }
@@ -137,7 +123,7 @@ fn reading_collections_does_not_change_the_catalog() {
     let dir = tempfile::tempdir().unwrap();
     let path = small_fixture(dir.path());
     let before = checksum(&path).unwrap();
-    let _ = read_collections(&path);
+    let _ = read(&path);
     assert_eq!(before, checksum(&path).unwrap());
 }
 
@@ -145,9 +131,13 @@ fn reading_collections_does_not_change_the_catalog() {
 fn reading_twice_gives_identical_results() {
     let dir = tempfile::tempdir().unwrap();
     let path = small_fixture(dir.path());
-    let a = reasons(&read_collections(&path));
-    let b = reasons(&read_collections(&path));
-    assert_eq!(a, b);
+    let (a, b) = (read(&path), read(&path));
+    assert_eq!(
+        format!("{:?}", a.collections),
+        format!("{:?}", b.collections)
+    );
+    assert_eq!(reasons(&a.report), reasons(&b.report));
+    assert_eq!(reasons(&a.members), reasons(&b.members));
 }
 
 #[test]
@@ -159,8 +149,8 @@ fn catalog_without_collections_reads_zero() {
         c.execute_batch("DELETE FROM AgLibraryCollectionImage; DELETE FROM AgLibraryCollection;")
             .unwrap();
     }
-    let report = read_collections(&path);
-    assert_eq!(report.read_count(), 0);
-    assert_eq!(report.skipped_count(), 0);
-    assert!(report.is_balanced());
+    let d = read(&path);
+    assert!(d.collections.is_empty());
+    assert_eq!(d.report.read_count(), 0);
+    assert_eq!(d.members.read_count(), 0);
 }
