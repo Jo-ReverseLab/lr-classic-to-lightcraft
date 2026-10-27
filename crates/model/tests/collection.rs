@@ -1,4 +1,3 @@
-#![cfg(any())] // waiting for P5b-3a: remove this line when `model::Collection` exists
 //! Acceptance tests for the collection model (task P5b-3a).
 //!
 //! Expected API (new in `crates/model/src/lib.rs`):

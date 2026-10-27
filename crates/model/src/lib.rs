@@ -1,7 +1,8 @@
 //! Neutral data model shared by the reader and the writer.
 //!
 //! The model knows nothing about Lightroom's or LightCraft's storage.
-//! It only describes folders, photos, keywords, ratings, flags, colour labels and the run report.
+//! It only describes folders, photos, keywords, ratings, flags, colour labels,
+//! collections and the run report.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -270,6 +271,32 @@ impl Keyword {
     pub fn is_child_of(&self, other: &Keyword) -> bool {
         self.path.len() == other.path.len() + 1 && self.path.starts_with(&other.path)
     }
+}
+
+/// What a collection is: an album holds photos, a folder holds other
+/// collections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CollectionKind {
+    /// A collection of photos (Lightroom: collection).
+    Album,
+    /// A container of albums and folders (Lightroom: collection set).
+    Folder,
+}
+
+/// A collection or collection set with its place in the tree and its
+/// members.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Collection {
+    /// Lightroom's `id_local` of the collection (provenance).
+    pub lightroom_id: i64,
+    /// The name, kept byte for byte. Never reported.
+    pub name: String,
+    pub kind: CollectionKind,
+    /// `lightroom_id` of the parent folder; `None` on top level.
+    pub parent: Option<i64>,
+    /// `lightroom_id`s of the member photos, in source order. Always empty
+    /// for folders.
+    pub members: Vec<i64>,
 }
 
 /// An element that could not be converted.
