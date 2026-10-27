@@ -269,6 +269,56 @@ pub mod label_edge {
     }
 }
 
+/// Counts and ids of the caption fixture ([`write_caption_catalog_with_files`]).
+///
+/// The small fixture plus rows in `AgLibraryIPTC` (all other fixtures have
+/// that table, empty). The CLI converts photos 1 and 4..=19 (17 photos);
+/// photos 2 and 3 (missing original) and 20 (virtual copy) are skipped.
+/// Photos 2 and 20 carry a caption that must not be counted anywhere.
+pub mod caption_edge {
+    pub const CONVERTED: i64 = 17;
+    pub const SKIPPED: i64 = 3;
+    /// Converted photos with a caption: [`UMLAUT_ID`], [`PADDED_ID`],
+    /// [`DUPLICATE_ID`].
+    pub const CAPTIONS: i64 = 3;
+    pub const CAPTIONED_IDS: [i64; 3] = [4, 5, 9];
+    /// Photo 4: umlaut and emoji.
+    pub const UMLAUT_ID: i64 = 4;
+    pub const UMLAUT_TEXT: &str = "Sonnenuntergang \u{fc}ber K\u{f6}ln \u{1f305}";
+    /// Photo 5: leading and trailing spaces and a trailing newline.
+    pub const PADDED_ID: i64 = 5;
+    pub const PADDED_TEXT: &str = "  padded caption \n";
+    /// Photo 6: empty string.
+    pub const EMPTY_ID: i64 = 6;
+    /// Photo 7: NULL.
+    pub const NULL_ID: i64 = 7;
+    /// Photo 8: no row at all.
+    pub const NO_ROW_ID: i64 = 8;
+    /// Photo 9: rows `id_local` 101 ("second", inserted first) and 100
+    /// ("first"). The smallest `id_local` wins.
+    pub const DUPLICATE_ID: i64 = 9;
+    pub const DUPLICATE_TEXT: &str = "first";
+    /// Photo 10: rows 200 (NULL) and 201 ("later"). The smallest `id_local`
+    /// wins, so there is no caption.
+    pub const DUPLICATE_NULL_FIRST_ID: i64 = 10;
+    /// Photo 11: an integer 42 instead of text: no caption.
+    pub const NON_TEXT_ID: i64 = 11;
+    /// Skipped photos with a caption: 2 (missing original), 20 (virtual copy).
+    pub const SKIPPED_CAPTIONED_IDS: [i64; 2] = [2, 20];
+    pub const SKIPPED_TEXTS: [&str; 2] = ["skipped-missing-caption", "skipped-virtual-caption"];
+    /// Every caption text of the fixture that is not empty; none of them may
+    /// appear in any output of the tool.
+    pub const ALL_TEXTS: [&str; 7] = [
+        "Sonnenuntergang",
+        "padded caption",
+        "first",
+        "second",
+        "later",
+        "skipped-missing-caption",
+        "skipped-virtual-caption",
+    ];
+}
+
 /// Counts and ids of the video fixture ([`write_video_catalog_with_files`]).
 pub mod video_edge {
     /// `Adobe_images` rows: the 20 of the small fixture plus virtual copy 21.
@@ -302,6 +352,7 @@ CREATE TABLE Adobe_images (id_local INTEGER PRIMARY KEY, id_global NOT NULL, asp
 CREATE TABLE AgLibraryKeyword (id_local INTEGER PRIMARY KEY, id_global NOT NULL, dateCreated NOT NULL, genealogy NOT NULL, includeOnExport INTEGER NOT NULL, includeParents INTEGER NOT NULL, includeSynonyms INTEGER NOT NULL, imageCountCache, keywordType, lastApplied, lc_name, name, parent INTEGER);
 CREATE TABLE AgLibraryKeywordImage (id_local INTEGER PRIMARY KEY, image INTEGER NOT NULL, tag INTEGER NOT NULL);
 CREATE TABLE AgLibraryKeywordSynonym (id_local INTEGER PRIMARY KEY, keyword INTEGER NOT NULL DEFAULT 0, lc_name, name);
+CREATE TABLE AgLibraryIPTC (id_local INTEGER PRIMARY KEY, altTextAccessibility, caption, copyright, extDescrAccessibility, image INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE Adobe_AdditionalMetadata (id_local INTEGER PRIMARY KEY, id_global, image INTEGER, xmp, embeddedXmp INTEGER, externalXmpIsDirty INTEGER);
 CREATE TABLE Adobe_imageProperties (id_local INTEGER PRIMARY KEY, id_global, image, propertiesString);
 CREATE TABLE AgLibraryCollection (id_local INTEGER PRIMARY KEY, creationId NOT NULL, genealogy NOT NULL, imageCount, name NOT NULL, parent INTEGER, systemOnly NOT NULL);
@@ -710,6 +761,50 @@ fn add_label_edges(path: &Path, fixture: label_edge::Fixture) -> Result<()> {
         "UPDATE Adobe_images SET colorLabels = NULL WHERE id_local = ?1",
         [label_edge::NULL_ID],
     )?;
+    c.execute_batch("COMMIT")?;
+    Ok(())
+}
+
+/// Writes the small fixture with the `AgLibraryIPTC` rows of
+/// [`caption_edge`] as `dir/captions.lrcat` with placeholder originals.
+/// Photos not named in [`caption_edge`] (1, 12..=19) have one row with a
+/// NULL caption. Returns the catalog path.
+pub fn write_caption_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("captions.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_caption_edges(&catalog)?;
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+fn add_caption_edges(path: &Path) -> Result<()> {
+    use caption_edge as e;
+    let c = Connection::open(path)?;
+    c.execute_batch("BEGIN")?;
+    let mut put = |row: i64, image: i64, caption: rusqlite::types::Value| {
+        c.execute(
+            "INSERT INTO AgLibraryIPTC (id_local, caption, image) VALUES (?1, ?2, ?3)",
+            params![row, caption, image],
+        )
+    };
+    use rusqlite::types::Value as V;
+    let text = |s: &str| V::Text(s.to_string());
+    put(1001, 1, V::Null)?;
+    for id in 12..=19 {
+        put(1000 + id, id, V::Null)?;
+    }
+    put(1004, e::UMLAUT_ID, text(e::UMLAUT_TEXT))?;
+    put(1005, e::PADDED_ID, text(e::PADDED_TEXT))?;
+    put(1006, e::EMPTY_ID, text(""))?;
+    put(1007, e::NULL_ID, V::Null)?;
+    put(101, e::DUPLICATE_ID, text("second"))?;
+    put(100, e::DUPLICATE_ID, text(e::DUPLICATE_TEXT))?;
+    put(200, e::DUPLICATE_NULL_FIRST_ID, V::Null)?;
+    put(201, e::DUPLICATE_NULL_FIRST_ID, text("later"))?;
+    put(1011, e::NON_TEXT_ID, V::Integer(42))?;
+    put(1002, 2, text(e::SKIPPED_TEXTS[0]))?;
+    put(1020, 20, text(e::SKIPPED_TEXTS[1]))?;
     c.execute_batch("COMMIT")?;
     Ok(())
 }
