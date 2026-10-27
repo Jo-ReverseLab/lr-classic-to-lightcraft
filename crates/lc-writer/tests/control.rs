@@ -29,7 +29,6 @@
 //! dev-dependencies `serde_json` and `tempfile`. The developer may ONLY
 //! remove the `#![cfg(any())]` line (and add the dev-dependencies to
 //! `Cargo.toml`). Any other change to this file needs the test author.
-#![cfg(any())]
 
 #[path = "support/fake_port.rs"]
 mod fake_port;
