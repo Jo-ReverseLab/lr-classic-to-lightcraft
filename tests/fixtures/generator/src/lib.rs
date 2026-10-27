@@ -297,6 +297,22 @@ pub fn write_small_catalog(path: &Path) -> Result<()> {
 /// No assignment hits two problems at once.
 pub fn write_keyword_edge_catalog(path: &Path) -> Result<()> {
     write_small_catalog(path)?;
+    add_keyword_edges(path)
+}
+
+/// Like [`write_keyword_edge_catalog`], but as `dir/keywords.lrcat` with
+/// placeholder originals as in [`write_small_catalog_with_files`] (photos 2, 3
+/// and 20 have missing originals). Returns the catalog path.
+pub fn write_keyword_edge_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("keywords.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_keyword_edges(&catalog)?;
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+fn add_keyword_edges(path: &Path) -> Result<()> {
     let c = Connection::open(path)?;
     c.execute_batch("BEGIN")?;
     add_keyword(&c, 14, Some("Bad|Name"), 1, "/1/14")?;
@@ -358,12 +374,24 @@ fn root_below(dir: &Path, name: &str) -> String {
 /// except the files in `small::MISSING_FILE_IDS`. Counts are the same as in
 /// `write_small_catalog`.
 pub fn write_small_catalog_with_files(dir: &Path) -> Result<PathBuf> {
-    std::fs::create_dir_all(dir).map_err(io_err)?;
-    let mac = root_below(dir, small::MACOS_ROOT_DIR);
-    let win = root_below(dir, small::WINDOWS_ROOT_DIR);
+    let (mac, win) = prepare_root_dirs(dir)?;
     let catalog = dir.join("small.lrcat");
     write_small(&catalog, &mac, &win)?;
-    let c = Connection::open_with_flags(&catalog, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+fn prepare_root_dirs(dir: &Path) -> Result<(String, String)> {
+    std::fs::create_dir_all(dir).map_err(io_err)?;
+    Ok((
+        root_below(dir, small::MACOS_ROOT_DIR),
+        root_below(dir, small::WINDOWS_ROOT_DIR),
+    ))
+}
+
+/// Creates a placeholder file for every original except the missing ones.
+fn create_original_files(catalog: &Path) -> Result<()> {
+    let c = Connection::open_with_flags(catalog, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let mut st = c.prepare(
         "SELECT f.id_local, r.absolutePath, d.pathFromRoot, f.idx_filename FROM AgLibraryFile f \
          JOIN AgLibraryFolder d ON d.id_local = f.folder \
@@ -388,7 +416,7 @@ pub fn write_small_catalog_with_files(dir: &Path) -> Result<PathBuf> {
             std::fs::write(p.join(name), b"placeholder\n").map_err(io_err)?;
         }
     }
-    Ok(catalog)
+    Ok(())
 }
 
 fn write_small(path: &Path, mac_root: &str, win_root: &str) -> Result<()> {
