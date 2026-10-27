@@ -60,10 +60,10 @@ fn input(photos: Vec<Photo>, per_photo: Vec<(i64, Vec<Keyword>)>) -> WriteInput 
     let mut keywords: Vec<Keyword> = Vec::new();
     for (_, ks) in &per_photo {
         for k in ks {
-            if let Some(p) = k.parent() {
-                if !keywords.iter().any(|x| x.path() == p.path()) {
-                    keywords.push(p);
-                }
+            if let Some(p) = k.parent()
+                && !keywords.iter().any(|x| x.path() == p.path())
+            {
+                keywords.push(p);
             }
             if !keywords.iter().any(|x| x.path() == k.path()) {
                 keywords.push(k.clone());
