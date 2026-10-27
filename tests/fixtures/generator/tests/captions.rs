@@ -11,7 +11,9 @@ fn rows_match_the_documentation() {
     let c = Connection::open_with_flags(&cat, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
     let rows = |image: i64| -> Vec<(i64, Value)> {
         let mut st = c
-            .prepare("SELECT id_local, caption FROM AgLibraryIPTC WHERE image = ?1 ORDER BY id_local")
+            .prepare(
+                "SELECT id_local, caption FROM AgLibraryIPTC WHERE image = ?1 ORDER BY id_local",
+            )
             .unwrap();
         st.query_map([image], |r| Ok((r.get(0)?, r.get(1)?)))
             .unwrap()
