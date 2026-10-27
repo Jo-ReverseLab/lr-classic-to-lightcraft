@@ -408,6 +408,93 @@ pub mod video_edge {
     pub const SKIPPED: i64 = 6;
 }
 
+/// Counts and ids of the collection fixture ([`write_collection_catalog`]).
+///
+/// It is the small fixture with all collection rows replaced. Photos used
+/// as members are 1..=19 except 2 and 3 (missing originals in the CLI),
+/// 20 (virtual copy) and 999 (does not exist), so reader and CLI see the same
+/// converted members. All names are invented; the ones that must never be
+/// printed are in [`NAMES`].
+pub mod collection_edge {
+    /// Rows in `AgLibraryCollection`.
+    pub const COLLECTIONS: i64 = 25;
+    /// Converted: folders 1, 2, 3 and albums 4..=12.
+    pub const CONVERTED: i64 = 12;
+    pub const FOLDERS: i64 = 3;
+    pub const ALBUMS: i64 = 9;
+    pub const SKIPPED: i64 = 13;
+    /// Albums that repeat the name of an earlier sibling (ids 11 and 12 are
+    /// both "Twin" below set 2: one repeat).
+    pub const DUPLICATE_NAMES: i64 = 1;
+    /// Rows in `AgLibraryCollectionImage`.
+    pub const MEMBER_ROWS: i64 = 26;
+    pub const MEMBERS_CONVERTED: i64 = 16;
+    pub const MEMBERS_SKIPPED: i64 = 10;
+    /// Folder ids and the ids of the folders' (converted) albums.
+    pub const FOLDER_IDS: [i64; 3] = [1, 2, 3];
+    pub const ALBUM_IDS: [i64; 9] = [4, 5, 6, 7, 8, 9, 10, 11, 12];
+    /// Smart collection ids (13 has a member row).
+    pub const SMART_IDS: [i64; 1] = [13];
+    /// Quick collection ids (`systemOnly` REAL 1.0 and INTEGER 1).
+    pub const QUICK_IDS: [i64; 2] = [14, 15];
+    /// Web (16) and print (17) collections: other kinds.
+    pub const OTHER_KIND_IDS: [i64; 2] = [16, 17];
+    /// Skipped because of the parent: missing (18), album (19), skipped
+    /// (20), set below a skipped set (21), album below that (22), cycle
+    /// (23, 24), own parent (25).
+    pub const PARENT_IDS: [i64; 8] = [18, 19, 20, 21, 22, 23, 24, 25];
+    /// `(id, name, parent)` of the converted collections.
+    pub const NAMES: [(i64, &str, Option<i64>); 12] = [
+        (1, "Set Top", None),
+        (2, "Set Mid", Some(1)),
+        (3, "Set Deep", Some(2)),
+        (4, "Album Deep", Some(3)),
+        (5, "Album Mid", Some(2)),
+        (6, "Album Top", None),
+        (7, "S\u{fc}\u{df}e \u{c4}pfel", Some(1)),
+        (8, "\u{1f305} Sunrise \u{1f304}", None),
+        (9, "Gru\u{308}n ", None),
+        (10, "Empty", Some(1)),
+        (11, "Twin", Some(2)),
+        (12, "Twin", Some(2)),
+    ];
+    /// Expected member photo ids per converted album, in order.
+    pub const MEMBERS: [(i64, &[i64]); 9] = [
+        (4, &[4, 5, 1]),
+        (5, &[7, 6, 8]),
+        (6, &[11, 10, 9, 12]),
+        (7, &[15, 16]),
+        (8, &[17]),
+        (9, &[18]),
+        (10, &[]),
+        (11, &[13]),
+        (12, &[14]),
+    ];
+    /// Names of skipped collections; they must never be printed.
+    pub const SKIPPED_NAMES: [&str; 13] = [
+        "Zyx-Smart",
+        "Zyx-Quick-Real",
+        "Zyx-Quick-Int",
+        "Zyx-Web",
+        "Zyx-Print",
+        "Zyx-Lost-Parent",
+        "Zyx-Album-Parent",
+        "Zyx-Smart-Child",
+        "Zyx-Set-Below",
+        "Zyx-Album-Below",
+        "Zyx-Cycle-A",
+        "Zyx-Cycle-B",
+        "Zyx-Self",
+    ];
+    /// Member photos that are skipped inside converted albums: virtual
+    /// copy 20 and unknown 999 (album 8), duplicate of 15 (album 7).
+    pub const NOT_CONVERTED_PHOTOS: [i64; 2] = [20, 999];
+    /// Album 7 stores the pair (7, 15) twice.
+    pub const DUPLICATE_MEMBER: (i64, i64) = (7, 15);
+    /// Folder 3 has a member row (photo 19).
+    pub const FOLDER_WITH_MEMBER: i64 = 3;
+}
+
 const SCHEMA: &str = "
 CREATE TABLE Adobe_variablesTable (id_local INTEGER PRIMARY KEY, id_global NOT NULL, name, type, value NOT NULL);
 CREATE TABLE AgLibraryRootFolder (id_local INTEGER PRIMARY KEY, id_global NOT NULL, absolutePath NOT NULL, name NOT NULL, relativePathFromCatalog);
@@ -972,6 +1059,124 @@ pub fn assignments_to_photo(path: &Path, photo: i64) -> Result<i64> {
         [photo],
         |r| r.get(0),
     )
+}
+
+/// Writes the small fixture with its collections replaced by the ones
+/// described in [`collection_edge`]. Order of the member rows follows
+/// `AgLibraryCollectionImage.id_local`, which is the insertion order below.
+pub fn write_collection_catalog(path: &Path) -> Result<()> {
+    write_small_catalog(path)?;
+    add_collection_edges(path)
+}
+
+/// Like [`write_collection_catalog`], but as `dir/collections.lrcat` with
+/// placeholder originals as in [`write_small_catalog_with_files`].
+pub fn write_collection_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("collections.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_collection_edges(&catalog)?;
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+fn add_collection_edges(path: &Path) -> Result<()> {
+    use rusqlite::types::Value as V;
+    const COLL: &str = "com.adobe.ag.library.collection";
+    const SET: &str = "com.adobe.ag.library.group";
+    let c = Connection::open(path)?;
+    // `systemOnly` is nullable here (NOT NULL in a real catalog) so that NULL
+    // can be tested.
+    c.execute_batch(
+        "BEGIN; DELETE FROM AgLibraryCollectionImage; DROP TABLE AgLibraryCollection; \
+         CREATE TABLE AgLibraryCollection (id_local INTEGER PRIMARY KEY, creationId NOT NULL, genealogy NOT NULL, imageCount, name NOT NULL, parent INTEGER, systemOnly);",
+    )?;
+    let zero = || V::Integer(0);
+    // (id, creationId, name, parent, systemOnly)
+    let rows: Vec<(i64, &str, &str, Option<i64>, V)> = vec![
+        (1, SET, "Set Top", None, zero()),
+        (2, SET, "Set Mid", Some(1), V::Real(0.0)),
+        (3, SET, "Set Deep", Some(2), V::Null),
+        (4, COLL, "Album Deep", Some(3), zero()),
+        (5, COLL, "Album Mid", Some(2), V::Null),
+        (6, COLL, "Album Top", None, zero()),
+        (7, COLL, "S\u{fc}\u{df}e \u{c4}pfel", Some(1), zero()),
+        (8, COLL, "\u{1f305} Sunrise \u{1f304}", None, zero()),
+        (9, COLL, "Gru\u{308}n ", None, zero()),
+        (10, COLL, "Empty", Some(1), zero()),
+        (11, COLL, "Twin", Some(2), zero()),
+        (12, COLL, "Twin", Some(2), zero()),
+        (
+            13,
+            "com.adobe.ag.library.smart_collection",
+            "Zyx-Smart",
+            None,
+            zero(),
+        ),
+        (
+            14,
+            "com.adobe.ag.library.quick_collection",
+            "Zyx-Quick-Real",
+            None,
+            V::Real(1.0),
+        ),
+        (15, COLL, "Zyx-Quick-Int", None, V::Integer(1)),
+        (16, "com.adobe.ag.webGallery", "Zyx-Web", None, zero()),
+        (17, "com.adobe.ag.print", "Zyx-Print", None, zero()),
+        (18, COLL, "Zyx-Lost-Parent", Some(9999), zero()),
+        (19, COLL, "Zyx-Album-Parent", Some(4), zero()),
+        (20, COLL, "Zyx-Smart-Child", Some(13), zero()),
+        (21, SET, "Zyx-Set-Below", Some(18), zero()),
+        (22, COLL, "Zyx-Album-Below", Some(21), zero()),
+        (23, SET, "Zyx-Cycle-A", Some(24), zero()),
+        (24, SET, "Zyx-Cycle-B", Some(23), zero()),
+        (25, SET, "Zyx-Self", Some(25), zero()),
+    ];
+    for (id, creation, name, parent, system) in rows {
+        c.execute(
+            "INSERT INTO AgLibraryCollection (id_local, creationId, genealogy, imageCount, name, parent, systemOnly) VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6)",
+            params![id, creation, format!("/{id}"), name, parent, system],
+        )?;
+    }
+    // (collection, image, position); the order is the row order.
+    let n = V::Null;
+    let r = |x: f64| V::Real(x);
+    let members: Vec<(i64, i64, V)> = vec![
+        (4, 1, r(3.0)),
+        (4, 4, r(1.0)),
+        (4, 5, r(2.0)),
+        (5, 7, n.clone()),
+        (5, 6, n.clone()),
+        (5, 8, n.clone()),
+        (6, 9, n.clone()),
+        (6, 10, r(2.5)),
+        (6, 11, r(1.5)),
+        (6, 12, n.clone()),
+        (7, 15, r(1.0)),
+        (7, 15, r(2.0)),
+        (7, 16, r(3.0)),
+        (8, 20, r(1.0)),
+        (8, 999, r(2.0)),
+        (8, 17, r(3.0)),
+        (9, 18, r(1.0)),
+        (11, 13, r(1.0)),
+        (12, 14, r(1.0)),
+        (3, 19, r(1.0)),
+        (13, 1, r(1.0)),
+        (14, 2, r(1.0)),
+        (15, 3, r(1.0)),
+        (16, 4, r(1.0)),
+        (18, 5, r(1.0)),
+        (22, 15, r(1.0)),
+    ];
+    for (coll, image, pos) in members {
+        c.execute(
+            "INSERT INTO AgLibraryCollectionImage (collection, image, pick, positionInCollection) VALUES (?1, ?2, 0, ?3)",
+            params![coll, image, pos],
+        )?;
+    }
+    c.execute_batch("COMMIT")?;
+    Ok(())
 }
 
 fn add_video_edges(path: &Path) -> Result<()> {
