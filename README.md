@@ -12,8 +12,10 @@ only to describe compatibility.
 Early development. The dry run reads folders and photos from a catalog,
 applies path mappings and checks that the original files exist. It also
 reads keywords with their hierarchy and synonyms, their assignments to
-photos, the star ratings, the pick/reject flags and the colour labels. Collections are read and counted, but not converted yet: each
-one is listed as skipped.
+photos, the star ratings, the pick/reject flags and the colour labels.
+It reads collections as albums and collection sets as album folders, with
+their members; the dry run reports them, but `--apply` does not write
+albums yet (planned next).
 With `--apply`, lr2lc writes keywords, photos (as references), ratings,
 flags, labels, titles, captions, copyright and creator into a LightCraft
 library through the control port of the running LightCraft app.
@@ -36,8 +38,8 @@ checksum before and after the run proves it was not changed.
 ### Dry run (default)
 
 Without `--apply`, lr2lc only reads the catalog and prints a summary: how
-many folders, photos, collections, keywords, keyword assignments and keyword
-synonyms it read,
+many folders, photos, collections, collection members, keywords, keyword
+assignments and keyword synonyms it read,
 how many it would convert and how many it skips, with the reasons grouped.
 A line `videos: skipped N` follows, then a line with keyword attribute
 counts, a line shows how many of the converted photos have 0 to 5
@@ -53,6 +55,18 @@ keyword attributes: persons 0, not exported 0, no parents on export 0, no synony
 ratings: 0: 6, 1: 3, 2: 2, 3: 3, 4: 2, 5: 1
 flags: pick 4, reject 2, none 11, unknown 0
 ```
+
+Collections become albums and collection sets become album folders, with
+their nesting and names unchanged. Smart collections, the Quick Collection
+(and other system collections) and other kinds such as web or print
+collections are skipped with a reason. A collection whose parent is missing,
+skipped, not a collection set or part of a cycle is skipped, and so is
+everything below it. Empty collections are kept. Members keep Lightroom's
+order; a member is skipped if its photo is not converted (for example a
+missing original or a virtual copy), if it repeats a photo already in the
+collection, if its collection is skipped, or if it belongs to a collection
+set, which holds no photos. Collection names never appear in the output or
+in the report. Albums are not written to LightCraft yet.
 
 LightCraft cannot read videos, so they are skipped with the reason
 `video files are not supported by LightCraft`. A photo counts as a video if
@@ -170,9 +184,17 @@ Writes a machine-readable report to `FILE` after the run:
     }
   },
   "collections": {
-    "read": 1,
-    "converted": 0,
-    "skipped": [{ "reason": "collection 4: smart collection is not converted" }]
+    "read": 3,
+    "converted": 2,
+    "skipped": [{ "reason": "collection 4: smart collection is not converted" }],
+    "albums": 1,
+    "folders": 1,
+    "duplicate_names": 0
+  },
+  "collection_members": {
+    "read": 2,
+    "converted": 1,
+    "skipped": [{ "reason": "photo 7: skipped or unknown photo, not added to collection 2" }]
   },
   "keywords": {
     "read": 3,
@@ -210,6 +232,10 @@ converted photos per colour label, names the label set (`en`, `de`, `file`
 or `none`) and lists each photo with a custom label; its seven counts add
 up to `photos.converted`. The six attribute
 counts in `keywords` cover converted keywords only, like the summary line.
+`collections.albums` and `collections.folders` count the converted
+collections by kind; `collections.duplicate_names` counts converted
+collections that repeat the exact name of an earlier sibling below the same
+parent (two equal names count as 1).
 
 To protect the catalog and your files, `FILE` is checked before anything is
 read, and lr2lc stops with exit code 2 if:
