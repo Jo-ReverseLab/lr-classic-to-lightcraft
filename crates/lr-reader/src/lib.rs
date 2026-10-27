@@ -3,8 +3,10 @@
 mod catalog;
 mod collections;
 mod folders;
+mod keywords;
 mod originals;
 mod photos;
 
 pub use catalog::{Catalog, ReadError, SUPPORTED_VERSION, checksum};
+pub use keywords::KeywordData;
 pub use originals::drop_missing_originals;

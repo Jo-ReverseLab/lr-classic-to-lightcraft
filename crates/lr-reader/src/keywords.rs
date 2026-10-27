@@ -1,0 +1,489 @@
+//! Reading keywords (`AgLibraryKeyword`) and their assignments to photos
+//! (`AgLibraryKeywordImage`).
+//!
+//! Skip reasons name ids only, never keyword names.
+
+use crate::catalog::{Catalog, ReadError};
+use model::{Keyword, Photo, Report};
+use rusqlite::OptionalExtension;
+use rusqlite::types::Value;
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+/// Keywords and their assignments read from a catalog.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KeywordData {
+    /// Converted keywords, ordered by `AgLibraryKeyword.id_local`.
+    pub keywords: Vec<Keyword>,
+    /// Keywords per Lightroom photo id (`Photo::lightroom_id`), in order of
+    /// the assignment rows (`AgLibraryKeywordImage.id_local`). Photos
+    /// without keywords have no entry.
+    pub assignments: BTreeMap<i64, Vec<Keyword>>,
+}
+
+/// One `AgLibraryKeyword` row.
+#[derive(Debug, Clone)]
+struct KeywordRow {
+    id: i64,
+    /// `None` if the name is NULL.
+    name: Option<String>,
+    parent: Option<i64>,
+}
+
+/// One `AgLibraryKeywordImage` row.
+#[derive(Debug, Clone, Copy)]
+struct AssignmentRow {
+    id: i64,
+    image: Option<i64>,
+    tag: Option<i64>,
+}
+
+impl Catalog {
+    /// Reads all keywords and their assignments to `photos`.
+    ///
+    /// Every keyword row except the hidden root keyword
+    /// (`AgLibraryKeyword_rootTagID`) is counted with [`Report::read`] on
+    /// `keyword_report`; every assignment row on `assignment_report`. Rows
+    /// that cannot be converted are recorded with [`Report::skipped`].
+    /// Nothing is marked converted here; the writer does that.
+    pub fn keywords(
+        &self,
+        photos: &[Photo],
+        keyword_report: &mut Report,
+        assignment_report: &mut Report,
+    ) -> Result<KeywordData, ReadError> {
+        let root = self.root_keyword_id()?;
+        let rows = self.keyword_rows()?;
+        let resolved = resolve_keywords(&rows, root);
+
+        let mut keywords = Vec::new();
+        let mut by_id = HashMap::new();
+        for (id, result) in resolved {
+            keyword_report.read();
+            match result {
+                Ok(keyword) => {
+                    by_id.insert(id, keyword.clone());
+                    keywords.push(keyword);
+                }
+                Err(reason) => keyword_report.skipped(reason),
+            }
+        }
+
+        let photo_ids: HashSet<i64> = photos.iter().map(|p| p.lightroom_id).collect();
+        let assignments = assign(
+            &self.assignment_rows()?,
+            &photo_ids,
+            &by_id,
+            assignment_report,
+        );
+        Ok(KeywordData {
+            keywords,
+            assignments,
+        })
+    }
+
+    /// The id of the hidden root keyword, or `None` if the catalog does not
+    /// name one (then no row is treated as the root).
+    fn root_keyword_id(&self) -> Result<Option<i64>, ReadError> {
+        let value: Option<Value> = self
+            .conn
+            .query_row(
+                "SELECT value FROM Adobe_variablesTable \
+                 WHERE name = 'AgLibraryKeyword_rootTagID' LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(ReadError::Query)?;
+        Ok(value.as_ref().and_then(value_as_id))
+    }
+
+    fn keyword_rows(&self) -> Result<Vec<KeywordRow>, ReadError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id_local, name, parent FROM AgLibraryKeyword ORDER BY id_local")
+            .map_err(ReadError::Query)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(KeywordRow {
+                    id: row.get(0)?,
+                    name: value_as_text(row.get(1)?),
+                    parent: row.get(2)?,
+                })
+            })
+            .map_err(ReadError::Query)?;
+        rows.collect::<Result<_, _>>().map_err(ReadError::Query)
+    }
+
+    fn assignment_rows(&self) -> Result<Vec<AssignmentRow>, ReadError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id_local, image, tag FROM AgLibraryKeywordImage ORDER BY id_local")
+            .map_err(ReadError::Query)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(AssignmentRow {
+                    id: row.get(0)?,
+                    image: row.get(1)?,
+                    tag: row.get(2)?,
+                })
+            })
+            .map_err(ReadError::Query)?;
+        rows.collect::<Result<_, _>>().map_err(ReadError::Query)
+    }
+}
+
+/// Reads an integer id stored as integer, integral real or numeric text.
+fn value_as_id(value: &Value) -> Option<i64> {
+    match value {
+        Value::Integer(n) => Some(*n),
+        Value::Real(f) if f.fract() == 0.0 => Some(*f as i64),
+        Value::Text(t) => t.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+/// Reads a name column; NULL becomes `None`.
+fn value_as_text(value: Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::Text(t) => Some(t),
+        Value::Integer(n) => Some(n.to_string()),
+        Value::Real(f) => Some(f.to_string()),
+        Value::Blob(b) => Some(String::from_utf8_lossy(&b).into_owned()),
+    }
+}
+
+/// Where the walk up the parent chain of a keyword ended.
+enum Top {
+    /// A keyword directly below the root (or without parent).
+    Root,
+    /// A parent that was resolved earlier.
+    Known(i64),
+    /// A parent id that has no row, or that closes a cycle.
+    Broken(i64),
+}
+
+/// Builds the full path of every keyword row except `root`, in row order.
+///
+/// A keyword is skipped if its name is empty or contains `|`, or if its
+/// parent is skipped, missing or part of a cycle; the parent reason wins.
+fn resolve_keywords(rows: &[KeywordRow], root: Option<i64>) -> Vec<(i64, Result<Keyword, String>)> {
+    let index: HashMap<i64, &KeywordRow> = rows.iter().map(|r| (r.id, r)).collect();
+    let mut done: HashMap<i64, Result<Keyword, String>> = HashMap::new();
+
+    for row in rows {
+        if Some(row.id) == root || done.contains_key(&row.id) {
+            continue;
+        }
+        // Walk up until the root, a resolved keyword, a missing row or a cycle.
+        let mut chain = vec![row];
+        let mut on_chain = HashSet::from([row.id]);
+        let top = loop {
+            let current = chain[chain.len() - 1];
+            match current.parent {
+                None => break Top::Root,
+                Some(p) if Some(p) == root => break Top::Root,
+                Some(p) if done.contains_key(&p) => break Top::Known(p),
+                Some(p) if on_chain.contains(&p) => break Top::Broken(p),
+                Some(p) => match index.get(&p) {
+                    Some(parent) => {
+                        chain.push(parent);
+                        on_chain.insert(p);
+                    }
+                    None => break Top::Broken(p),
+                },
+            }
+        };
+        // Resolve from the topmost row down.
+        let mut parent: Result<Vec<String>, i64> = match top {
+            Top::Root => Ok(Vec::new()),
+            Top::Known(p) => match &done[&p] {
+                Ok(k) => Ok(k.path().to_vec()),
+                Err(_) => Err(p),
+            },
+            Top::Broken(p) => Err(p),
+        };
+        for current in chain.into_iter().rev() {
+            let result = match parent {
+                Err(p) => Err(format!(
+                    "keyword {}: parent keyword {p} is skipped",
+                    current.id
+                )),
+                Ok(mut path) => own_name(current).map(|name| {
+                    path.push(name);
+                    path
+                }),
+            }
+            .and_then(|path| {
+                Keyword::new(path).map_err(|_| format!("keyword {}: name is empty", current.id))
+            });
+            parent = match &result {
+                Ok(k) => Ok(k.path().to_vec()),
+                Err(_) => Err(current.id),
+            };
+            done.insert(current.id, result);
+        }
+    }
+
+    rows.iter()
+        .filter(|r| Some(r.id) != root)
+        .map(|r| (r.id, done.remove(&r.id).expect("every row is resolved")))
+        .collect()
+}
+
+/// The keyword's own name, or the reason it cannot be used.
+fn own_name(row: &KeywordRow) -> Result<String, String> {
+    match row.name.as_deref() {
+        None => Err(format!("keyword {}: name is empty", row.id)),
+        Some(n) if n.trim().is_empty() => Err(format!("keyword {}: name is empty", row.id)),
+        Some(n) if n.contains('|') => {
+            Err(format!("keyword {}: name contains a vertical bar", row.id))
+        }
+        Some(n) => Ok(n.to_owned()),
+    }
+}
+
+/// Groups the converted keywords per photo. Every row is counted as read;
+/// a row whose photo is not in `photos` or whose keyword is not in
+/// `keywords` is skipped. The photo reason wins if both apply.
+fn assign(
+    rows: &[AssignmentRow],
+    photos: &HashSet<i64>,
+    keywords: &HashMap<i64, Keyword>,
+    report: &mut Report,
+) -> BTreeMap<i64, Vec<Keyword>> {
+    let mut out: BTreeMap<i64, Vec<Keyword>> = BTreeMap::new();
+    for row in rows {
+        report.read();
+        let image = row.image.filter(|i| photos.contains(i));
+        let keyword = row.tag.and_then(|t| keywords.get(&t));
+        match (image, keyword) {
+            (None, _) => report.skipped(format!(
+                "assignment {}: photo {} is skipped or unknown",
+                row.id,
+                id_text(row.image)
+            )),
+            (Some(_), None) => report.skipped(format!(
+                "assignment {}: keyword {} is skipped",
+                row.id,
+                id_text(row.tag)
+            )),
+            (Some(image), Some(keyword)) => out.entry(image).or_default().push(keyword.clone()),
+        }
+    }
+    out
+}
+
+fn id_text(id: Option<i64>) -> String {
+    id.map_or_else(|| "NULL".to_owned(), |i| i.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(id: i64, name: Option<&str>, parent: Option<i64>) -> KeywordRow {
+        KeywordRow {
+            id,
+            name: name.map(str::to_owned),
+            parent,
+        }
+    }
+
+    fn kw(parts: &[&str]) -> Keyword {
+        Keyword::new(parts.iter().map(|s| s.to_string()).collect()).unwrap()
+    }
+
+    fn reasons(resolved: &[(i64, Result<Keyword, String>)]) -> Vec<String> {
+        resolved
+            .iter()
+            .filter_map(|(_, r)| r.as_ref().err().cloned())
+            .collect()
+    }
+
+    #[test]
+    fn builds_paths_and_ignores_root() {
+        let rows = [
+            row(1, None, None),
+            row(3, Some("Child"), Some(2)),
+            row(2, Some("Top"), Some(1)),
+        ];
+        let resolved = resolve_keywords(&rows, Some(1));
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[0], (3, Ok(kw(&["Top", "Child"]))));
+        assert_eq!(resolved[1], (2, Ok(kw(&["Top"]))));
+    }
+
+    #[test]
+    fn keyword_without_parent_is_top_level() {
+        let resolved = resolve_keywords(&[row(5, Some("A"), None)], Some(1));
+        assert_eq!(resolved, vec![(5, Ok(kw(&["A"])))]);
+    }
+
+    #[test]
+    fn without_root_id_every_row_counts() {
+        let resolved = resolve_keywords(&[row(1, None, None), row(2, Some("A"), Some(1))], None);
+        assert_eq!(
+            reasons(&resolved),
+            vec![
+                "keyword 1: name is empty",
+                "keyword 2: parent keyword 1 is skipped"
+            ]
+        );
+    }
+
+    #[test]
+    fn subtree_of_vertical_bar_keyword_is_skipped() {
+        let rows = [
+            row(1, None, None),
+            row(2, Some("a|b"), Some(1)),
+            row(3, Some("Child"), Some(2)),
+            row(4, Some("Grandchild"), Some(3)),
+        ];
+        let resolved = resolve_keywords(&rows, Some(1));
+        assert_eq!(
+            reasons(&resolved),
+            vec![
+                "keyword 2: name contains a vertical bar",
+                "keyword 3: parent keyword 2 is skipped",
+                "keyword 4: parent keyword 3 is skipped",
+            ]
+        );
+    }
+
+    #[test]
+    fn null_and_whitespace_names_are_empty() {
+        let rows = [row(2, None, Some(1)), row(3, Some("  "), Some(1))];
+        let resolved = resolve_keywords(&rows, Some(1));
+        assert_eq!(
+            reasons(&resolved),
+            vec!["keyword 2: name is empty", "keyword 3: name is empty"]
+        );
+    }
+
+    #[test]
+    fn missing_parent_skips_keyword_and_subtree() {
+        let rows = [row(2, Some("A"), Some(99)), row(3, Some("B"), Some(2))];
+        let resolved = resolve_keywords(&rows, Some(1));
+        assert_eq!(
+            reasons(&resolved),
+            vec![
+                "keyword 2: parent keyword 99 is skipped",
+                "keyword 3: parent keyword 2 is skipped",
+            ]
+        );
+    }
+
+    #[test]
+    fn cycles_are_skipped_without_looping() {
+        let rows = [
+            row(2, Some("A"), Some(3)),
+            row(3, Some("B"), Some(2)),
+            row(4, Some("Self"), Some(4)),
+            row(5, Some("Below"), Some(2)),
+        ];
+        let resolved = resolve_keywords(&rows, Some(1));
+        assert_eq!(
+            reasons(&resolved),
+            vec![
+                "keyword 2: parent keyword 3 is skipped",
+                "keyword 3: parent keyword 2 is skipped",
+                "keyword 4: parent keyword 4 is skipped",
+                "keyword 5: parent keyword 2 is skipped",
+            ]
+        );
+    }
+
+    #[test]
+    fn deep_chain_is_resolved_iteratively() {
+        let mut rows = vec![row(1, None, None)];
+        for id in 2..=10_000 {
+            rows.push(row(id, Some("k"), Some(id - 1)));
+        }
+        let resolved = resolve_keywords(&rows, Some(1));
+        let last = resolved.last().unwrap().1.as_ref().unwrap();
+        assert_eq!(last.depth(), 9_999);
+    }
+
+    #[test]
+    fn reasons_never_contain_names() {
+        let rows = [
+            row(2, Some("Secret|Name"), Some(1)),
+            row(3, Some("Hidden"), Some(2)),
+            row(4, Some("Lost"), Some(77)),
+        ];
+        for reason in reasons(&resolve_keywords(&rows, Some(1))) {
+            for name in ["Secret", "Hidden", "Lost"] {
+                assert!(!reason.contains(name), "{reason}");
+            }
+        }
+    }
+
+    fn assignment(id: i64, image: i64, tag: i64) -> AssignmentRow {
+        AssignmentRow {
+            id,
+            image: Some(image),
+            tag: Some(tag),
+        }
+    }
+
+    #[test]
+    fn assignments_follow_row_order_and_skip_with_reasons() {
+        let photos = HashSet::from([10, 11]);
+        let keywords = HashMap::from([(2, kw(&["A"])), (3, kw(&["B"]))]);
+        let rows = [
+            assignment(1, 10, 3),
+            assignment(2, 10, 2),
+            assignment(3, 11, 1),  // root keyword
+            assignment(4, 11, 50), // unknown keyword
+            assignment(5, 12, 2),  // unknown photo
+            assignment(6, 12, 50), // both: photo reason wins
+        ];
+        let mut report = Report::new();
+        let out = assign(&rows, &photos, &keywords, &mut report);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[&10], vec![kw(&["B"]), kw(&["A"])]);
+        assert_eq!(report.read_count(), 6);
+        assert_eq!(report.converted_count(), 0);
+        let reasons: Vec<_> = report
+            .skipped_items()
+            .iter()
+            .map(|s| s.reason.as_str())
+            .collect();
+        assert_eq!(
+            reasons,
+            vec![
+                "assignment 3: keyword 1 is skipped",
+                "assignment 4: keyword 50 is skipped",
+                "assignment 5: photo 12 is skipped or unknown",
+                "assignment 6: photo 12 is skipped or unknown",
+            ]
+        );
+    }
+
+    #[test]
+    fn null_ids_in_assignments_are_skipped() {
+        let rows = [AssignmentRow {
+            id: 1,
+            image: None,
+            tag: None,
+        }];
+        let mut report = Report::new();
+        let out = assign(&rows, &HashSet::new(), &HashMap::new(), &mut report);
+        assert!(out.is_empty());
+        assert_eq!(
+            report.skipped_items()[0].reason,
+            "assignment 1: photo NULL is skipped or unknown"
+        );
+    }
+
+    #[test]
+    fn root_id_values() {
+        assert_eq!(value_as_id(&Value::Integer(7)), Some(7));
+        assert_eq!(value_as_id(&Value::Text(" 7 ".into())), Some(7));
+        assert_eq!(value_as_id(&Value::Real(7.0)), Some(7));
+        assert_eq!(value_as_id(&Value::Real(7.5)), None);
+        assert_eq!(value_as_id(&Value::Text("x".into())), None);
+        assert_eq!(value_as_id(&Value::Null), None);
+    }
+}

@@ -74,6 +74,8 @@ const REQUIRED_SCHEMA: &[(&str, &[&str])] = &[
         "AgLibraryCollection",
         &["id_local", "creationId", "systemOnly"],
     ),
+    ("AgLibraryKeyword", &["id_local", "name", "parent"]),
+    ("AgLibraryKeywordImage", &["id_local", "image", "tag"]),
 ];
 
 /// Suffixes SQLite appends to the full catalog file name for side files
@@ -402,6 +404,10 @@ mod tests {
         catalog.folders(&mut report).expect("folders");
         catalog.photos(&mut report).expect("photos");
         catalog.collections(&mut report).expect("collections");
+        let mut assignments = model::Report::default();
+        catalog
+            .keywords(&[], &mut report, &mut assignments)
+            .expect("keywords");
     }
 
     #[test]
