@@ -11,8 +11,8 @@ only to describe compatibility.
 
 Early development. The dry run reads folders and photos from a catalog,
 applies path mappings and checks that the original files exist. Collections
-are read and counted, but not converted yet: each one is listed as skipped. Writing to
-LightCraft (`--apply`) is not implemented yet.
+are read and counted, but not converted yet: each one is listed as skipped.
+Writing to LightCraft (`--apply`) is not implemented yet.
 
 ## Usage
 
@@ -29,8 +29,8 @@ checksum before and after the run proves it was not changed.
 ### Dry run (default)
 
 Without `--apply`, lr2lc only reads the catalog and prints a summary: how
-many folders, photos and collections it read, how many it would convert and how many it
-skips, with the reasons grouped. Nothing is written except the optional
+many folders, photos and collections it read, how many it would convert and
+how many it skips, with the reasons grouped. Nothing is written except the optional
 report file.
 
 ### `--map OLD=NEW`
@@ -105,7 +105,7 @@ error and reads or writes nothing.
 | Code | Meaning |
 | --- | --- |
 | 0 | Success (also for `--help` and `--version`) |
-| 1 | The run failed: catalog cannot be opened or read, unsupported version, pending `-wal`/`-journal` changes, report cannot be written, catalog changed during the run, or `--apply` given |
+| 1 | The run failed: catalog cannot be opened or read, unsupported version, required table or column missing, pending `-wal`/`-journal` changes, report cannot be written, catalog changed during the run, or `--apply` given |
 | 2 | Invalid command line (unknown option, missing value, invalid `--map`, refused `--report` file); nothing is read or written |
 
 ## License

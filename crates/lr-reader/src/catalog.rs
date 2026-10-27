@@ -35,7 +35,46 @@ pub enum ReadError {
         /// The side file that was found.
         path: PathBuf,
     },
+    /// A table or column that the readers query does not exist.
+    #[error("{}", missing_schema_message(table, column.as_deref()))]
+    MissingSchema {
+        /// The table that is missing or lacks a column.
+        table: String,
+        /// The missing column, or `None` if the whole table is missing.
+        column: Option<String>,
+    },
 }
+
+fn missing_schema_message(table: &str, column: Option<&str>) -> String {
+    match column {
+        Some(c) => format!("catalog table {table} has no column {c}; the catalog may be damaged"),
+        None => format!("catalog has no table {table}; the catalog may be damaged"),
+    }
+}
+
+/// Every table and column the readers query. This is the single source of
+/// truth for the schema check in [`Catalog::open`]: a new column in any
+/// SELECT of the readers must be added here. The unit test
+/// `readers_need_only_required_schema` fails otherwise.
+const REQUIRED_SCHEMA: &[(&str, &[&str])] = &[
+    (
+        "Adobe_images",
+        &["id_local", "masterImage", "rating", "rootFile"],
+    ),
+    (
+        "AgLibraryFile",
+        &["id_local", "baseName", "extension", "folder"],
+    ),
+    (
+        "AgLibraryFolder",
+        &["id_local", "rootFolder", "pathFromRoot"],
+    ),
+    ("AgLibraryRootFolder", &["id_local", "absolutePath"]),
+    (
+        "AgLibraryCollection",
+        &["id_local", "creationId", "systemOnly"],
+    ),
+];
 
 /// Suffixes SQLite appends to the full catalog file name for side files
 /// that can hold changes not yet merged into the catalog.
@@ -84,6 +123,7 @@ impl Catalog {
         if version != SUPPORTED_VERSION {
             return Err(ReadError::UnsupportedVersion(version));
         }
+        check_schema(&conn)?;
         Ok(Catalog { conn, version })
     }
 
@@ -91,6 +131,37 @@ impl Catalog {
     pub fn version(&self) -> &str {
         &self.version
     }
+}
+
+/// Checks that every table and column in [`REQUIRED_SCHEMA`] exists.
+/// Names are compared exactly.
+fn check_schema(conn: &Connection) -> Result<(), ReadError> {
+    let mut table_exists = conn
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1")
+        .map_err(ReadError::Open)?;
+    let mut columns = conn
+        .prepare("SELECT name FROM pragma_table_info(?1)")
+        .map_err(ReadError::Open)?;
+    for &(table, required) in REQUIRED_SCHEMA {
+        if !table_exists.exists([table]).map_err(ReadError::Open)? {
+            return Err(ReadError::MissingSchema {
+                table: table.to_owned(),
+                column: None,
+            });
+        }
+        let present = columns
+            .query_map([table], |row| row.get::<_, String>(0))
+            .map_err(ReadError::Open)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(ReadError::Open)?;
+        if let Some(missing) = required.iter().find(|c| !present.iter().any(|p| p == *c)) {
+            return Err(ReadError::MissingSchema {
+                table: table.to_owned(),
+                column: Some((*missing).to_owned()),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Returns the first `-wal` or `-journal` file next to `catalog` that is not
@@ -297,6 +368,95 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("Lightroom"), "{msg}");
         assert!(msg.contains("cat.lrcat-wal"), "{msg}");
+    }
+
+    /// Writes a catalog that has exactly the tables and columns of
+    /// [`REQUIRED_SCHEMA`] plus the version entry, with one row per table.
+    fn write_minimal_catalog(path: &Path) {
+        let c = Connection::open(path).unwrap();
+        c.execute_batch("CREATE TABLE Adobe_variablesTable (name, value);")
+            .unwrap();
+        c.execute(
+            "INSERT INTO Adobe_variablesTable VALUES ('Adobe_DBVersion', ?1)",
+            [SUPPORTED_VERSION],
+        )
+        .unwrap();
+        for &(table, columns) in REQUIRED_SCHEMA {
+            c.execute_batch(&format!(
+                "CREATE TABLE {table} ({}); INSERT INTO {table} (id_local) VALUES (1);",
+                columns.join(", ")
+            ))
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn readers_need_only_required_schema() {
+        // If a reader SELECTs a column missing from REQUIRED_SCHEMA, the
+        // statement fails to prepare here: add the column to the list.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("minimal.lrcat");
+        write_minimal_catalog(&path);
+        let catalog = Catalog::open(&path).expect("open");
+        let mut report = model::Report::default();
+        catalog.folders(&mut report).expect("folders");
+        catalog.photos(&mut report).expect("photos");
+        catalog.collections(&mut report).expect("collections");
+    }
+
+    #[test]
+    fn every_required_column_is_checked() {
+        for &(table, columns) in REQUIRED_SCHEMA {
+            for &column in columns {
+                let dir = tempfile::tempdir().unwrap();
+                let path = dir.path().join("damaged.lrcat");
+                write_minimal_catalog(&path);
+                let c = Connection::open(&path).unwrap();
+                c.execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column};"))
+                    .unwrap();
+                drop(c);
+                match Catalog::open(&path) {
+                    Err(ReadError::MissingSchema {
+                        table: t,
+                        column: col,
+                    }) => {
+                        assert_eq!(t, table);
+                        assert_eq!(col.as_deref(), Some(column));
+                    }
+                    other => panic!("{table}.{column}: expected MissingSchema, got {other:?}"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn column_names_are_compared_exactly() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("case.lrcat");
+        write_minimal_catalog(&path);
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch("ALTER TABLE Adobe_images RENAME COLUMN rating TO Rating;")
+            .unwrap();
+        drop(c);
+        assert!(matches!(
+            Catalog::open(&path),
+            Err(ReadError::MissingSchema { column: Some(c), .. }) if c == "rating"
+        ));
+    }
+
+    #[test]
+    fn missing_schema_message_names_table_and_column() {
+        let err = ReadError::MissingSchema {
+            table: "T".into(),
+            column: Some("c".into()),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("table T") && msg.contains("column c"), "{msg}");
+        let err = ReadError::MissingSchema {
+            table: "T".into(),
+            column: None,
+        };
+        assert!(err.to_string().contains("table T"));
     }
 
     #[test]
