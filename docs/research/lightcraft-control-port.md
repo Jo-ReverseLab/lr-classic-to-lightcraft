@@ -1,6 +1,6 @@
 # LightCraft control port (for writer P5-4)
 
-All paths are relative to the LightCraft source root (`~/lr2lc-ref/lightcraft`, read only). Anything not backed by a file:line is marked *(assumption)*.
+All paths are relative to the LightCraft source root (the LightCraft source checkout, read only). Anything not backed by a file:line is marked *(assumption)*.
 
 ## 1. The control port
 
@@ -37,8 +37,8 @@ All paths are relative to the LightCraft source root (`~/lr2lc-ref/lightcraft`, 
 
 Parameters (`crates/engine/src/cmd/library.rs:1638`): `paths` (files or folders, recursive), `mode?: add|copy|move`, `destination?`, `organize?`, `rename?`, `renameStart?`, `metadataPreset?`, `dng?`, `local?`, `album?: albumId`, `albumName?`, `preset?: presetId`, `keywords?: [..]` (applied to every imported file), `onDeleted?: restore|skip|fresh`. Result: `{imported, duplicates:[{path,existing,reason,existingDeleted?}], restored?, failed, warnings?, moved?, kept?, album?}` (`library.rs:1638`).
 
-- **Reference only**: `mode: "add"` = "reference the files in place" (`library.rs:1638`; `crates/engine/src/import.rs:47-49`; `docs/lightroom-catalog-import.md:59`). `copy` writes into the library's `Originals/…`, `move` also deletes the sources (`library.rs:1638`, `import.rs:51-55`). The mode parser accepts only `add|copy|move` and errors otherwise (`library.rs:57`).
-- Is `add` the default? The previous research read it as default (`docs/research/lightcraft-import.md:51`), but **the exact default was not re-verified here**: always send `"mode":"add"` explicitly and never send `copy`/`move`/`dng`/`organize`/`rename`/`destination`.
+- **Reference only**: `mode: "add"` = "reference the files in place" (`library.rs:1638`; `crates/engine/src/import.rs:47-49`; `docs/lightroom-catalog-import.md:59`). `copy` writes into the library's `Originals/…`, `move` also deletes the sources (`library.rs:1638`, `import.rs:51-55`). The mode parser defaults to `add` when `mode` is absent (`library.rs:53` `unwrap_or("add")`; `import.rs:47-49` `#[default] Add`) and accepts only `add|copy|move`, erroring otherwise (`library.rs:53-58`).
+- Still send `"mode":"add"` explicitly (defensive), and never send `copy`/`move`/`dng`/`organize`/`rename`/`destination`.
 - Other side effects to avoid: `local: true` keeps photos out of the library (`library.rs:1638`) — do not send. `metadataPreset`/`preset` change settings — do not send. `keywords` applies one list to all files — do not use for per-photo keywords.
 - Existing XMP sidecars are read at import and win over catalog data (`import.rs:15-17`; `docs/xmp-interop.md:13`). Import itself reads them only; with auto-write on it can write (see 3).
 - "Guaranteed" non-modification of originals is **not proven by a full code audit** (inherited limitation from `lightcraft-import.md:56`); it follows from the documented mode semantics. Recommendation: lr2lc's own checks (hash of originals before/after, if wanted by the user) as belt and braces.
@@ -70,7 +70,7 @@ Note: `photo.virtualCopy` copies the settings of the source photo; a copy create
 ## Open questions
 
 1. Does `library.import` run synchronously through the control port (60 s limit), or return early? Needs a test against a running app (not possible in this session: no app available, source reading only).
-2. Exact shape of `imported` in the `library.import` result and the default of `mode`.
+2. Exact shape of `imported` in the `library.import` result.
 3. Does `photo.inspect` expose the file path under a stable key, and is there a cheap list command returning `{id, path}` for all photos?
 4. `keyword.create` on an existing keyword: error or update? Are synonyms settable after creation (`keyword.info`/an edit command)? Rows at `keywords.rs:385-546` were not read.
 5. Is auto-write also applied to commands run via `engine.execute` (`lib.rs:603` generic path)? Likely yes; trace `Session::execute`.
@@ -83,4 +83,4 @@ Note: `photo.virtualCopy` copies the settings of the source photo; a copy create
 - Pre-flight checks, abort on failure: `library.info` → `persistent:true` and `path` equals the target library; `ui.inspect` → `libraryProblem` is null; `library.xmpPreferences {}` → `autoWrite` is false.
 - Import only with `mode:"add"` explicitly and only `paths` (+ nothing else); set everything per photo afterwards with `photo.rate`, `photo.flag`, `photo.label`, `photo.setMeta` — always with explicit `ids`.
 - Keep lr2lc's own index (Lightroom `id_global` → LightCraft id), because `Photo` has no external-id field (`lightcraft-import.md:44`); virtual copies must be created exactly once.
-- Before building the writer, run one live smoke test against a scratch library (`--library` in `~/lr2lc-scratch`) to close open questions 1–3.
+- Before building the writer, run one live smoke test against a scratch library (`--library`) to close open questions 1–3.
