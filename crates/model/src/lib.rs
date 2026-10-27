@@ -1,7 +1,7 @@
 //! Neutral data model shared by the reader and the writer.
 //!
 //! The model knows nothing about Lightroom's or LightCraft's storage.
-//! It only describes folders, photos, keywords, ratings and the run report.
+//! It only describes folders, photos, keywords, ratings, flags and the run report.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -79,6 +79,18 @@ impl Rating {
     }
 }
 
+/// The pick/reject flag of a photo.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum Flag {
+    /// Neither picked nor rejected.
+    #[default]
+    None,
+    /// Picked.
+    Pick,
+    /// Rejected.
+    Reject,
+}
+
 /// A photo, referenced by the path of its original file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Photo {
@@ -92,6 +104,8 @@ pub struct Photo {
     /// kept byte for byte. Stable across catalogs that hold the same photo,
     /// unlike `lightroom_id`. Internal identity only, never reported.
     pub global_id: Option<String>,
+    /// Pick/reject flag.
+    pub flag: Flag,
 }
 
 impl Photo {
@@ -102,7 +116,14 @@ impl Photo {
             lightroom_id,
             rating,
             global_id: None,
+            flag: Flag::None,
         }
+    }
+
+    /// Returns the photo with its flag set.
+    pub fn with_flag(mut self, flag: Flag) -> Self {
+        self.flag = flag;
+        self
     }
 
     /// Returns the photo with its global id set.
@@ -371,6 +392,13 @@ mod tests {
     fn photo_equality_includes_global_id() {
         let p = Photo::new("/a.jpg", 1, Rating::default());
         assert_ne!(p.clone().with_global_id("x"), p);
+    }
+
+    #[test]
+    fn photo_equality_includes_flag() {
+        let p = Photo::new("/a.jpg", 1, Rating::default());
+        assert_eq!(p.flag, Flag::None);
+        assert_ne!(p.clone().with_flag(Flag::Reject), p);
     }
 
     #[test]

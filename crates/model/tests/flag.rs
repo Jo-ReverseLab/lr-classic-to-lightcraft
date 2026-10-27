@@ -14,19 +14,16 @@ fn photo() -> Photo {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn default_flag_is_none() {
     assert_eq!(Flag::default(), Flag::None);
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn new_photo_has_no_flag() {
     assert_eq!(photo().flag, Flag::None);
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn with_flag_sets_the_flag_and_keeps_the_rest() {
     let base = photo().with_global_id("g-1");
     for flag in [Flag::None, Flag::Pick, Flag::Reject] {
@@ -39,7 +36,6 @@ fn with_flag_sets_the_flag_and_keeps_the_rest() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn photos_with_different_flags_differ() {
     assert_ne!(photo().with_flag(Flag::Pick), photo());
     assert_ne!(
