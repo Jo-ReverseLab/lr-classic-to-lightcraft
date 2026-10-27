@@ -369,7 +369,13 @@ fn script_in_a_dry_run_contains_valid_json_lines() {
         .lines()
         .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("{l}: {e}")))
         .collect();
-    assert_eq!(lines.len() as u64, keywords + photos + updates);
+    // `library.select` lines (P5-4e) are not updates: one per photo with
+    // updates, before them.
+    let selects = lines
+        .iter()
+        .filter(|l| l["params"]["command"] == "library.select")
+        .count() as u64;
+    assert_eq!(lines.len() as u64, keywords + photos + updates + selects);
     let mut counts: BTreeMap<String, u64> = BTreeMap::new();
     for l in &lines {
         assert_eq!(l["method"], "engine.execute");
@@ -382,6 +388,12 @@ fn script_in_a_dry_run_contains_valid_json_lines() {
                 assert_eq!(p["mode"], "add");
                 assert_eq!(p["paths"].as_array().unwrap().len(), 1);
                 assert_eq!(p.as_object().unwrap().len(), 2);
+            }
+            "library.select" => {
+                let p = &l["params"]["params"];
+                let id = p["ids"][0].as_str().unwrap();
+                assert!(id.starts_with("lr:"), "{id}: photo not imported yet");
+                assert_eq!(p["ids"], serde_json::json!([p["active"].clone()]));
             }
             c if c.starts_with("photo.") => {
                 let id = l["params"]["params"]["ids"][0].as_str().unwrap();

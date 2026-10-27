@@ -223,6 +223,12 @@ impl FakeLightCraft {
         self.shared.library.lock().unwrap().selection.clone()
     }
 
+    /// Empties the selection, like an app that was restarted or whose
+    /// user deselected everything.
+    pub fn clear_selection(&self) {
+        self.shared.library.lock().unwrap().selection.clear();
+    }
+
     /// Keyword path texts in the fake library.
     pub fn keywords(&self) -> BTreeSet<String> {
         self.shared.library.lock().unwrap().keywords.clone()

@@ -720,12 +720,14 @@ fn update_params_never_contain_ids() {
 }
 
 #[test]
+#[ignore = "waiting for P5-4e: the script has a library.select line"]
 fn script_has_one_valid_json_line_per_step() {
     let inp = input(vec![full_photo()], vec![(1, vec![kw(&["A", "B"])])]);
     let state = State::default();
     let p = plan(&inp, &state, &none());
     let script = p.to_script(&state);
-    assert_eq!(script.lines().count(), p.steps.len());
+    // One `library.select` line per photo with updates (P5-4e).
+    assert_eq!(script.lines().count(), p.steps.len() + 1);
     assert!(script.lines().all(|l| !l.trim().is_empty()));
     let l = lines(&p, &state);
     assert_eq!(l[0].0, "keyword.create");
@@ -737,6 +739,7 @@ fn script_has_one_valid_json_line_per_step() {
 }
 
 #[test]
+#[ignore = "waiting for P5-4e: the script has a library.select line"]
 fn script_uses_a_placeholder_id_for_new_photos() {
     let inp = input(vec![full_photo()], vec![]);
     let state = State::default();
@@ -750,20 +753,24 @@ fn script_uses_a_placeholder_id_for_new_photos() {
             found += 1;
         }
     }
-    assert_eq!(found, 4);
+    assert_eq!(found, 5, "4 updates and the select before them");
 }
 
 #[test]
+#[ignore = "waiting for P5-4e: the script has a library.select line"]
 fn script_uses_the_real_id_for_known_photos() {
     let inp = input(vec![full_photo()], vec![]);
     let state = recorded(&inp);
     let changed = input(vec![full_photo().with_title("New")], vec![]);
     let p = plan(&changed, &state, &none());
     let l = lines(&p, &state);
-    assert_eq!(l.len(), 1);
-    assert_eq!(l[0].0, "photo.setMeta");
+    assert_eq!(l.len(), 2);
+    assert_eq!(l[0].0, "library.select");
     assert_eq!(l[0].1["ids"], json!([100]));
-    assert_eq!(l[0].1["title"], json!("New"));
+    assert_eq!(l[0].1["active"], json!(100));
+    assert_eq!(l[1].0, "photo.setMeta");
+    assert_eq!(l[1].1["ids"], json!([100]));
+    assert_eq!(l[1].1["title"], json!("New"));
 }
 
 #[test]
