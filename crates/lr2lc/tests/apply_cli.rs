@@ -175,7 +175,10 @@ fn planned_line(text: &str) -> (u64, u64, u64) {
     let numbers: Vec<u64> = ["keywords to create ", "photos to import ", "updates "]
         .iter()
         .map(|key| {
-            let rest = line.split(key).nth(1).unwrap_or_else(|| panic!("{key}: {line}"));
+            let rest = line
+                .split(key)
+                .nth(1)
+                .unwrap_or_else(|| panic!("{key}: {line}"));
             let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
             digits.parse().unwrap_or_else(|_| panic!("{key}: {line}"))
         })
@@ -190,8 +193,14 @@ fn no_secrets(text: &str) {
 }
 
 fn only_reads(fake: &FakeLightCraft, from: usize) {
-    let sent: Vec<String> = fake.commands()[from..].iter().map(|(c, _)| c.clone()).collect();
-    assert!(sent.iter().all(|c| READ_COMMANDS.contains(&c.as_str())), "{sent:?}");
+    let sent: Vec<String> = fake.commands()[from..]
+        .iter()
+        .map(|(c, _)| c.clone())
+        .collect();
+    assert!(
+        sent.iter().all(|c| READ_COMMANDS.contains(&c.as_str())),
+        "{sent:?}"
+    );
 }
 
 // ------------------------------------------------------------ usage errors
@@ -228,7 +237,12 @@ fn apply_without_library_on_a_real_catalog_changes_nothing() {
     let port = fake.port().to_string();
     let o = run(
         s.work.path(),
-        &[s.catalog.as_os_str(), OsStr::new("--apply"), OsStr::new("--port"), OsStr::new(&port)],
+        &[
+            s.catalog.as_os_str(),
+            OsStr::new("--apply"),
+            OsStr::new("--port"),
+            OsStr::new(&port),
+        ],
     );
     assert_exit(&o, 2);
     assert_eq!(fake.connections(), 0);
@@ -278,7 +292,10 @@ fn dry_run_never_connects_and_prints_the_plan_numbers() {
     assert_eq!(report["dry_run"], true);
     // Every photo that is read and converted is planned or skipped.
     let skipped_photos = report["writer"]["skipped"].as_array().unwrap().len() as u64;
-    assert_eq!(report["photos"]["converted"].as_u64().unwrap(), photos + skipped_photos);
+    assert_eq!(
+        report["photos"]["converted"].as_u64().unwrap(),
+        photos + skipped_photos
+    );
     assert_eq!(fs::read(&s.catalog).unwrap(), before);
 }
 
@@ -290,7 +307,11 @@ fn dry_run_writes_nothing_next_to_the_library() {
     assert_exit(&o, 0);
     assert!(!s.library.exists());
     assert!(!s.state_file().exists());
-    assert_eq!(tree(s.photos.path()), originals, "originals and catalog are untouched");
+    assert_eq!(
+        tree(s.photos.path()),
+        originals,
+        "originals and catalog are untouched"
+    );
 }
 
 #[test]
@@ -299,7 +320,10 @@ fn dry_run_without_library_uses_an_empty_state() {
     let o = run(s.work.path(), &[s.catalog.as_os_str()]);
     assert_exit(&o, 0);
     let with_library = s.run(closed_port(), &[]);
-    assert_eq!(planned_line(&stdout(&o)), planned_line(&stdout(&with_library)));
+    assert_eq!(
+        planned_line(&stdout(&o)),
+        planned_line(&stdout(&with_library))
+    );
 }
 
 #[test]
@@ -318,7 +342,11 @@ fn dry_run_after_a_complete_apply_plans_nothing() {
     assert_exit(&s.run(fake.port(), &["--apply"]), 0);
     let o = s.run(fake.port(), &[]);
     assert_exit(&o, 0);
-    assert_eq!(planned_line(&stdout(&o)), (0, 0, 0), "the state file is used");
+    assert_eq!(
+        planned_line(&stdout(&o)),
+        (0, 0, 0),
+        "the state file is used"
+    );
 }
 
 // ------------------------------------------------------------------- script
@@ -370,7 +398,11 @@ fn script_without_a_library_works_too() {
     let script = s.work.path().join("plan.jsonl");
     let o = run(
         s.work.path(),
-        &[s.catalog.as_os_str(), OsStr::new("--script"), script.as_os_str()],
+        &[
+            s.catalog.as_os_str(),
+            OsStr::new("--script"),
+            script.as_os_str(),
+        ],
     );
     assert_exit(&o, 0);
     assert!(fs::metadata(&script).unwrap().len() > 0);
@@ -389,7 +421,11 @@ fn script_never_overwrites_the_catalog_or_its_companions() {
         let before = fs::read(&target).unwrap();
         let o = run(
             s.work.path(),
-            &[s.catalog.as_os_str(), OsStr::new("--script"), target.as_os_str()],
+            &[
+                s.catalog.as_os_str(),
+                OsStr::new("--script"),
+                target.as_os_str(),
+            ],
         );
         assert_exit(&o, 2);
         assert!(stderr(&o).contains("catalog"), "{}", stderr(&o));
@@ -440,9 +476,15 @@ fn apply_writes_through_the_port_and_reports_the_numbers() {
     assert_eq!(fake.keywords().len() as u64, keywords);
     for path in fake.photos().keys() {
         assert!(Path::new(path).starts_with(s.photos.path()), "{path}");
-        assert!(Path::new(path).exists(), "{path}: only existing files are imported");
+        assert!(
+            Path::new(path).exists(),
+            "{path}: only existing files are imported"
+        );
     }
-    assert!(s.state_file().exists(), "the mapping file is next to the library");
+    assert!(
+        s.state_file().exists(),
+        "the mapping file is next to the library"
+    );
 
     // Principles 1 and 2: the catalog and the originals are unchanged.
     assert_eq!(fs::read(&s.catalog).unwrap(), catalog_before);
@@ -461,8 +503,16 @@ fn apply_runs_the_preflight_before_the_first_write() {
         .iter()
         .position(|c| !READ_COMMANDS.contains(&c.as_str()))
         .unwrap();
-    for read in ["library.info", "ui.inspect", "library.xmpPreferences", "keyword.list"] {
-        let at = names.iter().position(|c| c == read).unwrap_or_else(|| panic!("{read} missing"));
+    for read in [
+        "library.info",
+        "ui.inspect",
+        "library.xmpPreferences",
+        "keyword.list",
+    ] {
+        let at = names
+            .iter()
+            .position(|c| c == read)
+            .unwrap_or_else(|| panic!("{read} missing"));
         assert!(at < first_write, "{read} must come before the first write");
     }
 }
@@ -501,7 +551,12 @@ fn second_apply_sends_only_read_commands_and_creates_no_duplicates() {
     assert_eq!(fake.keywords(), keywords);
     assert_eq!(fs::read(s.state_file()).unwrap(), state_before);
     let w = &s.report_json()["writer"];
-    for key in ["keywords_created", "photos_imported", "photos_existing", "updates"] {
+    for key in [
+        "keywords_created",
+        "photos_imported",
+        "photos_existing",
+        "updates",
+    ] {
         assert_eq!(w[key], 0, "{key}");
     }
 }
@@ -511,7 +566,9 @@ fn apply_with_a_lost_state_file_finds_the_photos_as_existing() {
     let s = setup();
     let fake = s.fake();
     assert_exit(&s.run(fake.port(), &["--apply"]), 0);
-    let imported = s.report_json()["writer"]["photos_imported"].as_u64().unwrap();
+    let imported = s.report_json()["writer"]["photos_imported"]
+        .as_u64()
+        .unwrap();
     fs::remove_file(s.state_file()).unwrap();
     let photos = fake.photos();
 
@@ -548,7 +605,11 @@ fn xmp_auto_write_stops_the_run_before_any_write() {
     let o = s.run(fake.port(), &["--apply"]);
     assert_exit(&o, 1);
     assert!(stderr(&o).contains("XMP"), "{}", stderr(&o));
-    assert!(fake.write_commands().is_empty(), "{:?}", fake.write_commands());
+    assert!(
+        fake.write_commands().is_empty(),
+        "{:?}",
+        fake.write_commands()
+    );
     assert!(fake.photos().is_empty());
 }
 
@@ -600,7 +661,11 @@ fn no_server_gives_exit_1_with_a_clear_message() {
     let s = setup();
     let o = s.run(closed_port(), &["--apply"]);
     assert_exit(&o, 1);
-    assert!(stderr(&o).to_lowercase().contains("connect"), "{}", stderr(&o));
+    assert!(
+        stderr(&o).to_lowercase().contains("connect"),
+        "{}",
+        stderr(&o)
+    );
     assert!(!s.state_file().exists());
 }
 
@@ -624,11 +689,22 @@ fn lost_connection_says_outcome_unknown_and_a_rerun_finishes_without_duplicates(
     let o = s.run(fake.port(), &["--apply"]);
     assert_exit(&o, 0);
     let dry = s.run(closed_port(), &[]);
-    assert_eq!(planned_line(&stdout(&dry)), (0, 0, 0), "everything is done now");
+    assert_eq!(
+        planned_line(&stdout(&dry)),
+        (0, 0, 0),
+        "everything is done now"
+    );
     let photos = fake.photos();
     let total = s.report_json()["photos"]["converted"].as_u64().unwrap();
-    let skipped = s.report_json()["writer"]["skipped"].as_array().unwrap().len() as u64;
-    assert_eq!(photos.len() as u64, total - skipped, "each photo exactly once");
+    let skipped = s.report_json()["writer"]["skipped"]
+        .as_array()
+        .unwrap()
+        .len() as u64;
+    assert_eq!(
+        photos.len() as u64,
+        total - skipped,
+        "each photo exactly once"
+    );
     let mut ids: Vec<i64> = photos.values().copied().collect();
     ids.sort_unstable();
     ids.dedup();
@@ -641,7 +717,7 @@ fn error_reply_for_a_command_is_reported_as_skipped_not_fatal() {
     let mut config = Config::new(&s.library);
     config.failures.push(fake_lightcraft::Failure {
         command: "photo.rate".into(),
-        photo_id: Some(1001),
+        photo_id: None,
         message: "refused".into(),
     });
     let fake = FakeLightCraft::start(config);
@@ -650,13 +726,17 @@ fn error_reply_for_a_command_is_reported_as_skipped_not_fatal() {
     let w = &s.report_json()["writer"];
     let skipped = w["skipped"].as_array().unwrap();
     assert!(!skipped.is_empty());
-    assert!(skipped.iter().any(|i| i["reason"].as_str().unwrap().contains("photo.rate")));
+    assert!(
+        skipped
+            .iter()
+            .any(|i| i["reason"].as_str().unwrap().contains("photo.rate"))
+    );
+    // Every photo was imported; only their rating updates were refused. Such
+    // a photo is counted as imported and, for its refused update, as skipped.
     let p = &s.report_json()["photos"];
     assert_eq!(
         p["converted"].as_u64().unwrap(),
-        w["photos_imported"].as_u64().unwrap()
-            + w["photos_existing"].as_u64().unwrap()
-            + skipped.len() as u64
+        w["photos_imported"].as_u64().unwrap() + w["photos_existing"].as_u64().unwrap()
     );
     no_secrets(&fs::read_to_string(s.report()).unwrap());
 }

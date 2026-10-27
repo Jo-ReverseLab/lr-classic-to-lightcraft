@@ -316,7 +316,11 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                 return Err("unexpected import parameters".into());
             }
             let path = params["paths"][0].as_str().ok_or("path is not text")?;
-            if config.import_failed_for.as_deref().is_some_and(|t| path.contains(t)) {
+            if config
+                .import_failed_for
+                .as_deref()
+                .is_some_and(|t| path.contains(t))
+            {
                 return Ok(json!({"imported": [], "duplicates": [], "failed": 1}));
             }
             if let Some(existing) = lib.photos.get(path) {
@@ -340,7 +344,8 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             let id = photo_id.filter(|id| lib.photos.values().any(|p| p == id));
             let id = id.ok_or("unknown photo id")?;
             if command == "photo.rate" {
-                lib.ratings.insert(id, params["rating"].as_i64().unwrap_or(-1));
+                lib.ratings
+                    .insert(id, params["rating"].as_i64().unwrap_or(-1));
             }
             if config.not_saved_updates {
                 return Err("saved in memory but not written to disk: disk full".into());

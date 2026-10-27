@@ -45,7 +45,7 @@ use std::path::PathBuf;
 #[path = "support/fake_lightcraft.rs"]
 mod fake_lightcraft;
 use fake_lightcraft::{
-    Config, FakeLightCraft, Failure, ImportIdStyle, KeywordListFormat, READ_COMMANDS,
+    Config, Failure, FakeLightCraft, ImportIdStyle, KeywordListFormat, READ_COMMANDS,
 };
 
 const PHOTO_DIR: &str = "/Users/example/Pictures";
@@ -170,10 +170,19 @@ fn first_run_records_every_photo_and_keyword_in_the_saved_state() {
     let photos = fake.photos();
     for p in &input.photos {
         let gid = p.global_id.as_deref().unwrap();
-        let entry = saved.photo(gid).unwrap_or_else(|| panic!("{gid} not recorded"));
+        let entry = saved
+            .photo(gid)
+            .unwrap_or_else(|| panic!("{gid} not recorded"));
         assert_eq!(entry.lightroom_id, p.lightroom_id);
-        assert_eq!(entry.lightcraft_id, serde_json::json!(photos[&photo_path(gid)]));
-        let keywords = input.photo_keywords.get(&p.lightroom_id).cloned().unwrap_or_default();
+        assert_eq!(
+            entry.lightcraft_id,
+            serde_json::json!(photos[&photo_path(gid)])
+        );
+        let keywords = input
+            .photo_keywords
+            .get(&p.lightroom_id)
+            .cloned()
+            .unwrap_or_default();
         assert_eq!(entry.fields, snapshot(p, &keywords), "{gid}");
     }
     for k in expected_keywords() {
@@ -187,7 +196,10 @@ fn keywords_are_created_parents_first_and_before_any_import() {
     let fake = first_run_fake(&env);
     run(&fake, &env, &input()).unwrap();
     let commands = fake.commands();
-    assert_eq!(commands[0].0, "keyword.list", "the first command reads the keywords");
+    assert_eq!(
+        commands[0].0, "keyword.list",
+        "the first command reads the keywords"
+    );
     assert_eq!(commands[0].1, serde_json::json!({}));
     let names: Vec<&str> = commands.iter().map(|(c, _)| c.as_str()).collect();
     let last_create = names.iter().rposition(|c| *c == "keyword.create").unwrap();
@@ -238,9 +250,14 @@ fn every_update_names_the_photo_by_its_lightcraft_id() {
         .collect();
     assert_eq!(updates.len(), 5);
     for (command, params) in updates {
-        let ids = params["ids"].as_array().unwrap_or_else(|| panic!("{command} has no ids"));
+        let ids = params["ids"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{command} has no ids"));
         assert_eq!(ids.len(), 1, "{command}");
-        assert!(known.contains(&ids[0].as_i64().unwrap()), "{command}: {ids:?}");
+        assert!(
+            known.contains(&ids[0].as_i64().unwrap()),
+            "{command}: {ids:?}"
+        );
     }
 }
 
@@ -252,8 +269,15 @@ fn only_known_commands_are_sent() {
     for (command, _) in fake.commands() {
         assert!(
             is_read(&command)
-                || ["keyword.create", "library.import", "photo.rate", "photo.flag",
-                    "photo.label", "photo.setMeta"].contains(&command.as_str()),
+                || [
+                    "keyword.create",
+                    "library.import",
+                    "photo.rate",
+                    "photo.flag",
+                    "photo.label",
+                    "photo.setMeta"
+                ]
+                .contains(&command.as_str()),
             "unexpected command {command}"
         );
     }
@@ -273,7 +297,10 @@ fn second_run_with_unchanged_input_sends_only_read_commands() {
     assert_eq!(summary.photos_existing, 0);
     assert_eq!(summary.updates, 0);
     assert!(summary.skipped.is_empty());
-    let second: Vec<String> = fake.commands()[before..].iter().map(|(c, _)| c.clone()).collect();
+    let second: Vec<String> = fake.commands()[before..]
+        .iter()
+        .map(|(c, _)| c.clone())
+        .collect();
     assert!(!second.is_empty(), "the keyword list is still read");
     assert!(second.iter().all(|c| is_read(c)), "{second:?}");
     assert_eq!(fake.photos().len(), 4);
@@ -300,7 +327,10 @@ fn lost_state_file_finds_photos_and_keywords_again_without_duplicates() {
     let before = fake.commands().len();
     let summary = run(&fake, &env, &input()).unwrap();
     assert_eq!(summary.photos_imported, 0);
-    assert_eq!(summary.photos_existing, 4, "reported as duplicates by LightCraft");
+    assert_eq!(
+        summary.photos_existing, 4,
+        "reported as duplicates by LightCraft"
+    );
     assert_eq!(summary.keywords_created, 0, "keyword.list shows them");
     assert!(summary.skipped.is_empty(), "{:?}", summary.skipped);
     assert_eq!(fake.photos().len(), 4);
@@ -316,7 +346,10 @@ fn lost_state_file_finds_photos_and_keywords_again_without_duplicates() {
     let photos = fake.photos();
     for gid in ["g1", "g2", "g3", "g4"] {
         let entry = state.photo(gid).unwrap();
-        assert_eq!(entry.lightcraft_id, serde_json::json!(photos[&photo_path(gid)]));
+        assert_eq!(
+            entry.lightcraft_id,
+            serde_json::json!(photos[&photo_path(gid)])
+        );
     }
 }
 
@@ -377,7 +410,10 @@ fn every_keyword_list_format_is_understood() {
         config.keyword_list = format.clone();
         let fake = FakeLightCraft::start(config);
         let summary = run(&fake, &env, &input()).unwrap();
-        assert_eq!(summary.keywords_created, 1, "{format:?}: only `Café ☕` is new");
+        assert_eq!(
+            summary.keywords_created, 1,
+            "{format:?}: only `Café ☕` is new"
+        );
         let created: Vec<String> = fake
             .commands()
             .into_iter()
@@ -397,7 +433,11 @@ fn unknown_keyword_list_format_is_a_protocol_error_before_any_write() {
     let fake = FakeLightCraft::start(config);
     let e = run(&fake, &env, &input()).unwrap_err();
     assert!(matches!(e, WriteError::Protocol(_)), "{e:?}");
-    assert!(fake.write_commands().is_empty(), "{:?}", fake.write_commands());
+    assert!(
+        fake.write_commands().is_empty(),
+        "{:?}",
+        fake.write_commands()
+    );
     assert!(fake.photos().is_empty());
     assert!(fake.keywords().is_empty());
 }
@@ -427,7 +467,11 @@ fn assert_no_command_twice(fake: &FakeLightCraft) {
         .filter(|l| !l.contains("\"command\":\"keyword.list\""))
         .collect();
     let unique: BTreeSet<&String> = lines.iter().collect();
-    assert_eq!(unique.len(), lines.len(), "a command was sent twice: {lines:?}");
+    assert_eq!(
+        unique.len(),
+        lines.len(),
+        "a command was sent twice: {lines:?}"
+    );
 }
 
 #[test]
@@ -446,7 +490,10 @@ fn lost_connection_aborts_the_run_and_keeps_finished_photos() {
     for (gid, lr) in [("g1", 1), ("g2", 2)] {
         let entry = state.photo(gid).unwrap_or_else(|| panic!("{gid} lost"));
         let keywords = inp.photo_keywords.get(&lr).cloned().unwrap_or_default();
-        assert_eq!(entry.fields, snapshot(&inp.photos[lr as usize - 1], &keywords));
+        assert_eq!(
+            entry.fields,
+            snapshot(&inp.photos[lr as usize - 1], &keywords)
+        );
     }
     assert!(state.photo("g3").is_none());
     assert!(state.photo("g4").is_none());
@@ -483,7 +530,11 @@ fn run_after_a_lost_import_finishes_the_rest_without_duplicates() {
 fn run_after_an_import_that_took_effect_but_got_no_reply_finds_the_duplicate() {
     let (env, fake) = lost_at(9, true);
     run(&fake, &env, &input()).unwrap_err();
-    assert_eq!(fake.photos().len(), 3, "g3 was imported but never confirmed");
+    assert_eq!(
+        fake.photos().len(),
+        3,
+        "g3 was imported but never confirmed"
+    );
     let summary = run(&fake, &env, &input()).unwrap();
     assert_eq!(summary.photos_existing, 1, "g3 is reported as a duplicate");
     assert_eq!(summary.photos_imported, 1, "g4");
@@ -504,11 +555,17 @@ fn photo_is_recorded_right_after_its_import_when_a_later_update_is_lost() {
     // Line 6 is `photo.rate` of g1: the import before it must already be saved.
     let (env, fake) = lost_at(6, false);
     let e = run(&fake, &env, &input()).unwrap_err();
-    assert!(matches!(&e, WriteError::ConnectionLost { command } if command == "photo.rate"), "{e:?}");
+    assert!(
+        matches!(&e, WriteError::ConnectionLost { command } if command == "photo.rate"),
+        "{e:?}"
+    );
     let state = State::load(&env.state_file).unwrap();
     let entry = state.photo("g1").expect("g1 recorded after its import");
     assert_eq!(entry.fields, PhotoFields::imported_default());
-    assert_eq!(entry.lightcraft_id, serde_json::json!(fake.photos()[&photo_path("g1")]));
+    assert_eq!(
+        entry.lightcraft_id,
+        serde_json::json!(fake.photos()[&photo_path("g1")])
+    );
 
     let summary = run(&fake, &env, &input()).unwrap();
     assert_eq!(summary.photos_imported, 3, "g1 is not imported again");
@@ -538,7 +595,10 @@ fn error_reply_for_one_photo_skips_only_that_photo() {
     assert_eq!(summary.skipped.len(), 1, "{:?}", summary.skipped);
     let reason = &summary.skipped[0].reason;
     assert!(reason.contains("photo.rate"), "{reason}");
-    assert!(!reason.contains("example") && !reason.contains("g1.jpg"), "{reason}");
+    assert!(
+        !reason.contains("example") && !reason.contains("g1.jpg"),
+        "{reason}"
+    );
     assert_eq!(summary.photos_imported, 4);
     assert_eq!(summary.updates, 3, "g3 rate, g4 rate and label");
     // No later step for g1: its setMeta never went out.
@@ -554,9 +614,15 @@ fn error_reply_for_one_photo_skips_only_that_photo() {
     assert_eq!(fake.ratings()[&photos[&photo_path("g4")]], 2);
     let state = State::load(&env.state_file).unwrap();
     let inp = input();
-    assert_eq!(state.photo("g3").unwrap().fields, snapshot(&inp.photos[2], &[]));
+    assert_eq!(
+        state.photo("g3").unwrap().fields,
+        snapshot(&inp.photos[2], &[])
+    );
     // g1 stays at its post-import state, so a later run retries it.
-    assert_eq!(state.photo("g1").unwrap().fields, PhotoFields::imported_default());
+    assert_eq!(
+        state.photo("g1").unwrap().fields,
+        PhotoFields::imported_default()
+    );
 }
 
 #[test]
@@ -574,7 +640,11 @@ fn error_reply_for_a_keyword_skips_that_keyword_and_the_run_goes_on() {
     assert!(!summary.skipped.is_empty());
     for s in &summary.skipped {
         assert!(s.reason.contains("keyword.create"), "{}", s.reason);
-        assert!(!s.reason.contains("Café") && !s.reason.contains("Rome"), "{}", s.reason);
+        assert!(
+            !s.reason.contains("Café") && !s.reason.contains("Rome"),
+            "{}",
+            s.reason
+        );
     }
     assert_eq!(summary.photos_imported, 4, "photos are still written");
     let state = State::load(&env.state_file).unwrap();
@@ -594,7 +664,10 @@ fn failed_import_skips_the_photo_and_its_later_steps() {
     assert_eq!(summary.skipped.len(), 1, "{:?}", summary.skipped);
     assert_eq!(summary.updates, 4, "g1 rate + setMeta, g4 rate + label");
     let state = State::load(&env.state_file).unwrap();
-    assert!(state.photo("g3").is_none(), "an unimported photo is not recorded");
+    assert!(
+        state.photo("g3").is_none(),
+        "an unimported photo is not recorded"
+    );
     assert!(
         fake.commands()
             .iter()
@@ -616,7 +689,10 @@ fn not_saved_replies_count_as_success() {
     let state = State::load(&env.state_file).unwrap();
     let inp = input();
     let kws = inp.photo_keywords[&1].clone();
-    assert_eq!(state.photo("g1").unwrap().fields, snapshot(&inp.photos[0], &kws));
+    assert_eq!(
+        state.photo("g1").unwrap().fields,
+        snapshot(&inp.photos[0], &kws)
+    );
 }
 
 #[test]
@@ -625,6 +701,9 @@ fn nothing_to_do_still_reads_the_keyword_list_only() {
     let fake = first_run_fake(&env);
     let empty = WriteInput::default();
     let summary = run(&fake, &env, &empty).unwrap();
-    assert_eq!(summary.photos_imported + summary.updates + summary.keywords_created, 0);
+    assert_eq!(
+        summary.photos_imported + summary.updates + summary.keywords_created,
+        0
+    );
     assert!(fake.write_commands().is_empty());
 }
