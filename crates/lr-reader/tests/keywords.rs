@@ -182,9 +182,12 @@ fn root_keyword_is_not_a_keyword() {
 fn person_and_do_not_export_keyword_is_converted() {
     let dir = tempfile::tempdir().unwrap();
     let r = run(&edge_fixture(dir.path()));
-    assert!(r.data.keywords.contains(&kw(&["Alice Example"])));
+    // Compare paths only: the person and export attributes are tested in
+    // keyword_attributes.rs.
+    let alice = kw(&["Alice Example"]).path().to_vec();
+    assert!(paths(&r.data.keywords).contains(&alice));
     // Photo 5 carries it.
-    assert!(r.data.assignments[&5].contains(&kw(&["Alice Example"])));
+    assert!(paths(&r.data.assignments[&5]).contains(&alice));
 }
 
 #[test]
