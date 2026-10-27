@@ -13,14 +13,16 @@
 //!   otherwise it is empty. stdout gets one line
 //!   `writer: keywords to create K, photos to import P, updates U`;
 //!   report.json gets `writer.planned = {"keywords": K, "photos": P,
-//!   "updates": U}` and `writer.skipped = [{"reason"}]`. Nothing is written
+//!   "updates": U}` and `writer.photos_skipped` and `writer.keywords_skipped`
+//!   (each `[{"reason"}]`). Nothing is written
 //!   next to the library (no state file, no library folder);
 //! - `--script FILE` writes the plan as JSON lines, also in a dry run, with
 //!   the same protection as `--report` (never the catalog or its companions);
 //! - `--apply` with `--library`: catalog read as in a dry run, then
 //!   pre-flight, then the writer. Exit 0; report.json has `dry_run: false`
 //!   and `writer = {keywords_created, photos_imported, photos_existing,
-//!   updates, not_saved, skipped: [{"reason"}]}`; the balance holds:
+//!   updates, not_saved, photos_skipped, photos_incomplete, keywords_skipped
+//!   (each `[{"reason"}]`)}`; the strict balance holds (a photo counts once):
 //!   `photos.converted == photos_imported + photos_existing + (photos
 //!   skipped by the writer)`; no names in stdout or report.json;
 //! - pre-flight or connection failures (XMP auto-write without
@@ -291,7 +293,8 @@ fn dry_run_never_connects_and_prints_the_plan_numbers() {
     assert_eq!(report["writer"]["planned"]["updates"], updates);
     assert_eq!(report["dry_run"], true);
     // Every photo that is read and converted is planned or skipped.
-    let skipped_photos = report["writer"]["skipped"].as_array().unwrap().len() as u64;
+    let skipped_photos = report["writer"]["photos_skipped"].as_array().unwrap().len() as u64;
+    assert!(report["writer"]["keywords_skipped"].is_array());
     assert_eq!(
         report["photos"]["converted"].as_u64().unwrap(),
         photos + skipped_photos
@@ -409,6 +412,56 @@ fn script_without_a_library_works_too() {
 }
 
 #[test]
+fn script_refuses_an_existing_foreign_file() {
+    let s = setup();
+    let photo = s.work.path().join("photo.jpg");
+    fs::write(&photo, b"\xff\xd8 not a script").unwrap();
+    // A file whose lines are JSON but not engine.execute requests is foreign too.
+    let other = s.work.path().join("other.json");
+    fs::write(&other, b"{\"method\":\"something.else\"}\n").unwrap();
+    for target in [&photo, &other] {
+        let before = fs::read(target).unwrap();
+        let o = run(
+            s.work.path(),
+            &[
+                s.catalog.as_os_str(),
+                OsStr::new("--script"),
+                target.as_os_str(),
+            ],
+        );
+        assert_exit(&o, 2);
+        assert_eq!(fs::read(target).unwrap(), before, "file was modified");
+    }
+}
+
+#[test]
+fn script_overwrites_an_earlier_script_or_an_empty_file() {
+    let s = setup();
+    let earlier = s.work.path().join("earlier.jsonl");
+    fs::write(
+        &earlier,
+        b"{\"method\":\"engine.execute\",\"params\":{\"command\":\"x\",\"params\":{}}}\n\n",
+    )
+    .unwrap();
+    let empty = s.work.path().join("empty.jsonl");
+    fs::write(&empty, b"").unwrap();
+    for target in [&earlier, &empty] {
+        let o = run(
+            s.work.path(),
+            &[
+                s.catalog.as_os_str(),
+                OsStr::new("--script"),
+                target.as_os_str(),
+            ],
+        );
+        assert_exit(&o, 0);
+        let text = fs::read_to_string(target).unwrap();
+        assert!(!text.contains("\"command\":\"x\""), "old content is gone");
+        assert!(text.contains("keyword.create"));
+    }
+}
+
+#[test]
 fn script_never_overwrites_the_catalog_or_its_companions() {
     let s = setup();
     let wal = {
@@ -455,8 +508,12 @@ fn apply_writes_through_the_port_and_reports_the_numbers() {
     assert_eq!(w["photos_existing"], 0);
     assert_eq!(w["updates"], updates);
     assert_eq!(w["not_saved"], 0);
-    let skipped = w["skipped"].as_array().unwrap();
-    for item in skipped {
+    let skipped = w["photos_skipped"].as_array().unwrap();
+    for item in skipped
+        .iter()
+        .chain(w["photos_incomplete"].as_array().unwrap())
+        .chain(w["keywords_skipped"].as_array().unwrap())
+    {
         assert!(!item["reason"].as_str().unwrap().is_empty());
     }
     // The books balance: read = converted + skipped, converted = written + skipped by the writer.
@@ -696,7 +753,7 @@ fn lost_connection_says_outcome_unknown_and_a_rerun_finishes_without_duplicates(
     );
     let photos = fake.photos();
     let total = s.report_json()["photos"]["converted"].as_u64().unwrap();
-    let skipped = s.report_json()["writer"]["skipped"]
+    let skipped = s.report_json()["writer"]["photos_skipped"]
         .as_array()
         .unwrap()
         .len() as u64;
@@ -724,19 +781,21 @@ fn error_reply_for_a_command_is_reported_as_skipped_not_fatal() {
     let o = s.run(fake.port(), &["--apply"]);
     assert_exit(&o, 0);
     let w = &s.report_json()["writer"];
-    let skipped = w["skipped"].as_array().unwrap();
-    assert!(!skipped.is_empty());
+    let incomplete = w["photos_incomplete"].as_array().unwrap();
+    assert!(!incomplete.is_empty());
     assert!(
-        skipped
+        incomplete
             .iter()
-            .any(|i| i["reason"].as_str().unwrap().contains("photo.rate"))
+            .all(|i| i["reason"].as_str().unwrap().contains("photo.rate"))
     );
-    // Every photo was imported; only their rating updates were refused. Such
-    // a photo is counted as imported and, for its refused update, as skipped.
+    // Strict balance: a photo with a refused update was imported and counts once.
     let p = &s.report_json()["photos"];
     assert_eq!(
         p["converted"].as_u64().unwrap(),
-        w["photos_imported"].as_u64().unwrap() + w["photos_existing"].as_u64().unwrap()
+        w["photos_imported"].as_u64().unwrap()
+            + w["photos_existing"].as_u64().unwrap()
+            + w["photos_skipped"].as_array().unwrap().len() as u64
     );
+    assert!(incomplete.len() as u64 <= w["photos_imported"].as_u64().unwrap());
     no_secrets(&fs::read_to_string(s.report()).unwrap());
 }

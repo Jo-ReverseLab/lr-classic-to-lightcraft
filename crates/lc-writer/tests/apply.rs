@@ -6,7 +6,10 @@
 //! - `apply(&mut ControlClient, &WriteInput, &mut State, &Path /* state file */)
 //!   -> Result<ApplySummary, WriteError>`;
 //! - `ApplySummary { keywords_created, photos_imported, photos_existing,
-//!   updates, not_saved: usize, skipped: Vec<model::Skipped> }` (all pub).
+//!   updates, not_saved: usize, photos_skipped, photos_incomplete,
+//!   keywords_skipped: Vec<model::Skipped> }` (all pub). Every photo counts
+//!   once: photos in `photos_skipped` were not written; `photos_incomplete`
+//!   (a subset of imported + existing) lost an update.
 //!
 //! Rules checked (see the lead's design for P5-4c):
 //! - the first command is `keyword.list {}`; its answer is accepted as an
@@ -112,6 +115,12 @@ fn run(fake: &FakeLightCraft, env: &Env, input: &WriteInput) -> Result<ApplySumm
     run_with(fake, env, input, &mut state)
 }
 
+fn assert_clean(s: &ApplySummary) {
+    assert!(s.photos_skipped.is_empty(), "{:?}", s.photos_skipped);
+    assert!(s.photos_incomplete.is_empty(), "{:?}", s.photos_incomplete);
+    assert!(s.keywords_skipped.is_empty(), "{:?}", s.keywords_skipped);
+}
+
 fn texts(items: &[&str]) -> BTreeSet<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
@@ -141,7 +150,7 @@ fn first_run_creates_keywords_imports_photos_and_sets_fields() {
     assert_eq!(summary.photos_existing, 0);
     assert_eq!(summary.updates, 5);
     assert_eq!(summary.not_saved, 0);
-    assert!(summary.skipped.is_empty(), "{:?}", summary.skipped);
+    assert_clean(&summary);
 
     assert_eq!(fake.keywords(), expected_keywords());
     let photos = fake.photos();
@@ -296,7 +305,7 @@ fn second_run_with_unchanged_input_sends_only_read_commands() {
     assert_eq!(summary.photos_imported, 0);
     assert_eq!(summary.photos_existing, 0);
     assert_eq!(summary.updates, 0);
-    assert!(summary.skipped.is_empty());
+    assert_clean(&summary);
     let second: Vec<String> = fake.commands()[before..]
         .iter()
         .map(|(c, _)| c.clone())
@@ -332,7 +341,7 @@ fn lost_state_file_finds_photos_and_keywords_again_without_duplicates() {
         "reported as duplicates by LightCraft"
     );
     assert_eq!(summary.keywords_created, 0, "keyword.list shows them");
-    assert!(summary.skipped.is_empty(), "{:?}", summary.skipped);
+    assert_clean(&summary);
     assert_eq!(fake.photos().len(), 4);
     assert_eq!(fake.keywords(), expected_keywords());
     let creates = fake.commands()[before..]
@@ -385,7 +394,7 @@ fn import_id_may_be_an_object_with_id_or_photo_id() {
         let summary = run(&fake, &env, &input()).unwrap();
         assert_eq!(summary.photos_imported, 4, "{style:?}");
         assert_eq!(summary.updates, 5, "{style:?}");
-        assert!(summary.skipped.is_empty(), "{style:?}");
+        assert_clean(&summary);
         let state = State::load(&env.state_file).unwrap();
         let photos = fake.photos();
         assert_eq!(
@@ -421,7 +430,7 @@ fn every_keyword_list_format_is_understood() {
             .map(|(_, p)| p["name"].as_str().unwrap().to_string())
             .collect();
         assert_eq!(created, ["Café ☕"], "{format:?}");
-        assert!(summary.skipped.is_empty(), "{format:?}");
+        assert_clean(&summary);
     }
 }
 
@@ -510,7 +519,7 @@ fn run_after_a_lost_import_finishes_the_rest_without_duplicates() {
     assert_eq!(summary.keywords_created, 0);
     assert_eq!(summary.photos_imported, 2, "g3 and g4");
     assert_eq!(summary.photos_existing, 0);
-    assert!(summary.skipped.is_empty());
+    assert_clean(&summary);
     assert_eq!(fake.photos().len(), 4);
     assert_eq!(fake.keywords(), expected_keywords());
     let imports_of_g1 = fake
@@ -538,7 +547,7 @@ fn run_after_an_import_that_took_effect_but_got_no_reply_finds_the_duplicate() {
     let summary = run(&fake, &env, &input()).unwrap();
     assert_eq!(summary.photos_existing, 1, "g3 is reported as a duplicate");
     assert_eq!(summary.photos_imported, 1, "g4");
-    assert!(summary.skipped.is_empty(), "{:?}", summary.skipped);
+    assert_clean(&summary);
     assert_eq!(fake.photos().len(), 4);
     let state = State::load(&env.state_file).unwrap();
     assert_eq!(
@@ -592,8 +601,19 @@ fn error_reply_for_one_photo_skips_only_that_photo() {
     let fake = FakeLightCraft::start(config);
     let summary = run(&fake, &env, &input()).unwrap();
 
-    assert_eq!(summary.skipped.len(), 1, "{:?}", summary.skipped);
-    let reason = &summary.skipped[0].reason;
+    assert_eq!(summary.photos_incomplete.len(), 1, "{summary:?}");
+    assert!(
+        summary.photos_skipped.is_empty(),
+        "{:?}",
+        summary.photos_skipped
+    );
+    assert!(summary.keywords_skipped.is_empty());
+    assert_eq!(
+        4,
+        summary.photos_imported + summary.photos_existing + summary.photos_skipped.len(),
+        "strict balance: every photo counts once"
+    );
+    let reason = &summary.photos_incomplete[0].reason;
     assert!(reason.contains("photo.rate"), "{reason}");
     assert!(
         !reason.contains("example") && !reason.contains("g1.jpg"),
@@ -637,8 +657,9 @@ fn error_reply_for_a_keyword_skips_that_keyword_and_the_run_goes_on() {
     let fake = FakeLightCraft::start(config);
     let summary = run(&fake, &env, &input()).unwrap();
     assert_eq!(summary.keywords_created, 0);
-    assert!(!summary.skipped.is_empty());
-    for s in &summary.skipped {
+    assert!(!summary.keywords_skipped.is_empty());
+    assert!(summary.photos_skipped.is_empty());
+    for s in &summary.keywords_skipped {
         assert!(s.reason.contains("keyword.create"), "{}", s.reason);
         assert!(
             !s.reason.contains("Café") && !s.reason.contains("Rome"),
@@ -661,7 +682,17 @@ fn failed_import_skips_the_photo_and_its_later_steps() {
     let fake = FakeLightCraft::start(config);
     let summary = run(&fake, &env, &input()).unwrap();
     assert_eq!(summary.photos_imported, 3);
-    assert_eq!(summary.skipped.len(), 1, "{:?}", summary.skipped);
+    assert_eq!(
+        summary.photos_skipped.len(),
+        1,
+        "{:?}",
+        summary.photos_skipped
+    );
+    assert!(summary.photos_incomplete.is_empty());
+    assert_eq!(
+        4,
+        summary.photos_imported + summary.photos_existing + summary.photos_skipped.len()
+    );
     assert_eq!(summary.updates, 4, "g1 rate + setMeta, g4 rate + label");
     let state = State::load(&env.state_file).unwrap();
     assert!(
@@ -685,7 +716,7 @@ fn not_saved_replies_count_as_success() {
     let summary = run(&fake, &env, &input()).unwrap();
     assert_eq!(summary.updates, 5);
     assert_eq!(summary.not_saved, 5);
-    assert!(summary.skipped.is_empty(), "{:?}", summary.skipped);
+    assert_clean(&summary);
     let state = State::load(&env.state_file).unwrap();
     let inp = input();
     let kws = inp.photo_keywords[&1].clone();
