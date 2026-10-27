@@ -1,9 +1,6 @@
 //! Acceptance tests for reading titles (task P5b-7c).
 //!
-//! Switched off with `cfg(any())` until the API exists; the developer removes
-//! that line and the `ignore` attributes.
-//!
-//! Expected API: `Photo::title` (`Option<String>`), filled by
+//! API under test: `Photo::title` (`Option<String>`), filled by
 //! `Catalog::photo_data`, and `PhotoData::title_unreadable: Vec<i64>`
 //! (catalog ids of the returned photos with a broken blob, ascending; same
 //! pattern as `unknown_flag`). Source: `Adobe_AdditionalMetadata.xmp`, a blob

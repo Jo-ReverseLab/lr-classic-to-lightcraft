@@ -1,10 +1,6 @@
 //! Acceptance tests for colour labels in the model (task P5b-2).
 //!
-//! This file does not compile before the API exists, so it is switched off
-//! with the `cfg(any())` line below. The developer removes that line (and the
-//! `ignore` attributes) once the API is in place.
-//!
-//! Expected API in `model`:
+//! API under test in `model`:
 //! - `pub enum ColorLabel { Red, Yellow, Green, Blue, Purple }`, deriving at
 //!   least `Debug, Clone, Copy, PartialEq, Eq, Hash`.
 //! - `model::Photo` gets `pub label: Option<ColorLabel>`. `Photo::new` sets

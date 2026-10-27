@@ -1,9 +1,6 @@
 //! Acceptance tests for reading captions (task P5b-7).
 //!
-//! Switched off with `cfg(any())` until the API exists; the developer removes
-//! that line and the `ignore` attributes.
-//!
-//! Expected API: `Photo::caption: Option<String>`, filled by
+//! API under test: `Photo::caption: Option<String>`, filled by
 //! `Catalog::photo_data` from `AgLibraryIPTC.caption` (joined by `image`):
 //! - the stored text byte for byte (no trim, no normalisation);
 //! - NULL, empty string and non-text values give `None`;

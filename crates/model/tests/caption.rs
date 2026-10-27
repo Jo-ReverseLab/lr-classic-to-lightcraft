@@ -1,9 +1,6 @@
 //! Acceptance tests for captions in the model (task P5b-7).
 //!
-//! Switched off with `cfg(any())` until the API exists; the developer removes
-//! that line and the `ignore` attributes.
-//!
-//! Expected API: `model::Photo` gets `pub caption: Option<String>`.
+//! API under test: `model::Photo` gets `pub caption: Option<String>`.
 //! `Photo::new` sets `None`; `with_caption(self, impl Into<String>) -> Self`
 //! sets `Some(..)` and keeps the text byte for byte.
 

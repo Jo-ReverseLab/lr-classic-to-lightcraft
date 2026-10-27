@@ -1,10 +1,6 @@
 //! Acceptance tests for reading colour labels (task P5b-2).
 //!
-//! This file does not compile before the API exists, so it is switched off
-//! with the `cfg(any())` line below. The developer removes that line (and the
-//! `ignore` attributes) once the API is in place.
-//!
-//! Expected API: `PhotoData::color_labels: Vec<(i64, String)>`, filled by
+//! API under test: `PhotoData::color_labels: Vec<(i64, String)>`, filled by
 //! `Catalog::photo_data`:
 //! - one `(catalog id, raw text of Adobe_images.colorLabels)` entry for every
 //!   returned photo whose value is non-empty text, ascending by id. The text

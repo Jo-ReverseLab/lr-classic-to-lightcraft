@@ -1,9 +1,6 @@
 //! Acceptance tests for the title in the model (task P5b-7c).
 //!
-//! Switched off with `cfg(any())` until the API exists; the developer removes
-//! that line.
-//!
-//! Expected API: `model::Photo` gets `pub title: Option<String>`.
+//! API under test: `model::Photo` gets `pub title: Option<String>`.
 //! `Photo::new` sets it to `None`; `with_title` (`impl Into<String>`) sets
 //! `Some(..)`, keeps the text byte for byte and is independent of caption,
 //! copyright and creator.

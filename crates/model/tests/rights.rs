@@ -1,9 +1,6 @@
 //! Acceptance tests for copyright and creator in the model (task P5b-7b).
 //!
-//! Switched off with `cfg(any())` until the API exists; the developer removes
-//! that line and the `ignore` attributes.
-//!
-//! Expected API: `model::Photo` gets `pub copyright: Option<String>` and
+//! API under test: `model::Photo` gets `pub copyright: Option<String>` and
 //! `pub creator: Option<String>`. `Photo::new` sets both to `None`;
 //! `with_copyright` and `with_creator` (`impl Into<String>`) set `Some(..)`
 //! and keep the text byte for byte, independently of each other and of the

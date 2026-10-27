@@ -1,9 +1,6 @@
 //! Acceptance tests for reading copyright and creator (task P5b-7b).
 //!
-//! Switched off with `cfg(any())` until the API exists; the developer removes
-//! that line and the `ignore` attributes.
-//!
-//! Expected API: `Photo::copyright` and `Photo::creator` (`Option<String>`),
+//! API under test: `Photo::copyright` and `Photo::creator` (`Option<String>`),
 //! filled by `Catalog::photo_data`:
 //! - copyright from `AgLibraryIPTC.copyright`, same rules as the caption:
 //!   byte for byte, NULL / empty / non-text / no row give `None`, the row
