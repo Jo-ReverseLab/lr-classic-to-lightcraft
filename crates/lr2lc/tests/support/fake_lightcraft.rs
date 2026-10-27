@@ -78,6 +78,34 @@ pub struct AlbumView {
     pub photos: Vec<i64>,
 }
 
+/// An album or album folder the fake library already has at start.
+#[derive(Clone, Debug)]
+pub struct SeedAlbum {
+    pub name: String,
+    pub folder: bool,
+    /// Index of the enclosing folder in `Config::albums` (must be smaller
+    /// than the own index); `None` on top level.
+    pub parent: Option<usize>,
+}
+
+impl SeedAlbum {
+    pub fn album(name: &str, parent: Option<usize>) -> SeedAlbum {
+        SeedAlbum {
+            name: name.to_string(),
+            folder: false,
+            parent,
+        }
+    }
+
+    pub fn folder(name: &str, parent: Option<usize>) -> SeedAlbum {
+        SeedAlbum {
+            name: name.to_string(),
+            folder: true,
+            parent,
+        }
+    }
+}
+
 /// An error reply for a command, optionally only for one photo id.
 #[derive(Clone, Debug)]
 pub struct Failure {
@@ -114,6 +142,11 @@ pub struct Config {
     pub selection_gate: bool,
     /// Error replies for album commands.
     pub album_failures: Vec<AlbumFailure>,
+    /// Albums and folders the library has at start (ids 5001, 5002, ...
+    /// in this order; names are kept as given, not trimmed).
+    pub albums: Vec<SeedAlbum>,
+    /// Answer `albums.list` with an object instead of the nested array.
+    pub albums_list_garbage: bool,
 }
 
 impl Config {
@@ -133,6 +166,8 @@ impl Config {
             import_failed_for: None,
             selection_gate: true,
             album_failures: Vec::new(),
+            albums: Vec::new(),
+            albums_list_garbage: false,
         }
     }
 }
@@ -179,12 +214,28 @@ impl FakeLightCraft {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake LightCraft");
         listener.set_nonblocking(true).expect("nonblocking");
         let port = listener.local_addr().expect("addr").port();
-        let library = Library {
+        let mut library = Library {
             keywords: config.keywords.clone(),
             next_id: 1001,
             next_album_id: 5001,
             ..Library::default()
         };
+        for seed in &config.albums {
+            let id = library.next_album_id;
+            library.next_album_id += 1;
+            let parent = seed.parent.map(|i| 5001 + i as u64);
+            assert!(parent.is_none_or(|p| p < id), "seed parent must come first");
+            library.albums.insert(
+                id,
+                AlbumView {
+                    id,
+                    name: seed.name.clone(),
+                    folder: seed.folder,
+                    parent,
+                    photos: Vec::new(),
+                },
+            );
+        }
         let shared = Arc::new(Shared {
             config,
             library: Mutex::new(library),
@@ -616,6 +667,7 @@ fn album_command(
                 Ok(json!({"removed": before - album.photos.len(), "album": id}))
             }
         }
+        _ if config.albums_list_garbage => Ok(json!({"albums": "none"})),
         _ => Ok(json!(albums_nested(lib, None))),
     }
 }
@@ -631,6 +683,7 @@ fn albums_nested(lib: &Library, parent: Option<u64>) -> Vec<Value> {
                 "name": a.name,
                 "folder": a.folder,
                 "count": a.photos.len(),
+                "cover": null,
                 "children": albums_nested(lib, Some(a.id)),
             })
         })
