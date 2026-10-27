@@ -145,7 +145,6 @@ fn missing_color_labels_column_is_reported() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn missing_iptc_table_is_reported() {
     // P5b-7: AgLibraryIPTC (columns image, caption) is required.
     let dir = tempfile::tempdir().unwrap();
@@ -154,7 +153,6 @@ fn missing_iptc_table_is_reported() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn missing_iptc_caption_column_is_reported() {
     let dir = tempfile::tempdir().unwrap();
     let path = damaged(dir.path(), "AgLibraryIPTC", Some("caption"));
@@ -162,7 +160,6 @@ fn missing_iptc_caption_column_is_reported() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn missing_iptc_image_column_is_reported() {
     let dir = tempfile::tempdir().unwrap();
     let path = damaged(dir.path(), "AgLibraryIPTC", Some("image"));

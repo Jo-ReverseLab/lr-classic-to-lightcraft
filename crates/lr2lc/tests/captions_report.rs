@@ -51,7 +51,6 @@ fn captions_line(text: &str) -> &str {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn counts_converted_photos_with_a_caption() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_caption_catalog_with_files(dir.path()).unwrap();
@@ -66,7 +65,6 @@ fn counts_converted_photos_with_a_caption() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn catalog_without_captions_reports_zero() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_small_catalog_with_files(dir.path()).unwrap();
@@ -76,7 +74,6 @@ fn catalog_without_captions_reports_zero() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn no_caption_text_in_any_output() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_caption_catalog_with_files(dir.path()).unwrap();
@@ -89,7 +86,6 @@ fn no_caption_text_in_any_output() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn catalog_unchanged_second_run_identical_and_nothing_written() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_caption_catalog_with_files(dir.path()).unwrap();
@@ -113,7 +109,6 @@ fn catalog_unchanged_second_run_identical_and_nothing_written() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn apply_is_still_refused_and_writes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_caption_catalog_with_files(dir.path()).unwrap();

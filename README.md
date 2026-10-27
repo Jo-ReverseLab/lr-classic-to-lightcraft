@@ -71,6 +71,9 @@ in the set is a custom label: the photo is still converted, without a
 label, and counted as `custom`. The seven counts add up to the converted
 photos. Label names never appear in the output or in the report.
 
+Photos with a caption are counted on the line `captions: N` and as
+`photos.captions` in the report; the caption text itself never appears.
+
 Photos and keywords are identified by Lightroom's global id, which, unlike the
 internal row id, does not depend on the order in which rows were stored. This keeps repeated runs from creating duplicates. A photo or keyword
 without a global id is skipped with the reason `missing global id`; if

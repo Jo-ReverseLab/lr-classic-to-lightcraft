@@ -43,6 +43,8 @@ pub struct PhotosJson<'a> {
     pub flags: FlagsJson,
     /// Converted photos per colour label.
     pub labels: LabelsJson,
+    /// Converted photos with a caption. Caption texts are never listed.
+    pub captions: usize,
 }
 
 /// Converted photos per flag; the fields add up to the converted photos.
@@ -160,6 +162,7 @@ pub fn report_json(outcome: &Outcome) -> String {
             videos: outcome.videos,
             flags: outcome.flags.into(),
             labels: (&outcome.labels).into(),
+            captions: outcome.captions,
         },
         collections: AreaJson::new(&outcome.collections),
         keywords: KeywordsJson {
@@ -218,6 +221,7 @@ pub fn summary(outcome: &Outcome) -> String {
     let _ = writeln!(out, "{}", ratings_line(&outcome.ratings));
     let _ = writeln!(out, "{}", flags_line(&outcome.flags));
     let _ = writeln!(out, "{}", labels_line(&outcome.labels));
+    let _ = writeln!(out, "captions: {}", outcome.captions);
     if outcome.labels.recommend {
         let _ = writeln!(
             out,
@@ -384,7 +388,20 @@ mod tests {
                 none: 1,
                 ..LabelCounts::default()
             },
+            captions: 0,
         }
+    }
+
+    #[test]
+    fn captions_are_in_summary_and_json() {
+        let mut o = outcome();
+        o.captions = 4;
+        assert_eq!(
+            summary(&o).lines().filter(|l| *l == "captions: 4").count(),
+            1
+        );
+        let v: serde_json::Value = serde_json::from_str(&report_json(&o)).unwrap();
+        assert_eq!(v["photos"]["captions"], 4);
     }
 
     #[test]

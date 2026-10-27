@@ -110,6 +110,8 @@ pub struct Photo {
     pub flag: Flag,
     /// Colour label, if any.
     pub label: Option<ColorLabel>,
+    /// Caption, kept byte for byte. `None` if the photo has none.
+    pub caption: Option<String>,
 }
 
 impl Photo {
@@ -122,6 +124,7 @@ impl Photo {
             global_id: None,
             flag: Flag::None,
             label: None,
+            caption: None,
         }
     }
 
@@ -140,6 +143,12 @@ impl Photo {
     /// Returns the photo with its colour label set.
     pub fn with_label(mut self, label: ColorLabel) -> Self {
         self.label = Some(label);
+        self
+    }
+
+    /// Returns the photo with its caption set, kept byte for byte.
+    pub fn with_caption(mut self, caption: impl Into<String>) -> Self {
+        self.caption = Some(caption.into());
         self
     }
 }

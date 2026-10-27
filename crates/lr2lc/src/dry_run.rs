@@ -32,6 +32,8 @@ pub struct Outcome {
     pub flags: FlagCounts,
     /// Colour label counts over the converted photos.
     pub labels: LabelCounts,
+    /// Converted photos that carry a caption. The text is never reported.
+    pub captions: usize,
 }
 
 /// Number of converted photos per flag. `none` does not include `unknown`,
@@ -116,6 +118,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         ratings,
         flags,
         labels,
+        captions,
     ) = {
         let catalog = Catalog::open(path)?;
         let mut folders = Report::new();
@@ -172,6 +175,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
             rating_counts(&kept_photos),
             FlagCounts::count(&kept_photos, &photo_data.unknown_flag),
             labels,
+            count_captions(&kept_photos),
         )
     };
     let after = checksum(path).context("cannot read catalog file after the run")?;
@@ -201,7 +205,13 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         ratings,
         flags,
         labels,
+        captions,
     })
+}
+
+/// Counts the photos that carry a caption.
+fn count_captions(photos: &[Photo]) -> usize {
+    photos.iter().filter(|p| p.caption.is_some()).count()
 }
 
 /// Counts the photos skipped as videos.
@@ -299,6 +309,17 @@ mod tests {
     fn rating_counts_cover_all_stars() {
         let photos = [photo(1, 0), photo(2, 5), photo(3, 5), photo(4, 3)];
         assert_eq!(rating_counts(&photos), [1, 0, 0, 1, 0, 2]);
+    }
+
+    #[test]
+    fn only_photos_with_a_caption_are_counted() {
+        let photos = [
+            photo(1, 0).with_caption("a"),
+            photo(2, 0),
+            photo(3, 0).with_caption(" "),
+        ];
+        assert_eq!(count_captions(&photos), 2);
+        assert_eq!(count_captions(&[]), 0);
     }
 
     #[test]

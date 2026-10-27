@@ -16,7 +16,6 @@
 //!
 //! Fixture: `lrcat_fixtures::write_caption_catalog_with_files`, see
 //! `lrcat_fixtures::caption_edge`.
-#![cfg(any())]
 
 use lr_reader::{Catalog, checksum};
 use lrcat_fixtures::caption_edge as e;
@@ -45,7 +44,6 @@ fn caption(data: &lr_reader::PhotoData, id: i64) -> Option<String> {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn text_is_returned_byte_for_byte() {
     let (_d, _c, data, _) = read();
     assert_eq!(
@@ -59,7 +57,6 @@ fn text_is_returned_byte_for_byte() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn empty_null_missing_row_and_non_text_give_none() {
     let (_d, _c, data, _) = read();
     for id in [e::EMPTY_ID, e::NULL_ID, e::NO_ROW_ID, e::NON_TEXT_ID, 1, 12] {
@@ -68,7 +65,6 @@ fn empty_null_missing_row_and_non_text_give_none() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn smallest_id_local_wins_with_duplicate_rows() {
     let (_d, _c, data, _) = read();
     assert_eq!(
@@ -79,7 +75,6 @@ fn smallest_id_local_wins_with_duplicate_rows() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn captions_do_not_change_photos_or_counts() {
     let (_d, _c, data, report) = read();
     let plain_dir = tempfile::tempdir().unwrap();
@@ -101,7 +96,6 @@ fn captions_do_not_change_photos_or_counts() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn caption_text_stays_out_of_the_report() {
     let (_d, _c, _data, report) = read();
     for item in report.skipped_items() {
@@ -112,7 +106,6 @@ fn caption_text_stays_out_of_the_report() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7"]
 fn second_read_is_identical() {
     let (_d, cat, a, _) = read();
     let mut report = Report::new();

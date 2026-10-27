@@ -19,6 +19,9 @@ struct Row {
     pick: Value,
     /// `Adobe_images.colorLabels` if it is non-empty text.
     color_label: Option<String>,
+    /// `AgLibraryIPTC.caption` of the row with the smallest `id_local` for
+    /// this image, if it is non-empty text.
+    caption: Option<String>,
     file: Option<(String, String)>,
     folder: Option<String>,
     root_row: bool,
@@ -72,7 +75,9 @@ impl Catalog {
                 "SELECT i.id_local, i.masterImage, i.rating, i.fileFormat, \
                         f.id_local, f.baseName, f.extension, \
                         d.id_local, d.pathFromRoot, \
-                        r.id_local, r.absolutePath, i.id_global, i.pick, i.colorLabels \
+                        r.id_local, r.absolutePath, i.id_global, i.pick, i.colorLabels, \
+                        (SELECT c.caption FROM AgLibraryIPTC c \
+                         WHERE c.image = i.id_local ORDER BY c.id_local LIMIT 1) \
                  FROM Adobe_images i \
                  LEFT JOIN AgLibraryFile f ON f.id_local = i.rootFile \
                  LEFT JOIN AgLibraryFolder d ON d.id_local = f.folder \
@@ -91,6 +96,7 @@ impl Catalog {
                     rating: row.get(2)?,
                     pick: row.get(12)?,
                     color_label: text_value(row.get(13)?).filter(|t| !t.is_empty()),
+                    caption: text_value(row.get(14)?).filter(|t| !t.is_empty()),
                     file_format: text_value(row.get(3)?),
                     global_id: text_value(row.get(11)?),
                     file: match file_id {
@@ -178,11 +184,13 @@ fn photo_from_row(row: Row, used: &mut HashSet<String>) -> Result<Photo, String>
     let flag = flag_from_value(&row.pick).unwrap_or_default();
     let folder = join_folder_path(&root, &rel);
     used.insert(global_id.clone());
-    Ok(
-        Photo::new(join_file_path(&folder, &file_name(&base, &ext)), id, rating)
-            .with_global_id(global_id)
-            .with_flag(flag),
-    )
+    let photo = Photo::new(join_file_path(&folder, &file_name(&base, &ext)), id, rating)
+        .with_global_id(global_id)
+        .with_flag(flag);
+    Ok(match row.caption {
+        Some(caption) => photo.with_caption(caption),
+        None => photo,
+    })
 }
 
 /// Skip reason of a video, after the `photo {id}: ` prefix.
@@ -271,6 +279,7 @@ mod tests {
             rating: Value::Null,
             pick: Value::Null,
             color_label: None,
+            caption: None,
             file: Some(("IMG".into(), "jpg".into())),
             folder: Some("a/".into()),
             root_row: true,
@@ -302,6 +311,16 @@ mod tests {
         assert_eq!(r(Value::Integer(6)), None);
         assert_eq!(r(Value::Integer(-1)), None);
         assert_eq!(r(Value::Text("3".into())), None);
+    }
+
+    #[test]
+    fn caption_of_the_row_is_carried_by_the_photo() {
+        let mut r = row();
+        r.caption = Some(" a ".into());
+        let p = photo_from_row(r, &mut HashSet::new()).unwrap();
+        assert_eq!(p.caption.as_deref(), Some(" a "));
+        let p = photo_from_row(row(), &mut HashSet::new()).unwrap();
+        assert_eq!(p.caption, None);
     }
 
     #[test]
