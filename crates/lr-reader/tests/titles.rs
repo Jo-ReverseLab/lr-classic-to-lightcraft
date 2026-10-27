@@ -130,7 +130,7 @@ fn photos_and_counts_are_unchanged_by_titles() {
     assert!(plain_data.photos.iter().all(|p| p.title.is_none()));
     assert!(plain_data.title_unreadable.is_empty());
     let with = data.photos.iter().filter(|p| p.title.is_some()).count();
-    assert_eq!(with as i64, e::TITLES);
+    assert_eq!(with as i64, e::TITLES + 1); // photo 2 is returned by the reader; only the CLI skips it (missing file)
     for id in e::SKIPPED_IDS {
         assert!(title(&data, id).is_none() || id == 2 || id == 3);
     }
