@@ -202,6 +202,73 @@ pub mod flag_edge {
     pub const NONE: i64 = 10;
 }
 
+/// Counts and ids of the colour label fixtures
+/// ([`write_label_catalog_with_files`]).
+///
+/// Each fixture is the small fixture with `Adobe_images.colorLabels` set as
+/// listed in [`label_edge::values`]. Photos not listed store the empty string,
+/// except photo 10, which stores NULL (a real catalog has `NOT NULL`; the
+/// fixture column is nullable so that NULL can be tested). Photos 2 and 3
+/// have a missing original and photo 20 is a virtual copy, so the CLI
+/// converts 17 photos: ids 1 and 4..=19. Photos 2 and 20 carry a label as
+/// well; it must not be counted anywhere.
+pub mod label_edge {
+    /// Label fixtures. All names are invented.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Fixture {
+        /// English names. Photos 4..=9: Red, Yellow, Green, Blue, Purple, Red.
+        En,
+        /// German names, `Grün` in NFC. Photos 4..=9: Rot, Gelb, Grün, Blau,
+        /// Lila, Rot.
+        De,
+        /// Both sets mixed. Photos 4..=9: Red, Rot, Green, Blau, Purple, Gelb.
+        Mixed,
+        /// Photos 4..=9: `Grün` in NFD, `rot`, `Red ` (trailing space),
+        /// `Zyx-Label-Custom`, `Green`, `Red`.
+        Odd,
+        /// No labels at all (empty strings; photo 10 NULL).
+        Empty,
+    }
+
+    /// Converted photos (17 = 20 rows - virtual copy - 2 missing originals).
+    pub const CONVERTED: i64 = 17;
+    pub const PHOTOS: i64 = 20;
+    pub const SKIPPED: i64 = 3;
+    /// Converted photos that carry a non-empty label in `En`, `De`, `Mixed`
+    /// and `Odd` (ids 4..=9).
+    pub const LABELLED: i64 = 6;
+    /// Converted photos with an empty or NULL label (17 - 6).
+    pub const UNLABELLED: i64 = 11;
+    /// Photo 10 stores NULL in every label fixture.
+    pub const NULL_ID: i64 = 10;
+    /// Ids of the photos that carry a label (all fixtures but `Empty`).
+    pub const LABELLED_IDS: [i64; 6] = [4, 5, 6, 7, 8, 9];
+    /// The custom name in `Odd`.
+    pub const CUSTOM_NAME: &str = "Zyx-Label-Custom";
+
+    /// `(photo id, stored label)` rows of a fixture, without the NULL of
+    /// photo 10. Photos 2 (missing original) and 20 (virtual copy) are
+    /// included.
+    pub fn values(f: Fixture) -> Vec<(i64, &'static str)> {
+        let six: [&'static str; 6] = match f {
+            Fixture::En => ["Red", "Yellow", "Green", "Blue", "Purple", "Red"],
+            Fixture::De => ["Rot", "Gelb", "Gr\u{fc}n", "Blau", "Lila", "Rot"],
+            Fixture::Mixed => ["Red", "Rot", "Green", "Blau", "Purple", "Gelb"],
+            Fixture::Odd => ["Gru\u{308}n", "rot", "Red ", CUSTOM_NAME, "Green", "Red"],
+            Fixture::Empty => return Vec::new(),
+        };
+        let mut v: Vec<(i64, &'static str)> = LABELLED_IDS.into_iter().zip(six).collect();
+        // Skipped photos: missing original (2) and virtual copy (20).
+        let skipped: [&'static str; 2] = match f {
+            Fixture::En | Fixture::Mixed | Fixture::Odd => ["Red", "Green"],
+            _ => ["Rot", "Gr\u{fc}n"],
+        };
+        v.push((2, skipped[0]));
+        v.push((20, skipped[1]));
+        v
+    }
+}
+
 /// Counts and ids of the video fixture ([`write_video_catalog_with_files`]).
 pub mod video_edge {
     /// `Adobe_images` rows: the 20 of the small fixture plus virtual copy 21.
@@ -603,6 +670,46 @@ fn add_flag_edges(path: &Path) -> Result<()> {
     }
     // A pick in a collection is not the flag of the photo.
     c.execute_batch("UPDATE AgLibraryCollectionImage SET pick = 1")?;
+    c.execute_batch("COMMIT")?;
+    Ok(())
+}
+
+/// Writes the small fixture with `Adobe_images.colorLabels` as listed in
+/// [`label_edge::values`] as `dir/labels.lrcat` with placeholder originals.
+/// Returns the catalog path.
+pub fn write_label_catalog_with_files(dir: &Path, fixture: label_edge::Fixture) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("labels.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_label_edges(&catalog, fixture)?;
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+fn add_label_edges(path: &Path, fixture: label_edge::Fixture) -> Result<()> {
+    let c = Connection::open(path)?;
+    // Rebuild `Adobe_images` with a nullable `colorLabels` column.
+    let sql: String = c.query_row(
+        "SELECT sql FROM sqlite_master WHERE name = 'Adobe_images'",
+        [],
+        |r| r.get(0),
+    )?;
+    assert!(sql.contains("colorLabels NOT NULL,"));
+    c.execute_batch("BEGIN")?;
+    c.execute_batch("ALTER TABLE Adobe_images RENAME TO Adobe_images_old")?;
+    c.execute_batch(&sql.replace("colorLabels NOT NULL,", "colorLabels,"))?;
+    c.execute_batch("INSERT INTO Adobe_images SELECT * FROM Adobe_images_old")?;
+    c.execute_batch("DROP TABLE Adobe_images_old")?;
+    for (id, label) in label_edge::values(fixture) {
+        c.execute(
+            "UPDATE Adobe_images SET colorLabels = ?1 WHERE id_local = ?2",
+            params![label, id],
+        )?;
+    }
+    c.execute(
+        "UPDATE Adobe_images SET colorLabels = NULL WHERE id_local = ?1",
+        [label_edge::NULL_ID],
+    )?;
     c.execute_batch("COMMIT")?;
     Ok(())
 }
