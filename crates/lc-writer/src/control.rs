@@ -69,6 +69,26 @@ pub enum WriteError {
     State(#[from] crate::state::StateError),
 }
 
+impl WriteError {
+    /// A short reason for reports: fixed texts and command names only, never
+    /// a path, a name or a message of the app.
+    pub fn short_reason(&self) -> String {
+        match self {
+            WriteError::Connect { .. } => "cannot connect to the LightCraft control port".into(),
+            WriteError::Protocol(_) => "unexpected reply from the LightCraft control port".into(),
+            WriteError::Command { command, .. } => format!("LightCraft rejected {command}"),
+            WriteError::ConnectionLost { command } => {
+                format!("connection lost during {command}; outcome unknown")
+            }
+            WriteError::NotPersistent => "LightCraft has no persistent library open".into(),
+            WriteError::WrongLibrary { .. } => "LightCraft has another library open".into(),
+            WriteError::LibraryProblem(_) => "LightCraft reports a library problem".into(),
+            WriteError::XmpAutoWrite => "the library writes XMP sidecars automatically".into(),
+            WriteError::State(_) => "the mapping file could not be read or written".into(),
+        }
+    }
+}
+
 /// The result of a command the app has applied.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outcome {
@@ -276,6 +296,44 @@ fn same_library(expected: &Path, open: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_reasons_contain_no_paths_or_app_messages() {
+        let secret = "/private/dir/a.jpg";
+        let errors = [
+            WriteError::Connect {
+                port: 1,
+                source: std::io::Error::other(secret),
+            },
+            WriteError::Protocol(secret.into()),
+            WriteError::Command {
+                command: "photo.rate".into(),
+                message: secret.into(),
+            },
+            WriteError::ConnectionLost {
+                command: "library.import".into(),
+            },
+            WriteError::NotPersistent,
+            WriteError::WrongLibrary {
+                expected: secret.into(),
+                open: secret.into(),
+            },
+            WriteError::LibraryProblem(secret.into()),
+            WriteError::XmpAutoWrite,
+            WriteError::State(crate::state::StateError::Io {
+                path: secret.into(),
+                source: std::io::Error::other(secret),
+            }),
+        ];
+        for e in &errors {
+            let text = e.short_reason();
+            assert!(!text.is_empty() && !text.contains("private"), "{text}");
+        }
+        assert_eq!(
+            errors[3].short_reason(),
+            "connection lost during library.import; outcome unknown"
+        );
+    }
 
     #[test]
     fn success_reply_yields_result() {

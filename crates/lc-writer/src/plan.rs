@@ -71,6 +71,10 @@ pub struct Plan {
     pub skipped: Vec<Skipped>,
     /// How many of the leading entries of `skipped` concern keywords.
     keyword_skips: usize,
+    /// Known photos (in the mapping file) with at least one update.
+    photos_updated: usize,
+    /// Known photos that need no command.
+    photos_unchanged: usize,
 }
 
 impl Plan {
@@ -82,6 +86,18 @@ impl Plan {
     /// The skipped photos (no or duplicate global id, path not UTF-8).
     pub fn photo_skips(&self) -> &[Skipped] {
         &self.skipped[self.keyword_skips.min(self.skipped.len())..]
+    }
+
+    /// The photos already in the mapping file that get at least one
+    /// update. Together with the imports, [`Plan::photos_unchanged`] and
+    /// [`Plan::photo_skips`] every input photo counts exactly once.
+    pub fn photos_updated(&self) -> usize {
+        self.photos_updated
+    }
+
+    /// The photos already in the mapping file that need no command.
+    pub fn photos_unchanged(&self) -> usize {
+        self.photos_unchanged
     }
 
     /// The plan as a script: one JSON line per step, each an
@@ -241,6 +257,7 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
             .map(Vec::as_slice)
             .unwrap_or_default();
         let new = snapshot(p, keywords);
+        let known = state.photo(gid).is_some();
         let old = match state.photo(gid) {
             Some(entry) => entry.fields.clone(),
             None => {
@@ -260,7 +277,15 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
                 PhotoFields::imported_default()
             }
         };
-        for (command, params) in field_changes(&old, &new) {
+        let changes = field_changes(&old, &new);
+        if known {
+            if changes.is_empty() {
+                out.photos_unchanged += 1;
+            } else {
+                out.photos_updated += 1;
+            }
+        }
+        for (command, params) in changes {
             out.steps.push(Step::Update {
                 global_id: gid.to_string(),
                 command: command.to_string(),
@@ -402,6 +427,37 @@ mod tests {
         assert_eq!(p.keyword_skips().len(), 1);
         assert_eq!(p.photo_skips().len(), 1);
         assert!(p.photo_skips()[0].reason.contains('7'));
+    }
+
+    #[test]
+    fn known_photos_count_as_updated_or_unchanged() {
+        let photos = vec![
+            Photo::new("a.jpg", 1, Rating::new(2).unwrap()).with_global_id("a"),
+            Photo::new("b.jpg", 2, Rating::new(3).unwrap()).with_global_id("b"),
+            Photo::new("c.jpg", 3, Rating::default()).with_global_id("c"),
+            Photo::new("d.jpg", 4, Rating::default()).with_global_id("c"),
+            Photo::new("e.jpg", 5, Rating::default()),
+        ];
+        let mut state = State::default();
+        let old = Photo::new("a.jpg", 1, Rating::new(1).unwrap());
+        state.record("a", 1, json!(10), snapshot(&old, &[]));
+        state.record("c", 3, json!(30), PhotoFields::imported_default());
+        let input = WriteInput {
+            photos,
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &state, &BTreeSet::new());
+        assert_eq!(p.photos_updated(), 1);
+        assert_eq!(p.photos_unchanged(), 1);
+        let imports = p
+            .steps
+            .iter()
+            .filter(|s| matches!(s, Step::Import { .. }))
+            .count();
+        assert_eq!(imports, 1);
+        assert_eq!(p.photo_skips().len(), 2);
+        let total = imports + p.photos_updated() + p.photos_unchanged() + p.photo_skips().len();
+        assert_eq!(total, input.photos.len());
     }
 
     #[test]

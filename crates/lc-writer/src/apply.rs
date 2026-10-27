@@ -14,6 +14,9 @@
 //!   import, and with all its fields once every update succeeded;
 //! - an error reply skips only the affected keyword or photo; a lost
 //!   connection or a protocol error stops the run; nothing is repeated;
+//! - every input photo counts exactly once: imported, existing, updated,
+//!   unchanged or skipped; a stopped run hands back the numbers up to the
+//!   stop ([`Aborted`]);
 //! - reasons never contain texts from the catalog or from the app's error
 //!   messages (which may quote file paths); they name the command and, for
 //!   photos, the Lightroom id.
@@ -26,9 +29,10 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-/// What a run did. Every photo of the input counts at most once in
-/// `photos_imported`, `photos_existing` and `photos_skipped`; photos that
-/// were already written before and needed no import count in none of them.
+/// What a run did. After a complete run every photo of the input counts in
+/// exactly one of `photos_imported`, `photos_existing`, `photos_updated`,
+/// `photos_unchanged` and `photos_skipped`. A photo imported or found as a
+/// duplicate by this run counts only there, whatever its updates do.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ApplySummary {
     /// Keywords created by this run.
@@ -37,6 +41,11 @@ pub struct ApplySummary {
     pub photos_imported: usize,
     /// Photos the library already had (reported as duplicates on import).
     pub photos_existing: usize,
+    /// Photos known from the mapping file for which at least one update was
+    /// answered (applied or rejected).
+    pub photos_updated: usize,
+    /// Photos known from the mapping file that needed no command.
+    pub photos_unchanged: usize,
     /// Field updates applied.
     pub updates: usize,
     /// Commands applied in memory but not yet saved to disk by the app;
@@ -44,38 +53,58 @@ pub struct ApplySummary {
     pub not_saved: usize,
     /// Photos not written, each with a reason.
     pub photos_skipped: Vec<Skipped>,
-    /// Imported or existing photos with an update that failed; a later run
-    /// sends their updates again.
+    /// Imported, existing or updated photos with an update that failed; a
+    /// later run sends their updates again.
     pub photos_incomplete: Vec<Skipped>,
     /// Keywords not created, each with a reason.
     pub keywords_skipped: Vec<Skipped>,
+}
+
+/// A run that stopped: the error and what was done up to it.
+#[derive(Debug, thiserror::Error)]
+#[error("{error}")]
+pub struct Aborted {
+    /// Why the run stopped.
+    pub error: WriteError,
+    /// The numbers up to the stop; a command without a reply counts
+    /// nowhere. Boxed to keep the error small.
+    pub summary: Box<ApplySummary>,
 }
 
 /// Brings the library behind `client` up to date with `input`.
 ///
 /// `state` is the content of the mapping file at `state_file`; it is
 /// updated and saved after every finished step. The pre-flight checks
-/// ([`crate::control::preflight`]) must have passed before.
+/// ([`crate::control::preflight`]) must have passed before. Use
+/// [`apply_partial`] to keep the numbers of a run that stops.
 pub fn apply(
     client: &mut ControlClient,
     input: &WriteInput,
     state: &mut State,
     state_file: &Path,
 ) -> Result<ApplySummary, WriteError> {
-    let listed = match client.execute("keyword.list", json!({}))? {
-        Outcome::Applied(value) => parse_keyword_list(&value)?,
-        Outcome::AppliedNotSaved(_) => {
-            return Err(WriteError::Protocol(
-                "keyword.list answered like a writing command".into(),
-            ));
-        }
-    };
+    apply_partial(client, input, state, state_file).map_err(|a| a.error)
+}
+
+/// Like [`apply`], but a run that stops hands back what it did up to the
+/// stop.
+pub fn apply_partial(
+    client: &mut ControlClient,
+    input: &WriteInput,
+    state: &mut State,
+    state_file: &Path,
+) -> Result<ApplySummary, Aborted> {
+    let listed = list_keywords(client).map_err(|error| Aborted {
+        error,
+        summary: Box::default(),
+    })?;
     let plan = plan(input, state, &listed);
     let mut run = Run {
         client,
         state,
         state_file,
         summary: ApplySummary {
+            photos_unchanged: plan.photos_unchanged(),
             photos_skipped: plan.photo_skips().to_vec(),
             keywords_skipped: plan.keyword_skips().to_vec(),
             ..ApplySummary::default()
@@ -90,11 +119,23 @@ pub fn apply(
         failed_keywords: BTreeSet::new(),
         current: None,
     };
-    for step in &plan.steps {
-        run.step(step)?;
+    match run.steps(&plan.steps) {
+        Ok(()) => Ok(run.summary),
+        Err(error) => Err(Aborted {
+            error,
+            summary: Box::new(run.summary),
+        }),
     }
-    run.finish_photo()?;
-    Ok(run.summary)
+}
+
+/// The keywords the library has, from `keyword.list`.
+fn list_keywords(client: &mut ControlClient) -> Result<BTreeSet<String>, WriteError> {
+    match client.execute("keyword.list", json!({}))? {
+        Outcome::Applied(value) => parse_keyword_list(&value),
+        Outcome::AppliedNotSaved(_) => Err(WriteError::Protocol(
+            "keyword.list answered like a writing command".into(),
+        )),
+    }
 }
 
 /// The photo whose steps are running.
@@ -102,6 +143,9 @@ struct Current {
     global_id: String,
     /// False once a step of the photo failed; its later steps are skipped.
     ok: bool,
+    /// True for a photo known from the mapping file (no import in this
+    /// run) that is not yet counted as updated.
+    uncounted_update: bool,
 }
 
 struct Run<'a> {
@@ -120,6 +164,13 @@ struct Run<'a> {
 }
 
 impl Run<'_> {
+    fn steps(&mut self, steps: &[Step]) -> Result<(), WriteError> {
+        for step in steps {
+            self.step(step)?;
+        }
+        self.finish_photo()
+    }
+
     fn step(&mut self, step: &Step) -> Result<(), WriteError> {
         match step {
             Step::CreateKeyword { path, params } => self.create_keyword(path, params),
@@ -128,6 +179,7 @@ impl Run<'_> {
                 self.current = Some(Current {
                     global_id: global_id.clone(),
                     ok: true,
+                    uncounted_update: false,
                 });
                 self.import(global_id, path)
             }
@@ -141,6 +193,7 @@ impl Run<'_> {
                     self.current = Some(Current {
                         global_id: global_id.clone(),
                         ok: true,
+                        uncounted_update: true,
                     });
                 }
                 if self.current.as_ref().is_some_and(|c| c.ok) {
@@ -274,7 +327,11 @@ impl Run<'_> {
         if let Value::Object(map) = &mut params {
             map.insert("ids".to_string(), json!([entry.lightcraft_id.clone()]));
         }
-        match self.client.execute(command, params) {
+        let result = self.client.execute(command, params);
+        if matches!(result, Ok(_) | Err(WriteError::Command { .. })) {
+            self.count_updated();
+        }
+        match result {
             Ok(outcome) => {
                 self.count_not_saved(&outcome);
                 self.summary.updates += 1;
@@ -327,6 +384,16 @@ impl Run<'_> {
     fn fail_current(&mut self) {
         if let Some(c) = &mut self.current {
             c.ok = false;
+        }
+    }
+
+    /// Counts the running photo as updated once, if it is a known photo.
+    fn count_updated(&mut self) {
+        if let Some(c) = &mut self.current
+            && c.uncounted_update
+        {
+            c.uncounted_update = false;
+            self.summary.photos_updated += 1;
         }
     }
 

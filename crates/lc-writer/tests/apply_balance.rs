@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! Acceptance tests for the photo balance of `lc_writer::apply` in EVERY run
 //! (task P5-4d, extension), against the stateful fake LightCraft.
 //!
