@@ -65,11 +65,25 @@ pub enum Step {
 pub struct Plan {
     /// Commands in the order they must run.
     pub steps: Vec<Step>,
-    /// Elements that are not written, each with a reason.
+    /// Elements that are not written, each with a reason. Keyword entries
+    /// come first, then photo entries; see [`Plan::keyword_skips`] and
+    /// [`Plan::photo_skips`].
     pub skipped: Vec<Skipped>,
+    /// How many of the leading entries of `skipped` concern keywords.
+    keyword_skips: usize,
 }
 
 impl Plan {
+    /// The skipped keywords (attributes changed after creation).
+    pub fn keyword_skips(&self) -> &[Skipped] {
+        &self.skipped[..self.keyword_skips.min(self.skipped.len())]
+    }
+
+    /// The skipped photos (no or duplicate global id, path not UTF-8).
+    pub fn photo_skips(&self) -> &[Skipped] {
+        &self.skipped[self.keyword_skips.min(self.skipped.len())..]
+    }
+
     /// The plan as a script: one JSON line per step, each an
     /// `engine.execute` request. Photo updates carry `ids`: the known
     /// LightCraft id, or the placeholder `lr:<global id>` for a photo that
@@ -122,6 +136,7 @@ pub fn import_params(path: &std::path::Path) -> Value {
 pub fn plan(input: &WriteInput, state: &State, library_keywords: &BTreeSet<String>) -> Plan {
     let mut out = Plan::default();
     plan_keywords(input, state, library_keywords, &mut out);
+    out.keyword_skips = out.skipped.len();
     plan_photos(input, state, &mut out);
     out
 }
@@ -373,6 +388,23 @@ mod tests {
     }
 
     #[test]
+    fn skips_are_split_into_keywords_and_photos() {
+        let mut changed = kw(&["A"]);
+        changed.person = true;
+        let mut state = State::default();
+        state.record_keyword(&kw(&["A"]));
+        let input = WriteInput {
+            photos: vec![Photo::new("a.jpg", 7, Rating::default())],
+            keywords: vec![changed],
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &state, &BTreeSet::new());
+        assert_eq!(p.keyword_skips().len(), 1);
+        assert_eq!(p.photo_skips().len(), 1);
+        assert!(p.photo_skips()[0].reason.contains('7'));
+    }
+
+    #[test]
     fn deep_parent_is_sent_as_path_text() {
         assert_eq!(
             create_keyword_params(&kw(&["A", "B", "C"]))["parent"],
@@ -388,7 +420,7 @@ mod tests {
                 command: "photo.rate".into(),
                 params: json!({"rating": 1}),
             }],
-            skipped: vec![],
+            ..Plan::default()
         };
         let line: Value = serde_json::from_str(plan.to_script(&State::default()).trim()).unwrap();
         assert_eq!(

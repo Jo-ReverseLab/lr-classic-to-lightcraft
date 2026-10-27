@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! Acceptance tests for running the plan over the control port (task P5-4c),
 //! module `lc_writer::apply`, against a stateful fake LightCraft.
 //!

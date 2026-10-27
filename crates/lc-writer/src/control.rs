@@ -63,6 +63,10 @@ pub enum WriteError {
         "the library writes XMP sidecars automatically; turn this off in LightCraft or allow it explicitly"
     )]
     XmpAutoWrite,
+    /// The mapping file could not be written; the run stops so that no
+    /// command is sent whose result could not be recorded.
+    #[error(transparent)]
+    State(#[from] crate::state::StateError),
 }
 
 /// The result of a command the app has applied.
