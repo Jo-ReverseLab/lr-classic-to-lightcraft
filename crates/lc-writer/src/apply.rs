@@ -5,13 +5,18 @@
 //!    answer in an unknown shape stops the run before anything is written;
 //! 2. the plan is computed from the input, the mapping file and that list;
 //! 3. its steps run in order: keywords first (parents before children),
-//!    then each photo with its import and its updates.
+//!    then each photo with its import and its updates; before the first
+//!    update of a photo, `library.select {ids: [id], active: id}` selects
+//!    exactly that photo, because LightCraft runs `photo.*` commands only
+//!    on a selection (the selection is left on the last updated photo);
 //!
 //! Rules:
 //! - every finished step is recorded in the mapping file at once, so an
 //!   interrupted run loses nothing that was confirmed;
 //! - a photo is recorded right after its import with the fields of a fresh
 //!   import, and with all its fields once every update succeeded;
+//! - a rejected select makes the photo incomplete like a rejected update;
+//!   a select is not counted in `updates`;
 //! - an error reply skips only the affected keyword or photo; a lost
 //!   connection or a protocol error stops the run; nothing is repeated;
 //! - every input photo counts exactly once: imported, existing, updated,
@@ -22,7 +27,7 @@
 //!   photos, the Lightroom id.
 
 use crate::control::{ControlClient, Outcome, WriteError};
-use crate::plan::{Step, WriteInput, import_params, plan};
+use crate::plan::{Step, WriteInput, import_params, plan, select_params};
 use crate::state::{PhotoFields, State, keyword_text, snapshot};
 use model::{Keyword, Photo, Skipped};
 use serde_json::{Value, json};
@@ -143,6 +148,8 @@ struct Current {
     global_id: String,
     /// False once a step of the photo failed; its later steps are skipped.
     ok: bool,
+    /// True once `library.select` named this photo.
+    selected: bool,
     /// True for a photo known from the mapping file (no import in this
     /// run) that is not yet counted as updated.
     uncounted_update: bool,
@@ -179,6 +186,7 @@ impl Run<'_> {
                 self.current = Some(Current {
                     global_id: global_id.clone(),
                     ok: true,
+                    selected: false,
                     uncounted_update: false,
                 });
                 self.import(global_id, path)
@@ -193,8 +201,12 @@ impl Run<'_> {
                     self.current = Some(Current {
                         global_id: global_id.clone(),
                         ok: true,
+                        selected: false,
                         uncounted_update: true,
                     });
+                }
+                if self.current.as_ref().is_some_and(|c| c.ok && !c.selected) {
+                    self.select(global_id)?;
                 }
                 if self.current.as_ref().is_some_and(|c| c.ok) {
                     self.update(global_id, command, params)?;
@@ -315,6 +327,44 @@ impl Run<'_> {
         Ok(())
     }
 
+    /// Selects the running photo before its first update. A select is
+    /// sent even right after an import, which selects as a side effect.
+    fn select(&mut self, global_id: &str) -> Result<(), WriteError> {
+        let Some(entry) = self.state.photo(global_id) else {
+            // Not reachable: an update follows a recorded import or a known
+            // photo.
+            self.fail_current();
+            return Ok(());
+        };
+        let lightroom_id = entry.lightroom_id;
+        let params = select_params(&entry.lightcraft_id);
+        match self.client.execute("library.select", params) {
+            Ok(_) => {
+                if let Some(c) = &mut self.current {
+                    c.selected = true;
+                }
+                Ok(())
+            }
+            Err(WriteError::Command { command, .. }) => {
+                self.count_updated();
+                self.reject(lightroom_id, &command);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Marks the running photo as incomplete after a rejected command.
+    fn reject(&mut self, lightroom_id: i64, command: &str) {
+        self.summary.photos_incomplete.push(Skipped {
+            reason: format!(
+                "photo {lightroom_id}: LightCraft rejected `{command}`; \
+                 the photo is incomplete and is updated again by the next run"
+            ),
+        });
+        self.fail_current();
+    }
+
     fn update(&mut self, global_id: &str, command: &str, params: &Value) -> Result<(), WriteError> {
         let Some(entry) = self.state.photo(global_id) else {
             // Not reachable: an update follows a recorded import or a known
@@ -338,13 +388,7 @@ impl Run<'_> {
                 Ok(())
             }
             Err(WriteError::Command { command, .. }) => {
-                self.summary.photos_incomplete.push(Skipped {
-                    reason: format!(
-                        "photo {lightroom_id}: LightCraft rejected `{command}`; \
-                         the photo is incomplete and is updated again by the next run"
-                    ),
-                });
-                self.fail_current();
+                self.reject(lightroom_id, &command);
                 Ok(())
             }
             Err(e) => Err(e),

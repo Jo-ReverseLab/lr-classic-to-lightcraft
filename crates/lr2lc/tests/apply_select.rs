@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! CLI acceptance tests for the selection before photo commands (task P5-4e),
 //! against the stateful fake LightCraft, which behaves like the real app
 //! (photo commands fail with `no photos selected` while nothing is selected).

@@ -484,7 +484,6 @@ fn assert_no_command_twice(fake: &FakeLightCraft) {
 }
 
 #[test]
-#[ignore = "waiting for P5-4e: line numbers count the new library.select"]
 fn lost_connection_aborts_the_run_and_keeps_finished_photos() {
     let (env, fake) = lost_at(10, false);
     let e = run(&fake, &env, &input()).unwrap_err();
@@ -513,7 +512,6 @@ fn lost_connection_aborts_the_run_and_keeps_finished_photos() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4e: line numbers count the new library.select"]
 fn run_after_a_lost_import_finishes_the_rest_without_duplicates() {
     let (env, fake) = lost_at(10, false);
     run(&fake, &env, &input()).unwrap_err();
@@ -538,7 +536,6 @@ fn run_after_a_lost_import_finishes_the_rest_without_duplicates() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4e: line numbers count the new library.select"]
 fn run_after_an_import_that_took_effect_but_got_no_reply_finds_the_duplicate() {
     let (env, fake) = lost_at(10, true);
     run(&fake, &env, &input()).unwrap_err();
@@ -563,7 +560,6 @@ fn run_after_an_import_that_took_effect_but_got_no_reply_finds_the_duplicate() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4e: line numbers count the new library.select"]
 fn photo_is_recorded_right_after_its_import_when_a_later_update_is_lost() {
     // Line 7 is `photo.rate` of g1: the import before it must already be saved.
     let (env, fake) = lost_at(7, false);
