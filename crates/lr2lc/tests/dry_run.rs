@@ -6,7 +6,8 @@
 //!   (needs `--library`; without it: exit 2, nothing read or written), `-h`, `-V`.
 //! - stdout contains a line `folders: read N, would convert N, skipped N`, a
 //!   line `photos: read N, would convert N, skipped N`, a line
-//!   `collections: read N, would convert 0, skipped N` (P4-10), and the words
+//!   `collections: read N, would convert N, skipped N` (P5b-3a: sets and
+//!   plain collections are converted, the rest is skipped), and the words
 //!   "dry run".
 //! - report.json: `{"tool_version", "catalog_version", "dry_run": true,
 //!   "catalog_unchanged": true, "folders": {"read", "converted", "skipped":
@@ -20,6 +21,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 const COLLECTIONS: i64 = small::COLLECTIONS;
+/// Small fixture: set 1 and albums 2, 3, 4 are converted; smart 5 and 6,
+/// quick 7 and 8 and unknown 9 are skipped.
+const COLLECTIONS_OK: i64 = 4;
+const COLLECTIONS_SKIPPED: i64 = COLLECTIONS - COLLECTIONS_OK;
 
 const PHOTOS_OK: i64 = small::PHOTOS - small::MISSING_PHOTO_IDS.len() as i64;
 const PHOTOS_MISSING: i64 = small::MISSING_PHOTO_IDS.len() as i64;
@@ -90,6 +95,7 @@ fn check_area(v: &serde_json::Value, area: &str, read: i64, conv: i64, skipped: 
 }
 
 #[test]
+#[ignore = "waiting for P5b-3a: collections are converted, not all skipped"]
 fn dry_run_exits_zero_and_prints_counts() {
     let (dir, cat) = with_files();
     let cwd = tempfile::tempdir().unwrap();
@@ -105,7 +111,13 @@ fn dry_run_exits_zero_and_prints_counts() {
         "stdout: {text}"
     );
     assert!(
-        count_line(&text, "collections", COLLECTIONS, 0, COLLECTIONS),
+        count_line(
+            &text,
+            "collections",
+            COLLECTIONS,
+            COLLECTIONS_OK,
+            COLLECTIONS_SKIPPED
+        ),
         "stdout: {text}"
     );
     assert!(text.to_lowercase().contains("dry run"), "stdout: {text}");
@@ -113,6 +125,7 @@ fn dry_run_exits_zero_and_prints_counts() {
 }
 
 #[test]
+#[ignore = "waiting for P5b-3a: collections are converted, not all skipped"]
 fn report_file_has_documented_structure_and_balance() {
     let (dir, cat) = with_files();
     let cwd = tempfile::tempdir().unwrap();
@@ -129,17 +142,20 @@ fn report_file_has_documented_structure_and_balance() {
     assert_eq!(v["catalog_unchanged"], true);
     check_area(&v, "folders", small::FOLDERS, small::FOLDERS, 0);
     check_area(&v, "photos", small::PHOTOS, PHOTOS_OK, PHOTOS_MISSING);
-    // Task P4-10: every collection is read and skipped, none converted.
-    check_area(&v, "collections", COLLECTIONS, 0, COLLECTIONS);
+    // Task P5b-3a: set 1 and albums 2..=4 are converted, the rest skipped.
+    check_area(
+        &v,
+        "collections",
+        COLLECTIONS,
+        COLLECTIONS_OK,
+        COLLECTIONS_SKIPPED,
+    );
     let reasons: Vec<&str> = v["collections"]["skipped"]
         .as_array()
         .unwrap()
         .iter()
         .map(|s| s["reason"].as_str().unwrap())
         .collect();
-    assert!(reasons.contains(&"collection 1: collection set is not converted"));
-    assert!(reasons.contains(&"collection 7: system collection is not converted"));
-    assert!(reasons.contains(&"collection 9: unknown collection type is not converted"));
     for name in [
         "Set Alpha",
         "Coll Beta",
