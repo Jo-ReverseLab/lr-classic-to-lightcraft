@@ -22,6 +22,7 @@ pub enum WriterJson {
         planned: PlannedJson,
         photos_skipped: Vec<ReasonJson>,
         keywords_skipped: Vec<ReasonJson>,
+        members_skipped: Vec<ReasonJson>,
     },
     /// `--apply`: what was sent.
     Applied {
@@ -35,6 +36,17 @@ pub enum WriterJson {
         photos_skipped: Vec<ReasonJson>,
         photos_incomplete: Vec<ReasonJson>,
         keywords_skipped: Vec<ReasonJson>,
+        folders_created: usize,
+        albums_created: usize,
+        collections_known: usize,
+        members_added: usize,
+        members_removed: usize,
+        collections_renamed: usize,
+        collections_moved: usize,
+        collections_removed: usize,
+        collections_skipped: Vec<ReasonJson>,
+        collections_incomplete: Vec<ReasonJson>,
+        members_skipped: Vec<ReasonJson>,
         /// Why the run stopped early; absent after a complete run.
         #[serde(skip_serializing_if = "Option::is_none")]
         aborted: Option<String>,
@@ -43,7 +55,9 @@ pub enum WriterJson {
 
 /// Number of planned commands by kind, and the known photos with and
 /// without updates. Every converted photo counts once in `photos`,
-/// `photos_updated`, `photos_unchanged` or the writer's skipped photos.
+/// `photos_updated`, `photos_unchanged` or the writer's skipped photos;
+/// every converted collection once in `folders`, `albums` or
+/// `collections_known`. `members_added` and `members_removed` count photos.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct PlannedJson {
     pub keywords: usize,
@@ -51,6 +65,11 @@ pub struct PlannedJson {
     pub updates: usize,
     pub photos_updated: usize,
     pub photos_unchanged: usize,
+    pub folders: usize,
+    pub albums: usize,
+    pub members_added: usize,
+    pub members_removed: usize,
+    pub collections_known: usize,
 }
 
 /// The writer input from the converted elements of the catalog.
@@ -59,6 +78,7 @@ pub fn input(converted: &Converted) -> WriteInput {
         photos: converted.photos.clone(),
         keywords: converted.keywords.clone(),
         photo_keywords: converted.photo_keywords.clone(),
+        collections: converted.collections.clone(),
     }
 }
 
@@ -76,6 +96,7 @@ pub fn planned(plan: &Plan) -> PlannedJson {
     let mut out = PlannedJson {
         photos_updated: plan.photos_updated(),
         photos_unchanged: plan.photos_unchanged(),
+        collections_known: plan.collections_known(),
         ..PlannedJson::default()
     };
     for step in &plan.steps {
@@ -83,6 +104,15 @@ pub fn planned(plan: &Plan) -> PlannedJson {
             Step::CreateKeyword { .. } => out.keywords += 1,
             Step::Import { .. } => out.photos += 1,
             Step::Update { .. } => out.updates += 1,
+            Step::CreateAlbum { params, .. } => {
+                if params["folder"] == true {
+                    out.folders += 1;
+                } else {
+                    out.albums += 1;
+                }
+            }
+            Step::AddMembers { gids, .. } => out.members_added += gids.len(),
+            Step::RemoveMembers { gids, .. } => out.members_removed += gids.len(),
         }
     }
     out
@@ -94,6 +124,7 @@ pub fn planned_json(plan: &Plan) -> WriterJson {
         planned: planned(plan),
         photos_skipped: reasons(plan.photo_skips()),
         keywords_skipped: reasons(plan.keyword_skips()),
+        members_skipped: reasons(plan.member_skips()),
     }
 }
 
@@ -111,6 +142,17 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         photos_skipped: reasons(&s.photos_skipped),
         photos_incomplete: reasons(&s.photos_incomplete),
         keywords_skipped: reasons(&s.keywords_skipped),
+        folders_created: s.folders_created,
+        albums_created: s.albums_created,
+        collections_known: s.collections_known,
+        members_added: s.members_added,
+        members_removed: s.members_removed,
+        collections_renamed: s.collections_renamed,
+        collections_moved: s.collections_moved,
+        collections_removed: s.collections_removed,
+        collections_skipped: reasons(&s.collections_skipped),
+        collections_incomplete: reasons(&s.collections_incomplete),
+        members_skipped: reasons(&s.members_skipped),
         aborted: aborted.map(WriteError::short_reason),
     }
 }
@@ -124,15 +166,22 @@ fn reasons(items: &[Skipped]) -> Vec<ReasonJson> {
         .collect()
 }
 
-/// The readable summary of a dry run's plan.
+/// The readable summary of a dry run's plan. `albums to create` counts
+/// albums only, not album folders.
 pub fn planned_summary(plan: &Plan) -> String {
     let p = planned(plan);
     let mut out = format!(
-        "writer: keywords to create {}, photos to import {}, updates {}\n",
-        p.keywords, p.photos, p.updates
+        "writer: keywords to create {}, photos to import {}, updates {}, \
+         albums to create {}, album members to add {}\n",
+        p.keywords, p.photos, p.updates, p.albums, p.members_added
     );
     skipped_lines(&mut out, "writer would skip photos", plan.photo_skips());
     skipped_lines(&mut out, "writer would skip keywords", plan.keyword_skips());
+    skipped_lines(
+        &mut out,
+        "writer would skip album members",
+        plan.member_skips(),
+    );
     out
 }
 
@@ -151,14 +200,43 @@ pub fn applied_summary(s: &ApplySummary) -> String {
     );
     let _ = writeln!(
         out,
-        "not written: photos skipped {}, photos incomplete {}, keywords skipped {}",
+        "written collections: folders created {}, albums created {}, already in the library {}, \
+         album members added {}, album members removed {}",
+        s.folders_created,
+        s.albums_created,
+        s.collections_known,
+        s.members_added,
+        s.members_removed
+    );
+    let _ = writeln!(
+        out,
+        "not written: photos skipped {}, photos incomplete {}, keywords skipped {}, \
+         collections skipped {}, collections incomplete {}, album members skipped {}",
         s.photos_skipped.len(),
         s.photos_incomplete.len(),
-        s.keywords_skipped.len()
+        s.keywords_skipped.len(),
+        s.collections_skipped.len(),
+        s.collections_incomplete.len(),
+        s.members_skipped.len()
     );
+    if s.collections_renamed + s.collections_moved + s.collections_removed > 0 {
+        let _ = writeln!(
+            out,
+            "changed in Lightroom, left as is in LightCraft: collections renamed {}, moved {}, \
+             removed {}",
+            s.collections_renamed, s.collections_moved, s.collections_removed
+        );
+    }
     skipped_lines(&mut out, "skipped photos", &s.photos_skipped);
     skipped_lines(&mut out, "incomplete photos", &s.photos_incomplete);
     skipped_lines(&mut out, "skipped keywords", &s.keywords_skipped);
+    skipped_lines(&mut out, "skipped collections", &s.collections_skipped);
+    skipped_lines(
+        &mut out,
+        "incomplete collections",
+        &s.collections_incomplete,
+    );
+    skipped_lines(&mut out, "skipped album members", &s.members_skipped);
     out
 }
 
@@ -240,7 +318,10 @@ mod tests {
             }
         );
         let text = planned_summary(&p);
-        assert!(text.starts_with("writer: keywords to create 0, photos to import 2, updates 1\n"));
+        assert!(text.starts_with(
+            "writer: keywords to create 0, photos to import 2, updates 1, \
+             albums to create 0, album members to add 0\n"
+        ));
         assert!(text.contains("writer would skip photos:"));
     }
 
@@ -251,9 +332,12 @@ mod tests {
             v,
             serde_json::json!({
                 "planned": {"keywords": 0, "photos": 0, "updates": 0,
-                        "photos_updated": 0, "photos_unchanged": 0},
+                        "photos_updated": 0, "photos_unchanged": 0,
+                        "folders": 0, "albums": 0, "members_added": 0,
+                        "members_removed": 0, "collections_known": 0},
                 "photos_skipped": [],
                 "keywords_skipped": [],
+                "members_skipped": [],
             })
         );
         let s = ApplySummary {
@@ -268,6 +352,25 @@ mod tests {
         assert_eq!(v["photos_updated"], 0);
         assert_eq!(v["photos_unchanged"], 0);
         assert!(v["keywords_skipped"].is_array());
+        for key in [
+            "folders_created",
+            "albums_created",
+            "collections_known",
+            "members_added",
+            "members_removed",
+            "collections_renamed",
+            "collections_moved",
+            "collections_removed",
+        ] {
+            assert_eq!(v[key], 0, "{key}");
+        }
+        for key in [
+            "collections_skipped",
+            "collections_incomplete",
+            "members_skipped",
+        ] {
+            assert!(v[key].is_array(), "{key}");
+        }
         assert!(v.get("aborted").is_none());
     }
 
@@ -307,10 +410,57 @@ mod tests {
             p.photos + p.photos_updated + p.photos_unchanged + skipped,
             input.photos.len()
         );
-        assert!(
-            planned_summary(&plan)
-                .starts_with("writer: keywords to create 0, photos to import 1, updates 1\n")
-        );
+        assert!(planned_summary(&plan).starts_with(
+            "writer: keywords to create 0, photos to import 1, updates 1, \
+             albums to create 0, album members to add 0\n"
+        ));
+    }
+
+    #[test]
+    fn planned_counts_folders_and_albums_apart() {
+        use model::{Collection, CollectionKind};
+        let collection = |id, kind, parent, members: Vec<i64>| Collection {
+            lightroom_id: id,
+            name: format!("c{id}"),
+            kind,
+            parent,
+            members,
+        };
+        let input = WriteInput {
+            photos: vec![Photo::new("a.jpg", 1, Rating::default()).with_global_id("a")],
+            collections: vec![
+                collection(1, CollectionKind::Folder, None, vec![]),
+                collection(2, CollectionKind::Album, Some(1), vec![1, 9]),
+            ],
+            ..WriteInput::default()
+        };
+        let plan = lc_writer::plan::plan(&input, &State::default(), &Default::default());
+        let p = planned(&plan);
+        assert_eq!((p.folders, p.albums, p.members_added), (1, 1, 1));
+        let text = planned_summary(&plan);
+        assert!(text.starts_with(
+            "writer: keywords to create 0, photos to import 1, updates 0, \
+             albums to create 1, album members to add 1\n"
+        ));
+        assert!(text.contains("writer would skip album members:"));
+    }
+
+    #[test]
+    fn applied_summary_names_collection_numbers_but_no_names() {
+        let s = ApplySummary {
+            folders_created: 2,
+            albums_created: 3,
+            collections_renamed: 1,
+            collections_skipped: vec![Skipped {
+                reason: "collection 4: LightCraft rejected `album.create`".into(),
+            }],
+            ..ApplySummary::default()
+        };
+        let text = applied_summary(&s);
+        assert!(text.contains("folders created 2, albums created 3"));
+        assert!(text.contains("collections renamed 1, moved 0, removed 0"));
+        assert!(text.contains("skipped collections:"));
+        assert!(text.contains("LightCraft rejected `album.create`"));
     }
 
     #[test]

@@ -9,6 +9,10 @@
 //!    update of a photo, `library.select {ids: [id], active: id}` selects
 //!    exactly that photo, because LightCraft runs `photo.*` commands only
 //!    on a selection (the selection is left on the last updated photo);
+//! 4. then the collections: album folders and albums are created (parents
+//!    first), then members are added and removed album by album, each call
+//!    directly after `library.select {ids, active: first}` of exactly its
+//!    photos, because LightCraft changes album members only on a selection.
 //!
 //! Rules:
 //! - every finished step is recorded in the mapping file at once, so an
@@ -19,17 +23,23 @@
 //!   a select is not counted in `updates`;
 //! - an error reply skips only the affected keyword or photo; a lost
 //!   connection or a protocol error stops the run; nothing is repeated;
+//! - a rejected `album.create` skips the collection and every collection
+//!   below it; a rejected select or member change makes the collection
+//!   incomplete, its members are not recorded and the next run sends them
+//!   again; albums are never renamed, moved or deleted;
+//! - every input collection counts exactly once: created as folder or
+//!   album, known, or skipped;
 //! - every input photo counts exactly once: imported, existing, updated,
 //!   unchanged or skipped; a stopped run hands back the numbers up to the
 //!   stop ([`Aborted`]);
 //! - reasons never contain texts from the catalog or from the app's error
 //!   messages (which may quote file paths); they name the command and, for
-//!   photos, the Lightroom id.
+//!   photos and collections, the Lightroom id; never a collection name.
 
 use crate::control::{ControlClient, Outcome, WriteError};
-use crate::plan::{Step, WriteInput, import_params, plan, select_params};
-use crate::state::{PhotoFields, State, keyword_text, snapshot};
-use model::{Keyword, Photo, Skipped};
+use crate::plan::{Step, WriteInput, import_params, members_select_params, plan, select_params};
+use crate::state::{CollectionEntry, PhotoFields, State, keyword_text, snapshot};
+use model::{Collection, CollectionKind, Keyword, Photo, Skipped};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -63,6 +73,31 @@ pub struct ApplySummary {
     pub photos_incomplete: Vec<Skipped>,
     /// Keywords not created, each with a reason.
     pub keywords_skipped: Vec<Skipped>,
+    /// Album folders created by this run.
+    pub folders_created: usize,
+    /// Albums created by this run.
+    pub albums_created: usize,
+    /// Input collections already in the mapping file. Together with the
+    /// created and skipped ones every input collection counts once.
+    pub collections_known: usize,
+    /// Photos added to albums.
+    pub members_added: usize,
+    /// Photos removed from albums (only ones lr2lc added before).
+    pub members_removed: usize,
+    /// Known collections renamed in Lightroom; not renamed in LightCraft.
+    pub collections_renamed: usize,
+    /// Known collections moved in Lightroom; not moved in LightCraft.
+    pub collections_moved: usize,
+    /// Recorded collections no longer in Lightroom; not deleted in
+    /// LightCraft.
+    pub collections_removed: usize,
+    /// Collections not created, each with a reason.
+    pub collections_skipped: Vec<Skipped>,
+    /// Albums whose members could not all be changed; a later run sends
+    /// them again.
+    pub collections_incomplete: Vec<Skipped>,
+    /// Album members not written, each with a reason.
+    pub members_skipped: Vec<Skipped>,
 }
 
 /// A run that stopped: the error and what was done up to it.
@@ -112,6 +147,11 @@ pub fn apply_partial(
             photos_unchanged: plan.photos_unchanged(),
             photos_skipped: plan.photo_skips().to_vec(),
             keywords_skipped: plan.keyword_skips().to_vec(),
+            collections_known: plan.collections_known(),
+            collections_renamed: plan.collections_renamed(),
+            collections_moved: plan.collections_moved(),
+            collections_removed: plan.collections_removed(),
+            members_skipped: plan.member_skips().to_vec(),
             ..ApplySummary::default()
         },
         keywords: wanted_keywords(input),
@@ -123,6 +163,12 @@ pub fn apply_partial(
         photo_keywords: &input.photo_keywords,
         failed_keywords: BTreeSet::new(),
         current: None,
+        collections: input
+            .collections
+            .iter()
+            .map(|c| (c.lightroom_id, c))
+            .collect(),
+        incomplete: BTreeSet::new(),
     };
     match run.steps(&plan.steps) {
         Ok(()) => Ok(run.summary),
@@ -168,6 +214,10 @@ struct Run<'a> {
     /// Path texts of keywords that could not be created.
     failed_keywords: BTreeSet<String>,
     current: Option<Current>,
+    /// The input collections by Lightroom id.
+    collections: BTreeMap<i64, &'a Collection>,
+    /// Lightroom ids of the collections already reported as incomplete.
+    incomplete: BTreeSet<i64>,
 }
 
 impl Run<'_> {
@@ -213,6 +263,188 @@ impl Run<'_> {
                 }
                 Ok(())
             }
+            Step::CreateAlbum {
+                collection_id,
+                params,
+            } => {
+                self.finish_photo()?;
+                self.create_album(*collection_id, params)
+            }
+            Step::AddMembers {
+                collection_id,
+                gids,
+            } => {
+                self.finish_photo()?;
+                self.change_members(*collection_id, gids, Change::Add)
+            }
+            Step::RemoveMembers {
+                collection_id,
+                gids,
+            } => {
+                self.finish_photo()?;
+                self.change_members(*collection_id, gids, Change::Remove)
+            }
+        }
+    }
+
+    /// Creates one album or album folder. The parent's LightCraft id is
+    /// taken from the mapping file, so a parent created earlier in this run
+    /// replaces its placeholder; a parent that was not created skips the
+    /// collection.
+    fn create_album(&mut self, collection_id: i64, params: &Value) -> Result<(), WriteError> {
+        let Some(c) = self.collections.get(&collection_id).copied() else {
+            // Not reachable: the plan only creates input collections.
+            return Ok(());
+        };
+        let mut params = params.clone();
+        if let Some(parent) = c.parent {
+            match self.state.collection(parent) {
+                Some(entry) => params["parent"] = entry.lightcraft_id.clone(),
+                None => {
+                    self.skip_collection(
+                        collection_id,
+                        &format!("its parent collection {parent} was not created"),
+                    );
+                    return Ok(());
+                }
+            }
+        }
+        match self.client.execute("album.create", params) {
+            Ok(Outcome::Applied(result)) => {
+                let Some(id) = result.get("id").and_then(valid_id) else {
+                    self.skip_collection(collection_id, "`album.create` returned no id");
+                    return Ok(());
+                };
+                match c.kind {
+                    CollectionKind::Folder => self.summary.folders_created += 1,
+                    CollectionKind::Album => self.summary.albums_created += 1,
+                }
+                let entry = CollectionEntry {
+                    lightcraft_id: id,
+                    kind: c.kind.into(),
+                    name: c.name.clone(),
+                    parent: c.parent,
+                    members: Vec::new(),
+                };
+                self.state.record_collection(collection_id, entry);
+                self.state.save(self.state_file)?;
+                Ok(())
+            }
+            Ok(Outcome::AppliedNotSaved(_)) => {
+                self.summary.not_saved += 1;
+                self.skip_collection(
+                    collection_id,
+                    "`album.create` was applied but not saved and returned no id; \
+                     the next run creates it again, check LightCraft for a duplicate",
+                );
+                Ok(())
+            }
+            Err(WriteError::Command { command, .. }) => {
+                self.skip_collection(collection_id, &format!("LightCraft rejected `{command}`"));
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn skip_collection(&mut self, collection_id: i64, why: &str) {
+        self.summary.collections_skipped.push(Skipped {
+            reason: format!("collection {collection_id}: {why}"),
+        });
+    }
+
+    /// Adds photos to an album or removes them, after selecting exactly
+    /// those photos. Members whose photo has no LightCraft id are not sent.
+    fn change_members(
+        &mut self,
+        collection_id: i64,
+        gids: &[String],
+        change: Change,
+    ) -> Result<(), WriteError> {
+        let Some(album_id) = self
+            .state
+            .collection(collection_id)
+            .map(|e| e.lightcraft_id.clone())
+        else {
+            // The collection was not created; it is already skipped.
+            return Ok(());
+        };
+        let mut sent: Vec<String> = Vec::new();
+        let mut ids: Vec<Value> = Vec::new();
+        for gid in gids {
+            if let Some(entry) = self.state.photo(gid) {
+                sent.push(gid.clone());
+                ids.push(entry.lightcraft_id.clone());
+            } else if change == Change::Add {
+                let lightroom_id = self.photos.get(gid.as_str()).map(|p| p.lightroom_id);
+                let photo = lightroom_id.map_or_else(|| "?".to_string(), |id| id.to_string());
+                self.summary.members_skipped.push(Skipped {
+                    reason: format!(
+                        "photo {photo}: not added to an album; the photo has no LightCraft id"
+                    ),
+                });
+            }
+            // Not reachable for removals: lr2lc only recorded members that
+            // had a LightCraft id.
+        }
+        if ids.is_empty() {
+            return Ok(());
+        }
+        match self
+            .client
+            .execute("library.select", members_select_params(&ids))
+        {
+            Ok(_) => {}
+            Err(WriteError::Command { command, .. }) => {
+                self.mark_incomplete(collection_id, &command);
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        }
+        let command = match change {
+            Change::Add => "album.addPhotos",
+            Change::Remove => "album.removePhotos",
+        };
+        match self
+            .client
+            .execute(command, json!({"id": album_id, "ids": ids}))
+        {
+            Ok(outcome) => {
+                self.count_not_saved(&outcome);
+                let Some(mut entry) = self.state.collection(collection_id).cloned() else {
+                    return Ok(());
+                };
+                match change {
+                    Change::Add => {
+                        self.summary.members_added += sent.len();
+                        entry.members.extend(sent);
+                    }
+                    Change::Remove => {
+                        self.summary.members_removed += sent.len();
+                        entry.members.retain(|m| !sent.contains(m));
+                    }
+                }
+                self.state.record_collection(collection_id, entry);
+                self.state.save(self.state_file)?;
+                Ok(())
+            }
+            Err(WriteError::Command { command, .. }) => {
+                self.mark_incomplete(collection_id, &command);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Reports an album as incomplete, once per run.
+    fn mark_incomplete(&mut self, collection_id: i64, command: &str) {
+        if self.incomplete.insert(collection_id) {
+            self.summary.collections_incomplete.push(Skipped {
+                reason: format!(
+                    "collection {collection_id}: LightCraft rejected `{command}`; \
+                     its members are written again by the next run"
+                ),
+            });
         }
     }
 
@@ -446,6 +678,13 @@ impl Run<'_> {
             self.summary.not_saved += 1;
         }
     }
+}
+
+/// Whether album members are added or removed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Change {
+    Add,
+    Remove,
 }
 
 /// Every keyword the plan may create, by path text: explicit keywords with

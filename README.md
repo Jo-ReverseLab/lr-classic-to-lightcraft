@@ -14,11 +14,11 @@ applies path mappings and checks that the original files exist. It also
 reads keywords with their hierarchy and synonyms, their assignments to
 photos, the star ratings, the pick/reject flags and the colour labels.
 It reads collections as albums and collection sets as album folders, with
-their members; the dry run reports them, but `--apply` does not write
-albums yet (planned next).
+their members.
 With `--apply`, lr2lc writes keywords, photos (as references), ratings,
-flags, labels, titles, captions, copyright and creator into a LightCraft
-library through the control port of the running LightCraft app.
+flags, labels, titles, captions, copyright and creator, and the
+collections as albums and album folders with their members, into a
+LightCraft library through the control port of the running LightCraft app.
 
 Once the repository is on GitHub, CI runs formatting, lint and tests on
 Linux, macOS and Windows.
@@ -253,17 +253,24 @@ read, and lr2lc stops with exit code 2 if:
 The dry run also prints what the writer would send, as one line:
 
 ```text
-writer: keywords to create 11, photos to import 17, updates 23
+writer: keywords to create 11, photos to import 17, updates 23, albums to create 4, album members to add 30
 ```
 
+`albums to create` counts albums only, not album folders.
+
 `report.json` then has a `writer` section with `planned` (`keywords`,
-`photos`, `updates`, `photos_updated`, `photos_unchanged`),
-`photos_skipped` and `keywords_skipped` (each a list of `{"reason": ...}`).
+`photos`, `updates`, `photos_updated`, `photos_unchanged`, `folders`,
+`albums`, `members_added`, `members_removed`, `collections_known`),
+`photos_skipped`, `keywords_skipped` and `members_skipped` (each a list of
+`{"reason": ...}`; `members_skipped` holds album members whose photo is
+not converted or has no global id).
 `planned.photos` counts the imports, `photos_updated` the photos from the
 mapping file with at least one update and `photos_unchanged` those that
 need no command. Every converted photo counts once:
 `photos.converted` equals `planned.photos` plus `planned.photos_updated`
 plus `planned.photos_unchanged` plus the photos skipped by the writer.
+Every converted collection counts once: `collections.converted` equals
+`planned.folders` plus `planned.albums` plus `planned.collections_known`.
 With `--library DIR` the dry run reads the mapping file of that library
 (see below), so it only plans what is still missing; it never connects to
 LightCraft and writes nothing next to the library.
@@ -272,7 +279,11 @@ LightCraft and writes nothing next to the library.
 request per command, with a `library.select` line before the updates of
 each photo (see `--apply`); photos that are not imported yet are named
 `lr:<global id>` in `ids`. The number of updates in the summary does not
-count the selects. The same protection as for `--report` applies:
+count the selects. Album commands follow the photo commands; an album or
+folder created by the same script is named `lr-collection:<Lightroom id>`
+(as `parent` of `album.create` and as `id` of `album.addPhotos`), and each
+member change has a `library.select` line of exactly its photos before it.
+The same protection as for `--report` applies:
 the catalog and its companion files are refused, and an existing `FILE` is
 only overwritten if it is empty or an earlier lr2lc script (every non-empty
 line a JSON object with `"method":"engine.execute"`).
@@ -300,8 +311,24 @@ its own as a reference (`mode: add`, the file stays where it is) and sets
 the fields that differ. LightCraft applies rating, flag, label and metadata
 commands only to selected photos, so lr2lc selects each photo before its
 first update; this changes the selection in LightCraft, which afterwards
-holds the last updated photo. A select is not counted as an update. A command LightCraft rejects skips only that photo
-or keyword, with a reason in the report. If the connection is lost, lr2lc
+holds the last updated photo. A select is not counted as an update.
+
+After all photos, lr2lc creates the missing album folders (for collection
+sets, parents first) and albums (for collections) with `album.create`,
+sending only the name, `folder` and the parent folder. Then it adds the
+members of each album with `album.addPhotos`, in Lightroom's order, and
+removes photos that it added earlier but that are no longer in the
+collection with `album.removePhotos`. LightCraft changes album members only
+for a selection, so each of these calls comes directly after a
+`library.select` of exactly its photos. lr2lc never removes photos it did
+not add, and never renames, moves or deletes an album: a collection
+renamed, moved or deleted in Lightroom is only counted in the report.
+Albums with equal names are allowed and kept as they are.
+
+A command LightCraft rejects skips only that photo, keyword or collection,
+with a reason in the report. A rejected `album.create` also skips every
+collection below it; a rejected select or member change leaves the album
+incomplete, and the next run sends its members again. If the connection is lost, lr2lc
 stops at once and never repeats the command: its outcome is unknown, so run
 lr2lc again; it re-checks the state and finds photos LightCraft already
 has. The catalog checksum is checked again after writing.
@@ -317,13 +344,28 @@ the `writer` section:
 - `updates` (field updates applied) and `not_saved` (applied but not yet
   saved to disk by LightCraft);
 - `photos_skipped`, `photos_incomplete` (an update or the select before
-  it failed; the next run sends the updates again) and `keywords_skipped`, each with reasons.
+  it failed; the next run sends the updates again) and `keywords_skipped`, each with reasons;
+- `folders_created`, `albums_created` and `collections_known` (already in
+  the mapping file, no `album.create`);
+- `members_added` and `members_removed` (photos added to or removed from
+  albums);
+- `collections_renamed`, `collections_moved` and `collections_removed`
+  (changed in Lightroom since lr2lc created them; nothing is changed in
+  LightCraft);
+- `collections_skipped` (not created), `collections_incomplete` (a select
+  or member change failed) and `members_skipped` (the photo is not
+  converted, has no global id or has no LightCraft id), each with reasons.
+  Reasons name Lightroom ids, never a collection name.
 
 Every converted photo counts once, in every run: `photos.converted` equals
 `photos_imported` plus `photos_existing` plus `photos_updated` plus
 `photos_unchanged` plus the photos skipped by the writer. A photo imported
 or found as a duplicate in this run counts only there. The incomplete
-photos are among the imported, existing or updated ones.
+photos are among the imported, existing or updated ones. Every converted
+collection counts once, too: `collections.converted` equals
+`folders_created` plus `albums_created` plus `collections_known` plus the
+entries of `collections_skipped`. The incomplete collections are among the
+created or known ones.
 
 If the run stops after it started (no connection, a failed pre-flight
 check, a lost connection, an unexpected reply, or the mapping file cannot
@@ -343,6 +385,15 @@ written. It is saved after every finished step, so an interrupted run loses
 nothing. A second run sends only what changed in Lightroom since then and
 creates no duplicates. If the file is lost, the next run finds the photos
 again as duplicates and the keywords in the library's keyword list.
+
+Collections are kept under `collections`, keyed by the Lightroom collection
+id: `{"lightcraft_id": ..., "kind": "album" | "folder", "name": ...,
+"parent": <Lightroom id> | null, "members": [...]}`, with the name and
+parent at creation and the sorted global ids of the photos lr2lc added.
+Files from older versions without `collections` still load; the file
+version stays 1. Albums cannot be found again without the mapping file
+(LightCraft allows equal names), so if it is lost, the next run creates
+the albums a second time.
 
 ### Exit codes
 

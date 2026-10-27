@@ -63,9 +63,7 @@ pub struct Converted {
     pub keywords: Vec<Keyword>,
     /// Keywords per `Photo::lightroom_id`.
     pub photo_keywords: BTreeMap<i64, Vec<Keyword>>,
-    /// Converted albums and folders, ascending by Lightroom id. Not written
-    /// yet.
-    #[expect(dead_code, reason = "the writer takes collections in task P5b-3b")]
+    /// Converted albums and folders, ascending by Lightroom id.
     pub collections: Vec<Collection>,
 }
 

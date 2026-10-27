@@ -11,10 +11,20 @@
 //!   run; keyword and text changes share one `photo.setMeta`;
 //! - keywords whose attributes changed after creation are not updated, only
 //!   reported;
-//! - photos are processed in the order of their global ids.
+//! - photos are processed in the order of their global ids;
+//! - collections come after all photo steps: new album folders first, then
+//!   new albums, a parent always before its children; then the members to
+//!   add and to remove, album by album;
+//! - `album.create` gets only `name`, `folder` and `parent` (never
+//!   `addSelected`); `parent` is the LightCraft id of a known parent or the
+//!   placeholder `lr-collection:<Lightroom id>` of a parent created by the
+//!   same plan;
+//! - only members that lr2lc added are ever removed; a known collection that
+//!   was renamed, moved or deleted in Lightroom gets no command, it is only
+//!   counted.
 
 use crate::state::{PhotoFields, State, keyword_text, snapshot};
-use model::{Keyword, Photo, Skipped};
+use model::{Collection, CollectionKind, Keyword, Photo, Skipped};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -29,6 +39,8 @@ pub struct WriteInput {
     pub keywords: Vec<Keyword>,
     /// The keywords of each photo, by `Photo::lightroom_id`.
     pub photo_keywords: BTreeMap<i64, Vec<Keyword>>,
+    /// The collections to write as albums and album folders.
+    pub collections: Vec<Collection>,
 }
 
 /// One command of the plan.
@@ -58,6 +70,28 @@ pub enum Step {
         /// The command parameters without `ids`.
         params: Value,
     },
+    /// Create an album or album folder (`album.create`).
+    CreateAlbum {
+        /// Lightroom id of the collection.
+        collection_id: i64,
+        /// `name`, `folder` and, below top level, `parent`: a LightCraft id
+        /// or the placeholder `lr-collection:<Lightroom id>`.
+        params: Value,
+    },
+    /// Add photos to an album (`album.addPhotos`), in Lightroom order.
+    AddMembers {
+        /// Lightroom id of the collection.
+        collection_id: i64,
+        /// Lightroom global ids of the photos.
+        gids: Vec<String>,
+    },
+    /// Remove photos that lr2lc added from an album (`album.removePhotos`).
+    RemoveMembers {
+        /// Lightroom id of the collection.
+        collection_id: i64,
+        /// Lightroom global ids of the photos.
+        gids: Vec<String>,
+    },
 }
 
 /// The commands to run, in order, and what is left out.
@@ -75,6 +109,16 @@ pub struct Plan {
     photos_updated: usize,
     /// Known photos that need no command.
     photos_unchanged: usize,
+    /// Input collections already in the mapping file.
+    collections_known: usize,
+    /// Known collections whose name differs from the recorded one.
+    collections_renamed: usize,
+    /// Known collections whose parent differs from the recorded one.
+    collections_moved: usize,
+    /// Recorded collections missing from the input.
+    collections_removed: usize,
+    /// Album members that cannot be written.
+    member_skips: Vec<Skipped>,
 }
 
 impl Plan {
@@ -100,12 +144,44 @@ impl Plan {
         self.photos_unchanged
     }
 
+    /// The input collections already in the mapping file; they get no
+    /// `album.create`.
+    pub fn collections_known(&self) -> usize {
+        self.collections_known
+    }
+
+    /// The known collections renamed in Lightroom since their creation;
+    /// they are not renamed in LightCraft.
+    pub fn collections_renamed(&self) -> usize {
+        self.collections_renamed
+    }
+
+    /// The known collections moved in Lightroom since their creation; they
+    /// are not moved in LightCraft.
+    pub fn collections_moved(&self) -> usize {
+        self.collections_moved
+    }
+
+    /// The recorded collections that are no longer in the input; they are
+    /// not deleted in LightCraft.
+    pub fn collections_removed(&self) -> usize {
+        self.collections_removed
+    }
+
+    /// The album members whose photo is not in the input or has no global
+    /// id. The reason names the photo's Lightroom id.
+    pub fn member_skips(&self) -> &[Skipped] {
+        &self.member_skips
+    }
+
     /// The plan as a script: one JSON line per step, each an
     /// `engine.execute` request, plus one `library.select` line before the
     /// updates of each photo (LightCraft runs photo commands only on a
     /// selection). Selects and updates carry `ids`: the known LightCraft
     /// id, or the placeholder `lr:<global id>` for a photo that is imported
-    /// by this plan.
+    /// by this plan. Member changes are preceded by a `library.select` of
+    /// exactly their photos and name the album by its LightCraft id or the
+    /// placeholder `lr-collection:<Lightroom id>`.
     pub fn to_script(&self, state: &State) -> String {
         let mut out = String::new();
         let mut push = |command: &str, params: Value| {
@@ -127,15 +203,34 @@ impl Plan {
                     selected = None;
                     push("library.import", import_params(path));
                 }
+                Step::CreateAlbum { params, .. } => {
+                    selected = None;
+                    push("album.create", params.clone());
+                }
+                Step::AddMembers {
+                    collection_id,
+                    gids,
+                }
+                | Step::RemoveMembers {
+                    collection_id,
+                    gids,
+                } => {
+                    selected = None;
+                    let ids: Vec<Value> = gids.iter().map(|g| photo_ref(state, g)).collect();
+                    push("library.select", members_select_params(&ids));
+                    let command = match step {
+                        Step::AddMembers { .. } => "album.addPhotos",
+                        _ => "album.removePhotos",
+                    };
+                    let album = album_ref(state, *collection_id);
+                    push(command, json!({"id": album, "ids": ids}));
+                }
                 Step::Update {
                     global_id,
                     command,
                     params,
                 } => {
-                    let id = state.photo(global_id).map_or_else(
-                        || Value::String(format!("lr:{global_id}")),
-                        |e| e.lightcraft_id.clone(),
-                    );
+                    let id = photo_ref(state, global_id);
                     if selected != Some(global_id.as_str()) {
                         selected = Some(global_id);
                         push("library.select", select_params(&id));
@@ -159,6 +254,33 @@ pub fn import_params(path: &std::path::Path) -> Value {
     json!({"paths": [path.to_string_lossy()], "mode": "add"})
 }
 
+/// The LightCraft id of a photo, or the placeholder `lr:<global id>`.
+fn photo_ref(state: &State, global_id: &str) -> Value {
+    state.photo(global_id).map_or_else(
+        || Value::String(format!("lr:{global_id}")),
+        |e| e.lightcraft_id.clone(),
+    )
+}
+
+/// The LightCraft id of a collection, or the placeholder
+/// `lr-collection:<Lightroom id>`.
+fn album_ref(state: &State, collection_id: i64) -> Value {
+    state.collection(collection_id).map_or_else(
+        || Value::String(format!("{COLLECTION_PLACEHOLDER}{collection_id}")),
+        |e| e.lightcraft_id.clone(),
+    )
+}
+
+/// Prefix of the placeholder for a collection created by the same plan.
+pub const COLLECTION_PLACEHOLDER: &str = "lr-collection:";
+
+/// The parameters that select exactly the given photos (at least one) and
+/// make the first one active; LightCraft changes album members only on a
+/// selection.
+pub fn members_select_params(ids: &[Value]) -> Value {
+    json!({"ids": ids, "active": ids.first()})
+}
+
 /// The parameters that select exactly one photo and make it the active
 /// one; LightCraft runs `photo.*` commands only on a selection.
 pub fn select_params(id: &Value) -> Value {
@@ -175,6 +297,7 @@ pub fn plan(input: &WriteInput, state: &State, library_keywords: &BTreeSet<Strin
     plan_keywords(input, state, library_keywords, &mut out);
     out.keyword_skips = out.skipped.len();
     plan_photos(input, state, &mut out);
+    plan_collections(input, state, &mut out);
     out
 }
 
@@ -314,6 +437,123 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
             });
         }
     }
+}
+
+fn plan_collections(input: &WriteInput, state: &State, out: &mut Plan) {
+    let by_id: BTreeMap<i64, &Collection> = input
+        .collections
+        .iter()
+        .map(|c| (c.lightroom_id, c))
+        .collect();
+
+    let mut new: Vec<&Collection> = Vec::new();
+    for c in by_id.values() {
+        match state.collection(c.lightroom_id) {
+            Some(entry) => {
+                out.collections_known += 1;
+                if entry.name != c.name {
+                    out.collections_renamed += 1;
+                }
+                if entry.parent != c.parent {
+                    out.collections_moved += 1;
+                }
+            }
+            None => new.push(c),
+        }
+    }
+    out.collections_removed = state
+        .collections()
+        .filter(|(id, _)| !by_id.contains_key(id))
+        .count();
+
+    // Folders first, then albums; within each, shallower before deeper, so
+    // a parent always comes before its children.
+    new.sort_by_key(|c| {
+        (
+            c.kind == CollectionKind::Album,
+            depth(c, &by_id),
+            c.lightroom_id,
+        )
+    });
+    for c in new {
+        out.steps.push(Step::CreateAlbum {
+            collection_id: c.lightroom_id,
+            params: create_album_params(c, state),
+        });
+    }
+
+    let mut global_ids: BTreeMap<i64, &str> = BTreeMap::new();
+    for p in &input.photos {
+        if let Some(gid) = p.global_id.as_deref() {
+            global_ids.entry(p.lightroom_id).or_insert(gid);
+        }
+    }
+    for c in by_id.values() {
+        if c.kind != CollectionKind::Album {
+            continue;
+        }
+        let mut wanted: Vec<String> = Vec::new();
+        for member in &c.members {
+            match global_ids.get(member) {
+                Some(gid) => {
+                    if !wanted.iter().any(|w| w == gid) {
+                        wanted.push((*gid).to_string());
+                    }
+                }
+                None => out.member_skips.push(Skipped {
+                    reason: format!(
+                        "photo {member}: not added to an album; the photo is not converted or \
+                         has no global id"
+                    ),
+                }),
+            }
+        }
+        let recorded: &[String] = state
+            .collection(c.lightroom_id)
+            .map(|e| e.members.as_slice())
+            .unwrap_or_default();
+        let add: Vec<String> = wanted
+            .iter()
+            .filter(|g| !recorded.contains(g))
+            .cloned()
+            .collect();
+        let remove: Vec<String> = recorded
+            .iter()
+            .filter(|g| !wanted.contains(g))
+            .cloned()
+            .collect();
+        if !add.is_empty() {
+            out.steps.push(Step::AddMembers {
+                collection_id: c.lightroom_id,
+                gids: add,
+            });
+        }
+        if !remove.is_empty() {
+            out.steps.push(Step::RemoveMembers {
+                collection_id: c.lightroom_id,
+                gids: remove,
+            });
+        }
+    }
+}
+
+/// The number of ancestors of a collection within the input. A parent
+/// chain that loops stops after as many steps as there are collections.
+fn depth(c: &Collection, by_id: &BTreeMap<i64, &Collection>) -> usize {
+    std::iter::successors(c.parent, |p| by_id.get(p).and_then(|c| c.parent))
+        .take(by_id.len())
+        .count()
+}
+
+fn create_album_params(c: &Collection, state: &State) -> Value {
+    let mut params = json!({
+        "name": c.name,
+        "folder": c.kind == CollectionKind::Folder,
+    });
+    if let Some(parent) = c.parent {
+        params["parent"] = album_ref(state, parent);
+    }
+    params
 }
 
 /// The commands that turn the fields `old` into `new`, at most one per
@@ -479,6 +719,48 @@ mod tests {
         assert_eq!(p.photo_skips().len(), 2);
         let total = imports + p.photos_updated() + p.photos_unchanged() + p.photo_skips().len();
         assert_eq!(total, input.photos.len());
+    }
+
+    fn collection(id: i64, parent: Option<i64>) -> Collection {
+        Collection {
+            lightroom_id: id,
+            name: format!("c{id}"),
+            kind: CollectionKind::Folder,
+            parent,
+            members: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn depth_counts_ancestors_and_stops_on_a_loop() {
+        let cols = [
+            collection(1, None),
+            collection(2, Some(1)),
+            collection(3, Some(2)),
+            collection(4, Some(5)),
+            collection(5, Some(4)),
+            collection(6, Some(99)),
+        ];
+        let by_id: BTreeMap<i64, &Collection> = cols.iter().map(|c| (c.lightroom_id, c)).collect();
+        let d: Vec<usize> = cols.iter().map(|c| depth(c, &by_id)).collect();
+        assert_eq!(d, [0, 1, 2, 6, 6, 1]);
+    }
+
+    #[test]
+    fn members_select_makes_the_first_photo_active() {
+        assert_eq!(
+            members_select_params(&[json!(3), json!(1)]),
+            json!({"ids": [3, 1], "active": 3})
+        );
+    }
+
+    #[test]
+    fn unknown_parent_is_sent_as_placeholder() {
+        let params = create_album_params(&collection(6, Some(99)), &State::default());
+        assert_eq!(
+            params,
+            json!({"name": "c6", "folder": true, "parent": "lr-collection:99"})
+        );
     }
 
     #[test]
