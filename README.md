@@ -14,7 +14,9 @@ applies path mappings and checks that the original files exist. It also
 reads keywords with their hierarchy and synonyms, their assignments to
 photos, the star ratings, the pick/reject flags and the colour labels. Collections are read and counted, but not converted yet: each
 one is listed as skipped.
-Writing to LightCraft (`--apply`) is not implemented yet.
+With `--apply`, lr2lc writes keywords, photos (as references), ratings,
+flags, labels, titles, captions, copyright and creator into a LightCraft
+library through the control port of the running LightCraft app.
 
 Once the repository is on GitHub, CI runs formatting, lint and tests on
 Linux, macOS and Windows.
@@ -220,18 +222,79 @@ read, and lr2lc stops with exit code 2 if:
   with the key `tool_version`). An earlier report is overwritten; any other
   file, such as a photo, is left untouched.
 
+### Writer plan in the dry run
+
+The dry run also prints what the writer would send, as one line:
+
+```text
+writer: keywords to create 11, photos to import 17, updates 23
+```
+
+`report.json` then has a `writer` section with `planned` (`keywords`,
+`photos`, `updates`), `photos_skipped` and `keywords_skipped` (each a list
+of `{"reason": ...}`). Converted photos are either planned for import or
+skipped by the writer. With `--library DIR` the dry run reads the mapping
+file of that library (see below), so it only plans what is still missing;
+it never connects to LightCraft and writes nothing next to the library.
+
+`--script FILE` also writes the plan as JSON lines, one `engine.execute`
+request per command; photos that are not imported yet are named
+`lr:<global id>` in `ids`. The same protection as for `--report` applies:
+the catalog and its companion files are refused, and an existing `FILE` is
+only overwritten if it is empty or an earlier lr2lc script (every non-empty
+line a JSON object with `"method":"engine.execute"`).
+
 ### `--apply`
 
-Will write the LightCraft library. Not implemented yet: lr2lc exits with an
-error and reads or writes nothing.
+```sh
+lr2lc catalog.lrcat --library ~/Pictures/Photos.lightcraft --apply
+```
+
+`--apply` needs `--library DIR`, the LightCraft library to write; without
+it lr2lc stops with exit code 2. LightCraft must be running with that
+library open and its control port enabled (`--port N`, default 7980; only
+`127.0.0.1` is contacted). lr2lc reads the catalog as in a dry run, then
+checks the app before it writes anything and stops with exit code 1 if:
+
+- the app runs a temporary in-memory session or has another library open;
+- the app reports a problem with its library;
+- the library writes XMP sidecars next to the originals. lr2lc never
+  touches the originals, so it refuses this unless you turn XMP auto-write
+  off in LightCraft or allow it explicitly with `--allow-xmp`.
+
+Then it creates the missing keywords (parents first), imports each photo on
+its own as a reference (`mode: add`, the file stays where it is) and sets
+the fields that differ. A command LightCraft rejects skips only that photo
+or keyword, with a reason in the report. If the connection is lost, lr2lc
+stops at once and never repeats the command: its outcome is unknown, so run
+lr2lc again; it re-checks the state and finds photos LightCraft already
+has. The catalog checksum is checked again after writing.
+
+The summary and `report.json` (`dry_run: false`) show what was written:
+`keywords_created`, `photos_imported`, `photos_existing` (already in the
+library), `updates`, `not_saved` (applied but not yet saved to disk by
+LightCraft), and `photos_skipped`, `photos_incomplete` (an update failed;
+the next run sends it again) and `keywords_skipped` with reasons. On a
+first run, `photos.converted` equals `photos_imported` plus
+`photos_existing` plus the photos skipped by the writer.
+
+### Mapping file
+
+lr2lc remembers what it wrote in `<library folder name>.lr2lc.json` next to
+the library folder, e.g. `Photos.lightcraft.lr2lc.json`. It maps each
+photo's Lightroom global id to its LightCraft id and keeps the values last
+written. It is saved after every finished step, so an interrupted run loses
+nothing. A second run sends only what changed in Lightroom since then and
+creates no duplicates. If the file is lost, the next run finds the photos
+again as duplicates and the keywords in the library's keyword list.
 
 ### Exit codes
 
 | Code | Meaning |
 | --- | --- |
 | 0 | Success (also for `--help` and `--version`) |
-| 1 | The run failed: catalog cannot be opened or read, unsupported version, required table or column missing, pending `-wal`/`-journal` changes, report cannot be written, catalog changed during the run, or `--apply` given |
-| 2 | Invalid command line (unknown option, missing value, invalid `--map`, invalid `--label-set`, refused `--report` file); nothing is read or written |
+| 1 | The run failed: catalog cannot be opened or read, unsupported version, required table or column missing, pending `-wal`/`-journal` changes, mapping file damaged, report or script cannot be written, catalog changed during the run, or with `--apply`: no connection to LightCraft, a pre-flight check failed (wrong or temporary library, library problem, XMP auto-write) or the connection was lost |
+| 2 | Invalid command line (unknown option, missing value, invalid `--map`, `--label-set` or `--port`, `--apply` without `--library`, refused `--report` or `--script` file); nothing is read or written |
 
 ## License
 
