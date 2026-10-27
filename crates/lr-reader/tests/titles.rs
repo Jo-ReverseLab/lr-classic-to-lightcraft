@@ -23,7 +23,6 @@
 //!
 //! Fixtures: `lrcat_fixtures::write_title_catalog_with_files[_variant]`, see
 //! `lrcat_fixtures::title_edge`.
-#![cfg(any())]
 
 use lr_reader::{Catalog, PhotoData, checksum};
 use lrcat_fixtures::title_edge::{self as e, Variant};
@@ -58,7 +57,6 @@ fn title(data: &PhotoData, id: i64) -> Option<&str> {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn x_default_wins_over_earlier_entries() {
     let (_d, _c, data, _) = read();
     assert_eq!(title(&data, e::UMLAUT_ID), Some(e::UMLAUT_TITLE));
@@ -70,7 +68,6 @@ fn x_default_wins_over_earlier_entries() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn without_x_default_the_first_entry_wins() {
     let (_d, _c, data, _) = read();
     assert_eq!(title(&data, e::OTHER_LANG_ID), Some(e::OTHER_LANG_TITLE));
@@ -78,14 +75,12 @@ fn without_x_default_the_first_entry_wins() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn xml_entities_are_decoded() {
     let (_d, _c, data, _) = read();
     assert_eq!(title(&data, e::ENTITY_ID), Some(e::ENTITY_TITLE));
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn empty_blank_missing_title_null_and_no_row_give_none() {
     let (_d, _c, data, _) = read();
     for id in [
@@ -101,7 +96,6 @@ fn empty_blank_missing_title_null_and_no_row_give_none() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn smallest_id_local_wins() {
     let (_d, _c, data, _) = read();
     assert_eq!(title(&data, e::DUPLICATE_ID), Some(e::DUPLICATE_TITLE));
@@ -110,7 +104,6 @@ fn smallest_id_local_wins() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn broken_blobs_give_none_keep_the_photo_and_are_listed() {
     let (_d, _c, data, _) = read();
     for id in e::UNREADABLE_IDS {
@@ -144,7 +137,6 @@ fn photos_and_counts_are_unchanged_by_titles() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn missing_table_or_column_is_not_an_error() {
     let (_d, _c, full, full_report) = read();
     for variant in [Variant::NoTable, Variant::NoColumn] {
@@ -161,7 +153,6 @@ fn missing_table_or_column_is_not_an_error() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn title_text_stays_out_of_the_report() {
     let (_d, _c, _data, report) = read();
     for item in report.skipped_items() {
@@ -172,7 +163,6 @@ fn title_text_stays_out_of_the_report() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn second_read_is_identical() {
     let (_d, cat, a, _) = read();
     let (b, _) = read_at(&cat);

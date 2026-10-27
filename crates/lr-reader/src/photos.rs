@@ -3,6 +3,7 @@
 
 use crate::catalog::{Catalog, ReadError};
 use crate::folders::join_folder_path;
+use crate::xmp::{Unreadable, title_from_blob};
 use model::{Flag, Photo, Rating, Report};
 use rusqlite::types::Value;
 use std::collections::HashSet;
@@ -29,6 +30,9 @@ struct Row {
     /// `AgHarvestedIptcMetadata` row with the smallest `id_local` for this
     /// image, if it is non-empty text.
     creator: Option<String>,
+    /// `Adobe_AdditionalMetadata.xmp` of the row with the smallest
+    /// `id_local` for this image, as stored.
+    xmp: Value,
     file: Option<(String, String)>,
     folder: Option<String>,
     root_row: bool,
@@ -50,6 +54,10 @@ pub struct PhotoData {
     /// The photos themselves carry no label; mapping the text needs a
     /// label set and is left to the caller.
     pub color_labels: Vec<(i64, String)>,
+    /// Catalog ids of the returned photos whose XMP blob (the one that
+    /// decides the title) cannot be read: too short, not zlib, too large or
+    /// not UTF-8. These photos have no title. Ascending.
+    pub title_unreadable: Vec<i64>,
 }
 
 impl Catalog {
@@ -70,6 +78,22 @@ impl Catalog {
             )
             .map_err(ReadError::Query)?;
         Ok(present == 5)
+    }
+
+    /// Whether the optional table `Adobe_AdditionalMetadata` exists with the
+    /// columns `id_local`, `image` and `xmp`. Without it no photo has a
+    /// title.
+    fn has_xmp_table(&self) -> Result<bool, ReadError> {
+        let present: i64 = self
+            .conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('Adobe_AdditionalMetadata') \
+                 WHERE name IN ('id_local', 'image', 'xmp')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(ReadError::Query)?;
+        Ok(present == 3)
     }
 
     /// Reads all photos, ordered by their catalog id.
@@ -102,6 +126,12 @@ impl Catalog {
         } else {
             "NULL"
         };
+        let xmp = if self.has_xmp_table()? {
+            "(SELECT a.xmp FROM Adobe_AdditionalMetadata a \
+              WHERE a.image = i.id_local ORDER BY a.id_local LIMIT 1)"
+        } else {
+            "NULL"
+        };
         let sql = format!(
             "SELECT i.id_local, i.masterImage, i.rating, i.fileFormat, \
                     f.id_local, f.baseName, f.extension, \
@@ -111,7 +141,7 @@ impl Catalog {
                      WHERE c.image = i.id_local ORDER BY c.id_local LIMIT 1), \
                     (SELECT c.copyright FROM AgLibraryIPTC c \
                      WHERE c.image = i.id_local ORDER BY c.id_local LIMIT 1), \
-                    {creator} \
+                    {creator}, {xmp} \
              FROM Adobe_images i \
              LEFT JOIN AgLibraryFile f ON f.id_local = i.rootFile \
              LEFT JOIN AgLibraryFolder d ON d.id_local = f.folder \
@@ -133,6 +163,7 @@ impl Catalog {
                     caption: text_value(row.get(14)?).filter(|t| !t.is_empty()),
                     copyright: text_value(row.get(15)?).filter(|t| !t.is_empty()),
                     creator: text_value(row.get(16)?).filter(|t| !t.is_empty()),
+                    xmp: row.get(17)?,
                     file_format: text_value(row.get(3)?),
                     global_id: text_value(row.get(11)?),
                     file: match file_id {
@@ -158,8 +189,17 @@ impl Catalog {
             report.read();
             let unknown_flag = flag_from_value(&row.pick).is_none();
             let color_label = row.color_label.clone();
+            let title = title_from_value(&row.xmp);
             match photo_from_row(row, &mut used) {
                 Ok(photo) => {
+                    let photo = match title {
+                        Ok(Some(title)) => photo.with_title(title),
+                        Ok(None) => photo,
+                        Err(Unreadable) => {
+                            data.title_unreadable.push(photo.lightroom_id);
+                            photo
+                        }
+                    };
                     if unknown_flag {
                         data.unknown_flag.push(photo.lightroom_id);
                     }
@@ -172,6 +212,17 @@ impl Catalog {
             }
         }
         Ok(data)
+    }
+}
+
+/// The title stored in an XMP column value. NULL gives no title; a blob
+/// (or text) is unpacked; any other type cannot be read.
+fn title_from_value(value: &Value) -> Result<Option<String>, Unreadable> {
+    match value {
+        Value::Null => Ok(None),
+        Value::Blob(b) => title_from_blob(b),
+        Value::Text(t) => title_from_blob(t.as_bytes()),
+        Value::Integer(_) | Value::Real(_) => Err(Unreadable),
     }
 }
 
@@ -326,6 +377,7 @@ mod tests {
             caption: None,
             copyright: None,
             creator: None,
+            xmp: Value::Null,
             file: Some(("IMG".into(), "jpg".into())),
             folder: Some("a/".into()),
             root_row: true,

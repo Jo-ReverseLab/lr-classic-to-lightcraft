@@ -175,7 +175,6 @@ fn missing_iptc_copyright_column_is_reported() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7c"]
 fn missing_xmp_column_or_metadata_table_is_not_an_error() {
     // P5b-7c: Adobe_AdditionalMetadata.xmp is optional (titles become None).
     let dir = tempfile::tempdir().unwrap();

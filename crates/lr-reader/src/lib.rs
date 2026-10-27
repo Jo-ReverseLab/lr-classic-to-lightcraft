@@ -6,6 +6,7 @@ mod folders;
 mod keywords;
 mod originals;
 mod photos;
+mod xmp;
 
 pub use catalog::{Catalog, ReadError, SUPPORTED_VERSION, checksum};
 pub use keywords::KeywordData;
