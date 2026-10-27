@@ -88,6 +88,10 @@ pub struct Photo {
     pub lightroom_id: i64,
     /// Star rating.
     pub rating: Rating,
+    /// Catalog-independent identity of the photo (Lightroom's `id_global`),
+    /// kept byte for byte. Stable across catalogs that hold the same photo,
+    /// unlike `lightroom_id`. Internal identity only, never reported.
+    pub global_id: Option<String>,
 }
 
 impl Photo {
@@ -97,14 +101,22 @@ impl Photo {
             path: path.into(),
             lightroom_id,
             rating,
+            global_id: None,
         }
+    }
+
+    /// Returns the photo with its global id set.
+    pub fn with_global_id(mut self, global_id: impl Into<String>) -> Self {
+        self.global_id = Some(global_id.into());
+        self
     }
 }
 
 /// A keyword with its full hierarchy path, root first, its synonyms and its
 /// attributes.
 ///
-/// Equality compares the path, the synonyms and the attributes.
+/// Equality compares the path, the synonyms, the attributes and the
+/// global id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Keyword {
     path: Vec<String>,
@@ -118,6 +130,10 @@ pub struct Keyword {
     pub export_synonyms: bool,
     /// The keyword names a person.
     pub person: bool,
+    /// Catalog-independent identity of the keyword (Lightroom's
+    /// `id_global`), kept byte for byte. Internal identity only, never
+    /// reported.
+    pub global_id: Option<String>,
 }
 
 impl Keyword {
@@ -143,7 +159,14 @@ impl Keyword {
             export_containing: true,
             export_synonyms: true,
             person: false,
+            global_id: None,
         }
+    }
+
+    /// Returns the keyword with its global id set.
+    pub fn with_global_id(mut self, global_id: impl Into<String>) -> Self {
+        self.global_id = Some(global_id.into());
+        self
     }
 
     /// The keyword's own name (last part of the path).
@@ -163,8 +186,8 @@ impl Keyword {
     }
 
     /// The parent keyword, or `None` for a root keyword. The parent is
-    /// built from the path only, so it has no synonyms and the default
-    /// attributes.
+    /// built from the path only, so it has no synonyms, the default
+    /// attributes and no global id.
     pub fn parent(&self) -> Option<Keyword> {
         if self.path.len() > 1 {
             Some(Keyword::with_path(
@@ -334,6 +357,20 @@ mod tests {
         k.export_synonyms = false;
         let p = k.parent().unwrap();
         assert!(!p.person && p.export_synonyms);
+    }
+
+    #[test]
+    fn parent_has_no_global_id() {
+        let k = Keyword::new(vec!["A".into(), "B".into()])
+            .unwrap()
+            .with_global_id("g");
+        assert_eq!(k.parent().unwrap().global_id, None);
+    }
+
+    #[test]
+    fn photo_equality_includes_global_id() {
+        let p = Photo::new("/a.jpg", 1, Rating::default());
+        assert_ne!(p.clone().with_global_id("x"), p);
     }
 
     #[test]
