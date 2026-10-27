@@ -7,7 +7,6 @@
 //! `Photo::new` sets it to `None`; `with_title` (`impl Into<String>`) sets
 //! `Some(..)`, keeps the text byte for byte and is independent of caption,
 //! copyright and creator.
-#![cfg(any())]
 
 use model::{Photo, Rating};
 
