@@ -34,6 +34,11 @@ pub struct Outcome {
     pub labels: LabelCounts,
     /// Converted photos that carry a caption. The text is never reported.
     pub captions: usize,
+    /// Converted photos that carry a copyright notice. The text is never
+    /// reported.
+    pub copyrights: usize,
+    /// Converted photos that carry a creator. The text is never reported.
+    pub creators: usize,
 }
 
 /// Number of converted photos per flag. `none` does not include `unknown`,
@@ -119,6 +124,8 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         flags,
         labels,
         captions,
+        copyrights,
+        creators,
     ) = {
         let catalog = Catalog::open(path)?;
         let mut folders = Report::new();
@@ -176,6 +183,8 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
             FlagCounts::count(&kept_photos, &photo_data.unknown_flag),
             labels,
             count_captions(&kept_photos),
+            kept_photos.iter().filter(|p| p.copyright.is_some()).count(),
+            kept_photos.iter().filter(|p| p.creator.is_some()).count(),
         )
     };
     let after = checksum(path).context("cannot read catalog file after the run")?;
@@ -206,6 +215,8 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         flags,
         labels,
         captions,
+        copyrights,
+        creators,
     })
 }
 

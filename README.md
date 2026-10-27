@@ -74,6 +74,11 @@ photos. Label names never appear in the output or in the report.
 Photos with a caption are counted on the line `captions: N` and as
 `photos.captions` in the report; the caption text itself never appears.
 
+Photos with a copyright notice are counted on the line `copyrights: N` and
+as `photos.copyrights`; photos with a creator on the line `creators: N` and
+as `photos.creators`. The texts themselves never appear. Catalogs without
+the creator tables report `creators: 0`.
+
 Photos and keywords are identified by Lightroom's global id, which, unlike the
 internal row id, does not depend on the order in which rows were stored. This keeps repeated runs from creating duplicates. A photo or keyword
 without a global id is skipped with the reason `missing global id`; if

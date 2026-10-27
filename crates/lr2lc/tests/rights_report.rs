@@ -55,7 +55,6 @@ fn line<'a>(text: &'a str, key: &str) -> &'a str {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn counts_converted_photos_with_copyright_and_creator() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_rights_catalog_with_files(dir.path()).unwrap();
@@ -74,7 +73,6 @@ fn counts_converted_photos_with_copyright_and_creator() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn catalog_without_rights_reports_zero() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_small_catalog_with_files(dir.path()).unwrap();
@@ -86,7 +84,6 @@ fn catalog_without_rights_reports_zero() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn missing_creator_tables_give_zero_creators_and_no_error() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_copyright_only_catalog_with_files(dir.path()).unwrap();
@@ -99,7 +96,6 @@ fn missing_creator_tables_give_zero_creators_and_no_error() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn no_rights_text_in_any_output() {
     for creators in [true, false] {
         let dir = tempfile::tempdir().unwrap();
@@ -126,7 +122,6 @@ fn no_rights_text_in_any_output() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn catalog_unchanged_second_run_identical_and_nothing_written() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_rights_catalog_with_files(dir.path()).unwrap();
@@ -150,7 +145,6 @@ fn catalog_unchanged_second_run_identical_and_nothing_written() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn apply_is_still_refused_and_writes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_rights_catalog_with_files(dir.path()).unwrap();
