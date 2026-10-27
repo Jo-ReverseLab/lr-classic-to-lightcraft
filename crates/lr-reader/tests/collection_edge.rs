@@ -91,7 +91,7 @@ fn has_reason(report: &Report, phrase: &str, id: i64) -> bool {
         .any(|r| r.contains(phrase) && mentions(r, id))
 }
 
-fn album<'a>(d: &'a CollectionData, id: i64) -> &'a model::Collection {
+fn album(d: &CollectionData, id: i64) -> &model::Collection {
     d.collections
         .iter()
         .find(|c| c.lightroom_id == id)

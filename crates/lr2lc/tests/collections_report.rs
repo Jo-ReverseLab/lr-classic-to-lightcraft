@@ -52,16 +52,14 @@ fn run(cat: &Path) -> (String, String, Value, String) {
 
 /// Removes a leading `word <digits>: ` such as `collection 12: `.
 fn strip_id_prefix(reason: &str) -> &str {
-    if let Some((head, rest)) = reason.split_once(": ") {
-        if let Some((word, id)) = head.split_once(' ') {
-            if !word.is_empty()
-                && word.bytes().all(|b| b.is_ascii_alphabetic())
-                && !id.is_empty()
-                && id.bytes().all(|b| b.is_ascii_digit())
-            {
-                return rest;
-            }
-        }
+    if let Some((head, rest)) = reason.split_once(": ")
+        && let Some((word, id)) = head.split_once(' ')
+        && !word.is_empty()
+        && word.bytes().all(|b| b.is_ascii_alphabetic())
+        && !id.is_empty()
+        && id.bytes().all(|b| b.is_ascii_digit())
+    {
+        return rest;
     }
     reason
 }
