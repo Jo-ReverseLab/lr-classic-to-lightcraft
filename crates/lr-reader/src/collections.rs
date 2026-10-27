@@ -33,6 +33,7 @@ pub struct CollectionData {
 /// Where a row points with its `parent` column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParentRef {
+    /// NULL or 0.
     Top,
     Id(i64),
     /// Neither NULL nor a whole number.
@@ -138,10 +139,7 @@ impl Catalog {
                     name.map(|name| (kind, name.to_owned()))
                         .ok_or_else(|| format!("collection {id}: name is not valid text"))
                 });
-                let parent = match row.get_ref(4)? {
-                    ValueRef::Null => ParentRef::Top,
-                    v => as_id(v).map_or(ParentRef::Invalid, ParentRef::Id),
-                };
+                let parent = parent_ref(row.get_ref(4)?);
                 Ok((id, Row { own, parent }))
             })
             .map_err(ReadError::Query)?;
@@ -294,6 +292,19 @@ fn resolve(rows: &BTreeMap<i64, Row>) -> HashMap<i64, Result<(), String>> {
     status
 }
 
+/// Where a `parent` value points. NULL and 0 both mean top level, as in
+/// Lightroom.
+fn parent_ref(value: ValueRef<'_>) -> ParentRef {
+    match value {
+        ValueRef::Null => ParentRef::Top,
+        v => match as_id(v) {
+            Some(0) => ParentRef::Top,
+            Some(p) => ParentRef::Id(p),
+            None => ParentRef::Invalid,
+        },
+    }
+}
+
 /// The text of a value, if it is valid UTF-8 text.
 fn text(value: ValueRef<'_>) -> Option<&str> {
     match value {
@@ -394,6 +405,17 @@ mod tests {
         assert_eq!(as_id(ValueRef::Real(f64::NAN)), None);
         assert_eq!(as_id(ValueRef::Text(b"4")), None);
         assert_eq!(as_id(ValueRef::Null), None);
+    }
+
+    #[test]
+    fn parent_null_and_zero_are_top_level() {
+        assert_eq!(parent_ref(ValueRef::Null), ParentRef::Top);
+        assert_eq!(parent_ref(ValueRef::Integer(0)), ParentRef::Top);
+        assert_eq!(parent_ref(ValueRef::Real(0.0)), ParentRef::Top);
+        assert_eq!(parent_ref(ValueRef::Integer(3)), ParentRef::Id(3));
+        assert_eq!(parent_ref(ValueRef::Real(3.0)), ParentRef::Id(3));
+        assert_eq!(parent_ref(ValueRef::Real(0.5)), ParentRef::Invalid);
+        assert_eq!(parent_ref(ValueRef::Text(b"0")), ParentRef::Invalid);
     }
 
     #[test]
