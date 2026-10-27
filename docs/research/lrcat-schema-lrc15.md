@@ -60,6 +60,16 @@ parent INTEGER (nullable; refers to `AgLibraryKeyword.id_local`).
 id_local INTEGER PK; image INTEGER NN (refers to `Adobe_images.id_local`);
 tag INTEGER NN (refers to `AgLibraryKeyword.id_local`).
 
+## Keyword synonyms: `AgLibraryKeywordSynonym`
+
+id_local INTEGER PK; keyword INTEGER NN DEFAULT 0 (refers to `AgLibraryKeyword.id_local`);
+lc_name, name (nullable, no declared type; by analogy with `AgLibraryKeyword`, `lc_name` is presumably the lower-case form of `name`).
+Indexes: `index_AgLibraryKeywordSynonym_keyword` on `keyword`, `index_AgLibraryKeywordSynonym_lc_name` on `lc_name`.
+No declared foreign key; the relation is by convention only, so a row may point to a missing keyword.
+The layout (no uniqueness on `keyword`) allows several synonym rows per keyword, presumably one row per synonym.
+Row semantics are inferred from the schema only and not yet confirmed against real synonym data.
+`AgLibraryKeyword.includeSynonyms` is only an export flag; synonyms are not stored in `AgLibraryKeyword`.
+
 ## Other tables read by lrcat-extractor (columns it uses exist)
 
 - `Adobe_AdditionalMetadata`: image INTEGER, xmp, embeddedXmp INTEGER, externalXmpIsDirty INTEGER.
@@ -78,6 +88,7 @@ tag INTEGER NN (refers to `AgLibraryKeyword.id_local`).
 - `AgLibraryFolder.parentId` -> `AgLibraryFolder.id_local` (optional)
 - `AgLibraryKeywordImage.image` -> `Adobe_images.id_local`; `.tag` -> `AgLibraryKeyword.id_local`
 - `AgLibraryKeyword.parent` -> `AgLibraryKeyword.id_local`
+- `AgLibraryKeywordSynonym.keyword` -> `AgLibraryKeyword.id_local`
 - `Adobe_images.masterImage` -> `Adobe_images.id_local` (virtual copies)
 
 ## Comparison with lrcat-extractor 0.6.0 (commit a3a59b37)
