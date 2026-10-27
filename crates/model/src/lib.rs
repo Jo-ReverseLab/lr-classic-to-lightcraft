@@ -112,6 +112,10 @@ pub struct Photo {
     pub label: Option<ColorLabel>,
     /// Caption, kept byte for byte. `None` if the photo has none.
     pub caption: Option<String>,
+    /// Copyright notice, kept byte for byte. `None` if the photo has none.
+    pub copyright: Option<String>,
+    /// Creator (author), kept byte for byte. `None` if the photo has none.
+    pub creator: Option<String>,
 }
 
 impl Photo {
@@ -125,6 +129,8 @@ impl Photo {
             flag: Flag::None,
             label: None,
             caption: None,
+            copyright: None,
+            creator: None,
         }
     }
 
@@ -149,6 +155,18 @@ impl Photo {
     /// Returns the photo with its caption set, kept byte for byte.
     pub fn with_caption(mut self, caption: impl Into<String>) -> Self {
         self.caption = Some(caption.into());
+        self
+    }
+
+    /// Returns the photo with its copyright notice set, kept byte for byte.
+    pub fn with_copyright(mut self, copyright: impl Into<String>) -> Self {
+        self.copyright = Some(copyright.into());
+        self
+    }
+
+    /// Returns the photo with its creator set, kept byte for byte.
+    pub fn with_creator(mut self, creator: impl Into<String>) -> Self {
+        self.creator = Some(creator.into());
         self
     }
 }

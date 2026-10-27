@@ -8,7 +8,6 @@
 //! `with_copyright` and `with_creator` (`impl Into<String>`) set `Some(..)`
 //! and keep the text byte for byte, independently of each other and of the
 //! caption.
-#![cfg(any())]
 
 use model::{Photo, Rating};
 
@@ -17,14 +16,12 @@ fn photo() -> Photo {
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn new_photo_has_neither() {
     let p = photo();
     assert_eq!((p.copyright, p.creator), (None, None));
 }
 
 #[test]
-#[ignore = "waiting for P5b-7b"]
 fn builders_keep_text_byte_for_byte_and_are_independent() {
     let c = "  \u{a9} K\u{f6}ln \u{1f305} \n";
     let a = " Example M\u{fc}ller \u{1f4f7} ";
