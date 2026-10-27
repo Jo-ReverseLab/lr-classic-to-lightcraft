@@ -213,8 +213,15 @@ fn lost_state_file_adopts_every_collection_and_creates_nothing() {
     assert!(s.collections_skipped.is_empty() && s.collections_incomplete.is_empty());
     assert!(of(&commands, "album.create").is_empty(), "{commands:?}");
     assert_eq!(fake.albums(), albums, "no album created, none changed");
-    let after: Vec<Vec<i64>> = fake.albums().iter().map(|a| fake.album_members(a.id)).collect();
-    assert_eq!(members, after, "members unchanged (addPhotos is idempotent)");
+    let after: Vec<Vec<i64>> = fake
+        .albums()
+        .iter()
+        .map(|a| fake.album_members(a.id))
+        .collect();
+    assert_eq!(
+        members, after,
+        "members unchanged (addPhotos is idempotent)"
+    );
     for word in ["album.delete", "album.rename", "album.move", "removePhotos"] {
         assert!(!fake.received().iter().any(|r| r.line.contains(word)));
     }
@@ -287,7 +294,10 @@ fn albums_already_in_the_library_are_adopted_without_state() {
     // The members are added to the adopted albums.
     assert_eq!(fake.album_members(5003), [1003, 1001]);
     assert_eq!(fake.album_members(5004), [1002]);
-    assert_eq!(state(&env)["collections"]["3"]["members"], json!(["g101", "g103"]));
+    assert_eq!(
+        state(&env)["collections"]["3"]["members"],
+        json!(["g101", "g103"])
+    );
 }
 
 #[test]
@@ -324,7 +334,12 @@ fn two_equal_albums_in_the_same_folder_are_reported_not_guessed() {
     let input = input_with(tree());
     let (s, commands) = ok(&fake, &env, &input);
     assert_eq!(s.collections_existing, 4);
-    assert_eq!(s.collections_skipped.len(), 1, "{:?}", s.collections_skipped);
+    assert_eq!(
+        s.collections_skipped.len(),
+        1,
+        "{:?}",
+        s.collections_skipped
+    );
     let reason = &s.collections_skipped[0].reason;
     assert!(reason.contains(AMBIGUOUS), "{reason}");
     assert_no_names(reason);
@@ -376,10 +391,18 @@ fn two_equal_folders_skip_the_collection_and_its_descendants() {
     // placed; Top Album is unaffected and does not exist yet.
     let fake = with_seeds(
         &env,
-        vec![SeedAlbum::folder("Set A", None), SeedAlbum::folder("Set A", None)],
+        vec![
+            SeedAlbum::folder("Set A", None),
+            SeedAlbum::folder("Set A", None),
+        ],
     );
     let (s, commands) = ok(&fake, &env, &input_with(tree()));
-    assert_eq!(s.collections_skipped.len(), 4, "{:?}", s.collections_skipped);
+    assert_eq!(
+        s.collections_skipped.len(),
+        4,
+        "{:?}",
+        s.collections_skipped
+    );
     assert!(s.collections_skipped[0].reason.contains(AMBIGUOUS));
     for skipped in &s.collections_skipped {
         assert_no_names(&skipped.reason);
@@ -428,7 +451,10 @@ fn equal_name_with_another_kind_is_no_hit() {
     // folder "Set A".
     let fake = with_seeds(
         &env,
-        vec![SeedAlbum::folder("Top Album", None), SeedAlbum::album("Set A", None)],
+        vec![
+            SeedAlbum::folder("Top Album", None),
+            SeedAlbum::album("Set A", None),
+        ],
     );
     let (s, commands) = ok(&fake, &env, &input_with(tree()));
     assert_eq!(s.collections_existing, 0);
@@ -471,11 +497,10 @@ fn names_are_compared_byte_for_byte_but_trimmed_like_the_app_does() {
 }
 
 #[test]
-fn adopting_a_nested_node_needs_the_adopted_parent_not_just_the_same_name() {
-    // Two folders "Set A" (top level) are NOT ambiguous when only one of
-    // them has the wanted child path: parents are resolved first, so with
-    // two "Set A" the whole subtree is skipped, and nothing below the
-    // second one is adopted by accident.
+fn subtree_below_ambiguous_folders_is_never_adopted_by_accident() {
+    // Below the second of two equal folders "Set A" sit a matching "Set B"
+    // and "Deep". The folder is ambiguous, so its whole subtree is skipped
+    // and nothing below either folder is adopted.
     let env = env();
     let fake = with_seeds(
         &env,
@@ -487,7 +512,11 @@ fn adopting_a_nested_node_needs_the_adopted_parent_not_just_the_same_name() {
         ],
     );
     let (s, commands) = ok(&fake, &env, &input_with(tree()));
-    assert!(of(&commands, "album.create").iter().all(|p| p["name"] == "Top Album"));
+    assert!(
+        of(&commands, "album.create")
+            .iter()
+            .all(|p| p["name"] == "Top Album")
+    );
     assert_eq!(s.collections_existing, 0);
     assert_eq!(s.collections_skipped.len(), 4);
     assert!(fake.album_members(5004).is_empty());
