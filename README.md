@@ -14,6 +14,9 @@ applies path mappings and checks that the original files exist. Collections
 are read and counted, but not converted yet: each one is listed as skipped.
 Writing to LightCraft (`--apply`) is not implemented yet.
 
+Once the repository is on GitHub, CI runs formatting, lint and tests on
+Linux, macOS and Windows.
+
 ## Usage
 
 ```sh
