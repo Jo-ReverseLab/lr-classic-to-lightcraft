@@ -3,7 +3,7 @@
 
 use crate::catalog::{Catalog, ReadError};
 use crate::folders::join_folder_path;
-use model::{Photo, Rating, Report};
+use model::{Flag, Photo, Rating, Report};
 use rusqlite::types::Value;
 use std::collections::HashSet;
 
@@ -15,14 +15,36 @@ struct Row {
     /// `Adobe_images.id_global` if it is text.
     global_id: Option<String>,
     rating: Value,
+    /// `Adobe_images.pick`, as stored.
+    pick: Value,
     file: Option<(String, String)>,
     folder: Option<String>,
     root_row: bool,
     root_path: Option<String>,
 }
 
+/// Photos read from a catalog, plus facts about them that the photos
+/// themselves cannot carry.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PhotoData {
+    /// Photos, ordered by their catalog id (see [`Catalog::photos`]).
+    pub photos: Vec<Photo>,
+    /// Catalog ids of the returned photos whose stored `pick` value is
+    /// neither NULL, 0, 1 nor -1. These photos carry [`Flag::None`].
+    /// Ascending.
+    pub unknown_flag: Vec<i64>,
+}
+
 impl Catalog {
     /// Reads all photos, ordered by their catalog id.
+    ///
+    /// Same as [`Catalog::photo_data`] without the extra facts.
+    pub fn photos(&self, report: &mut Report) -> Result<Vec<Photo>, ReadError> {
+        self.photo_data(report).map(|data| data.photos)
+    }
+
+    /// Reads all photos, ordered by their catalog id, and the ids of the
+    /// photos with an unknown flag value.
     ///
     /// Every `Adobe_images` row is counted with [`Report::read`]. Rows that
     /// cannot become a photo (virtual copies, videos, missing or duplicate
@@ -31,14 +53,19 @@ impl Catalog {
     /// [`Report::skipped`] and left out. Paths are assembled from stored
     /// strings only; the file system is never accessed. Nothing is marked
     /// converted here.
-    pub fn photos(&self, report: &mut Report) -> Result<Vec<Photo>, ReadError> {
+    ///
+    /// The flag comes from `Adobe_images.pick`: 1 is [`Flag::Pick`], -1 is
+    /// [`Flag::Reject`], 0 or NULL is [`Flag::None`] (whole-number reals
+    /// count the same). Any other value also gives [`Flag::None`]; the photo
+    /// is kept and its id is listed in [`PhotoData::unknown_flag`].
+    pub fn photo_data(&self, report: &mut Report) -> Result<PhotoData, ReadError> {
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT i.id_local, i.masterImage, i.rating, i.fileFormat, \
                         f.id_local, f.baseName, f.extension, \
                         d.id_local, d.pathFromRoot, \
-                        r.id_local, r.absolutePath, i.id_global \
+                        r.id_local, r.absolutePath, i.id_global, i.pick \
                  FROM Adobe_images i \
                  LEFT JOIN AgLibraryFile f ON f.id_local = i.rootFile \
                  LEFT JOIN AgLibraryFolder d ON d.id_local = f.folder \
@@ -55,6 +82,7 @@ impl Catalog {
                     image_id: row.get(0)?,
                     master: row.get(1)?,
                     rating: row.get(2)?,
+                    pick: row.get(12)?,
                     file_format: text_value(row.get(3)?),
                     global_id: text_value(row.get(11)?),
                     file: match file_id {
@@ -73,17 +101,23 @@ impl Catalog {
                 })
             })
             .map_err(ReadError::Query)?;
-        let mut photos = Vec::new();
+        let mut data = PhotoData::default();
         let mut used = HashSet::new();
         for row in rows {
             let row = row.map_err(ReadError::Query)?;
             report.read();
+            let unknown_flag = flag_from_value(&row.pick).is_none();
             match photo_from_row(row, &mut used) {
-                Ok(photo) => photos.push(photo),
+                Ok(photo) => {
+                    if unknown_flag {
+                        data.unknown_flag.push(photo.lightroom_id);
+                    }
+                    data.photos.push(photo);
+                }
                 Err(reason) => report.skipped(reason),
             }
         }
-        Ok(photos)
+        Ok(data)
     }
 }
 
@@ -129,11 +163,13 @@ fn photo_from_row(row: Row, used: &mut HashSet<String>) -> Result<Photo, String>
         .ok_or_else(|| format!("photo {id}: root folder has no path"))?;
     let rating = rating_from_value(&row.rating)
         .ok_or_else(|| format!("photo {id}: rating is not a whole number in 0..=5"))?;
+    let flag = flag_from_value(&row.pick).unwrap_or_default();
     let folder = join_folder_path(&root, &rel);
     used.insert(global_id.clone());
     Ok(
         Photo::new(join_file_path(&folder, &file_name(&base, &ext)), id, rating)
-            .with_global_id(global_id),
+            .with_global_id(global_id)
+            .with_flag(flag),
     )
 }
 
@@ -174,6 +210,21 @@ fn rating_from_value(value: &Value) -> Option<Rating> {
     u8::try_from(stars).ok().and_then(|s| Rating::new(s).ok())
 }
 
+/// Maps a stored `pick` value to a flag: NULL or 0 is none, 1 is pick, -1
+/// is reject (integers or whole-number reals); anything else is `None`
+/// (unknown).
+fn flag_from_value(value: &Value) -> Option<Flag> {
+    match value {
+        Value::Null | Value::Integer(0) => Some(Flag::None),
+        Value::Integer(1) => Some(Flag::Pick),
+        Value::Integer(-1) => Some(Flag::Reject),
+        Value::Real(v) if *v == 0.0 => Some(Flag::None),
+        Value::Real(v) if *v == 1.0 => Some(Flag::Pick),
+        Value::Real(v) if *v == -1.0 => Some(Flag::Reject),
+        _ => None,
+    }
+}
+
 /// `baseName` plus `.extension`, without a dot when the extension is empty.
 fn file_name(base: &str, ext: &str) -> String {
     if ext.is_empty() {
@@ -206,6 +257,7 @@ mod tests {
             file_format: Some("JPG".into()),
             global_id: Some("g-1".into()),
             rating: Value::Null,
+            pick: Value::Null,
             file: Some(("IMG".into(), "jpg".into())),
             folder: Some("a/".into()),
             root_row: true,
@@ -237,6 +289,41 @@ mod tests {
         assert_eq!(r(Value::Integer(6)), None);
         assert_eq!(r(Value::Integer(-1)), None);
         assert_eq!(r(Value::Text("3".into())), None);
+    }
+
+    #[test]
+    fn pick_values_map_to_flags() {
+        let f = |v| flag_from_value(&v);
+        assert_eq!(f(Value::Null), Some(Flag::None));
+        assert_eq!(f(Value::Integer(0)), Some(Flag::None));
+        assert_eq!(f(Value::Real(0.0)), Some(Flag::None));
+        assert_eq!(f(Value::Real(-0.0)), Some(Flag::None));
+        assert_eq!(f(Value::Integer(1)), Some(Flag::Pick));
+        assert_eq!(f(Value::Real(1.0)), Some(Flag::Pick));
+        assert_eq!(f(Value::Integer(-1)), Some(Flag::Reject));
+        assert_eq!(f(Value::Real(-1.0)), Some(Flag::Reject));
+        assert_eq!(f(Value::Integer(2)), None);
+        assert_eq!(f(Value::Integer(i64::MAX)), None);
+        assert_eq!(f(Value::Real(0.5)), None);
+        assert_eq!(f(Value::Real(f64::NAN)), None);
+        assert_eq!(f(Value::Text("1".into())), None);
+        assert_eq!(f(Value::Blob(vec![1])), None);
+    }
+
+    #[test]
+    fn row_flag_is_set_and_unknown_becomes_none() {
+        let mut r = row();
+        r.pick = Value::Integer(-1);
+        assert_eq!(
+            photo_from_row(r, &mut HashSet::new()).unwrap().flag,
+            Flag::Reject
+        );
+        let mut r = row();
+        r.pick = Value::Integer(2);
+        assert_eq!(
+            photo_from_row(r, &mut HashSet::new()).unwrap().flag,
+            Flag::None
+        );
     }
 
     #[test]

@@ -46,7 +46,6 @@ fn flag_of(photos: &[Photo], id: i64) -> Flag {
 macro_rules! flag_test {
     ($name:ident, $id:expr, $want:expr) => {
         #[test]
-        #[ignore = "waiting for P5b-1"]
         fn $name() {
             let (_d, cat) = fixture();
             let (photos, _) = read_photos(&cat);
@@ -69,7 +68,6 @@ flag_test!(missing_original_keeps_its_reject, 2, Flag::Reject);
 flag_test!(missing_original_unknown_value_is_none, 3, Flag::None);
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn unknown_values_do_not_skip_the_photo() {
     let (_d, cat) = fixture();
     let (photos, report) = read_photos(&cat);
@@ -82,7 +80,6 @@ fn unknown_values_do_not_skip_the_photo() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn skipped_virtual_copy_with_pick_is_not_returned_and_counts_as_read() {
     let (_d, cat) = fixture();
     let (photos, report) = read_photos(&cat);
@@ -93,7 +90,6 @@ fn skipped_virtual_copy_with_pick_is_not_returned_and_counts_as_read() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn collection_pick_is_not_read() {
     let (_d, cat) = fixture();
     let (photos, _) = read_photos(&cat);
@@ -117,7 +113,6 @@ fn collection_pick_is_not_read() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn small_fixture_has_no_flags() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("small.lrcat");
@@ -128,7 +123,6 @@ fn small_fixture_has_no_flags() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn flags_do_not_change_other_fields_and_catalog_is_unchanged() {
     let (_d, cat) = fixture();
     let before = checksum(&cat).unwrap();

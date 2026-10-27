@@ -129,7 +129,6 @@ fn missing_synonym_keyword_column_is_reported() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn missing_pick_column_is_reported() {
     // P5b-1: Adobe_images.pick is required.
     let dir = tempfile::tempdir().unwrap();
