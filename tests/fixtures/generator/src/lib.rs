@@ -1372,3 +1372,279 @@ pub fn write_large_catalog(path: &Path, images: usize) -> Result<()> {
     c.execute_batch("COMMIT")?;
     Ok(())
 }
+
+/// Counts and ids of the title fixture ([`write_title_catalog_with_files`]).
+///
+/// The small fixture with `Adobe_AdditionalMetadata.xmp` blobs: 4 header bytes
+/// (big-endian length of the XMP text) followed by the zlib-compressed XMP
+/// packet. The CLI converts photos 1 and 4..=19 (17 photos); photos 2 and 3
+/// (missing original) and 20 (virtual copy) are skipped. Photos 2 and 20
+/// carry blobs (2 a valid title, 20 a broken blob) that must be counted
+/// nowhere. The rows of the small fixture for the listed photos are replaced.
+pub mod title_edge {
+    pub const CONVERTED: i64 = 17;
+    pub const SKIPPED: i64 = 3;
+    /// Converted photos with a title: 4, 5, 6, 7, 14, 17, 18.
+    pub const TITLES: i64 = 7;
+    pub const TITLED_IDS: [i64; 7] = [4, 5, 6, 7, 14, 17, 18];
+    /// Converted photos with a broken blob: 11, 12, 13, 16.
+    pub const UNREADABLE: i64 = 4;
+    pub const UNREADABLE_IDS: [i64; 4] = [11, 12, 13, 16];
+    /// Photo 4: `x-default` (umlaut, emoji) listed after a `de` entry.
+    pub const UMLAUT_ID: i64 = 4;
+    pub const UMLAUT_TITLE: &str = "Sonnenaufgang \u{fc}ber K\u{f6}ln \u{1f305}";
+    /// Photo 5: no `x-default`, `de-DE` first, `en-US` second: first wins.
+    pub const OTHER_LANG_ID: i64 = 5;
+    pub const OTHER_LANG_TITLE: &str = "Nur Deutsch";
+    /// Photo 6: three entries without `x-default` and without `xml:lang`
+    /// on the first one: the first `rdf:li` wins.
+    pub const MULTI_ID: i64 = 6;
+    pub const MULTI_TITLE: &str = "First entry";
+    /// Photo 7: XML entities, named and numeric.
+    pub const ENTITY_ID: i64 = 7;
+    pub const ENTITY_TITLE: &str = "Tom & Jerry <b> \"q\" 's' AB\u{1f305}";
+    /// Photo 8: `x-default` entry is empty. Photo 9: only spaces: none.
+    pub const EMPTY_ID: i64 = 8;
+    pub const BLANK_ID: i64 = 9;
+    /// Photo 10: valid XMP without `dc:title`: none, not unreadable.
+    pub const NO_TITLE_ID: i64 = 10;
+    /// Photo 11: blob shorter than the 4 header bytes. Photo 12: header
+    /// followed by bytes that are not zlib. Photo 13: valid zlib whose content
+    /// is not UTF-8. All three: no title, photo kept, counted unreadable.
+    pub const SHORT_ID: i64 = 11;
+    pub const NOT_ZLIB_ID: i64 = 12;
+    pub const NOT_UTF8_ID: i64 = 13;
+    /// Photo 14: rows 101 ("second", inserted first) and 100 ("first").
+    pub const DUPLICATE_ID: i64 = 14;
+    pub const DUPLICATE_TITLE: &str = "first";
+    /// Photo 15: rows 200 (`xmp` NULL) and 201 (valid title): none.
+    pub const NULL_FIRST_ID: i64 = 15;
+    /// Photo 16: rows 300 (broken blob) and 301 (valid title): none, counted
+    /// once as unreadable.
+    pub const BROKEN_FIRST_ID: i64 = 16;
+    /// Photo 17: plain `x-default` title. Photo 18: the same plus a
+    /// `dc:description` and `dc:subject` that must not be mistaken for it.
+    pub const PLAIN_ID: i64 = 17;
+    pub const PLAIN_TITLE: &str = "Plain title";
+    pub const WITH_DESCRIPTION_ID: i64 = 18;
+    pub const WITH_DESCRIPTION_TITLE: &str = "Real title";
+    /// Photos with `xmp` NULL (19) or no row at all (1).
+    pub const NULL_XMP_ID: i64 = 19;
+    pub const NO_ROW_ID: i64 = 1;
+    /// Skipped photos: 2 (valid title), 20 (broken blob).
+    pub const SKIPPED_IDS: [i64; 2] = [2, 20];
+    /// Every non-empty text of the fixture; none may appear in any output.
+    pub const ALL_TEXTS: [&str; 15] = [
+        "Sonnenaufgang",
+        "Nur Deutsch",
+        "Only English",
+        "First entry",
+        "Second entry",
+        "Jerry",
+        "first",
+        "second",
+        "later",
+        "Plain title",
+        "Real title",
+        "desc text",
+        "skipped-missing-title",
+        "Third entry",
+        "keyword-like",
+    ];
+    /// Variants of [`super::write_title_catalog_with_files_variant`].
+    #[derive(Clone, Copy, Debug)]
+    pub enum Variant {
+        Full,
+        /// `Adobe_AdditionalMetadata` dropped.
+        NoTable,
+        /// Column `xmp` dropped.
+        NoColumn,
+    }
+}
+
+/// A title blob: 4 header bytes (big-endian length) plus zlib data.
+fn xmp_blob(xmp: &[u8]) -> Vec<u8> {
+    use flate2::{Compression, write::ZlibEncoder};
+    use std::io::Write;
+    let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+    enc.write_all(xmp).expect("in-memory write");
+    let mut blob = (xmp.len() as u32).to_be_bytes().to_vec();
+    blob.extend(enc.finish().expect("in-memory finish"));
+    blob
+}
+
+/// XMP packet with `inner` inside `rdf:Description`.
+fn xmp_packet(inner: &str) -> String {
+    format!(
+        "<?xpacket begin=\"\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
+         <x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n\
+         <rdf:Description xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" xmp:Rating=\"3\">\n\
+         {inner}\n</rdf:Description></rdf:RDF></x:xmpmeta>\n<?xpacket end=\"w\"?>"
+    )
+}
+
+fn alt(tag: &str, items: &[(Option<&str>, &str)]) -> String {
+    let mut s = format!("<{tag}><rdf:Alt>");
+    for (lang, text) in items {
+        match lang {
+            Some(l) => s.push_str(&format!("<rdf:li xml:lang=\"{l}\">{text}</rdf:li>")),
+            None => s.push_str(&format!("<rdf:li>{text}</rdf:li>")),
+        }
+    }
+    s.push_str(&format!("</rdf:Alt></{tag}>"));
+    s
+}
+
+fn title_blob(items: &[(Option<&str>, &str)]) -> Vec<u8> {
+    xmp_blob(xmp_packet(&alt("dc:title", items)).as_bytes())
+}
+
+/// Writes the small fixture with the XMP blobs of [`title_edge`] as
+/// `dir/titles.lrcat` with placeholder originals. Returns the catalog path.
+pub fn write_title_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    write_title_catalog_with_files_variant(dir, title_edge::Variant::Full)
+}
+
+/// Like [`write_title_catalog_with_files`] with the table or the `xmp`
+/// column of `Adobe_AdditionalMetadata` removed for the other variants.
+pub fn write_title_catalog_with_files_variant(
+    dir: &Path,
+    variant: title_edge::Variant,
+) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("titles.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_title_blobs(&catalog)?;
+    match variant {
+        title_edge::Variant::Full => {}
+        title_edge::Variant::NoTable => {
+            Connection::open(&catalog)?.execute_batch("DROP TABLE Adobe_AdditionalMetadata;")?;
+        }
+        title_edge::Variant::NoColumn => {
+            Connection::open(&catalog)?
+                .execute_batch("ALTER TABLE Adobe_AdditionalMetadata DROP COLUMN xmp;")?;
+        }
+    }
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+fn add_title_blobs(path: &Path) -> Result<()> {
+    use rusqlite::types::Value as V;
+    use title_edge as e;
+    let c = Connection::open(path)?;
+    c.execute_batch("BEGIN")?;
+    let x = Some("x-default");
+    let blob = |b: Vec<u8>| V::Blob(b);
+    // Replace the small fixture's row of every photo handled here.
+    c.execute_batch("DELETE FROM Adobe_AdditionalMetadata WHERE image BETWEEN 1 AND 20")?;
+    let put = |row: i64, image: i64, v: V| {
+        c.execute(
+            "INSERT INTO Adobe_AdditionalMetadata (id_local, id_global, image, xmp, embeddedXmp, externalXmpIsDirty) VALUES (?1, ?2, ?3, ?4, 0, 0)",
+            params![row, format!("TITLE-META-{row}"), image, v],
+        )
+    };
+    for id in 3..=20 {
+        // Defaults: NULL xmp (photo 3 is skipped anyway).
+        if id != e::NO_ROW_ID {
+            put(1000 + id, id, V::Null)?;
+        }
+    }
+    let replace = |row: i64, image: i64, v: V| -> Result<()> {
+        c.execute(
+            "UPDATE Adobe_AdditionalMetadata SET xmp = ?1 WHERE id_local = ?2 AND image = ?3",
+            params![v, row, image],
+        )?;
+        Ok(())
+    };
+    let own = |image: i64, v: V| replace(1000 + image, image, v);
+    own(
+        e::UMLAUT_ID,
+        blob(title_blob(&[
+            (Some("de"), "Deutsch"),
+            (x, "Sonnenaufgang \u{fc}ber K\u{f6}ln \u{1f305}"),
+        ])),
+    )?;
+    own(
+        e::OTHER_LANG_ID,
+        blob(title_blob(&[
+            (Some("de-DE"), "Nur Deutsch"),
+            (Some("en-US"), "Only English"),
+        ])),
+    )?;
+    own(
+        e::MULTI_ID,
+        blob(title_blob(&[
+            (None, "First entry"),
+            (Some("fr"), "Second entry"),
+            (Some("it"), "Third entry"),
+        ])),
+    )?;
+    own(
+        e::ENTITY_ID,
+        blob(title_blob(&[(
+            x,
+            "Tom &amp; Jerry &lt;b&gt; &quot;q&quot; &apos;s&apos; &#65;&#x42;&#x1F305;",
+        )])),
+    )?;
+    own(e::EMPTY_ID, blob(title_blob(&[(x, "")])))?;
+    own(e::BLANK_ID, blob(title_blob(&[(x, "   \n ")])))?;
+    own(
+        e::NO_TITLE_ID,
+        blob(xmp_blob(
+            xmp_packet(&alt("dc:description", &[(x, "desc text")])).as_bytes(),
+        )),
+    )?;
+    own(e::SHORT_ID, V::Blob(vec![0, 0, 1]))?;
+    let mut not_zlib = vec![0, 0, 0, 40];
+    not_zlib.extend_from_slice(b"this is not zlib data at all, sorry");
+    own(e::NOT_ZLIB_ID, V::Blob(not_zlib))?;
+    own(
+        e::NOT_UTF8_ID,
+        blob(xmp_blob(&[b'<', 0xff, 0xfe, 0xc0, 0x80, b'>'])),
+    )?;
+    // Duplicates: replace the default row by two explicit ones.
+    let dup = |image: i64, rows: [(i64, V); 2]| -> Result<()> {
+        c.execute(
+            "DELETE FROM Adobe_AdditionalMetadata WHERE image = ?1",
+            [image],
+        )?;
+        for (row, v) in rows {
+            put(row, image, v)?;
+        }
+        Ok(())
+    };
+    dup(
+        e::DUPLICATE_ID,
+        [
+            (101, blob(title_blob(&[(x, "second")]))),
+            (100, blob(title_blob(&[(x, e::DUPLICATE_TITLE)]))),
+        ],
+    )?;
+    dup(
+        e::NULL_FIRST_ID,
+        [(200, V::Null), (201, blob(title_blob(&[(x, "later")])))],
+    )?;
+    dup(
+        e::BROKEN_FIRST_ID,
+        [
+            (300, V::Blob(vec![1, 2])),
+            (301, blob(title_blob(&[(x, "later")]))),
+        ],
+    )?;
+    own(e::PLAIN_ID, blob(title_blob(&[(x, e::PLAIN_TITLE)])))?;
+    let inner = format!(
+        "{}\n{}\n<dc:subject><rdf:Bag><rdf:li>keyword-like</rdf:li></rdf:Bag></dc:subject>",
+        alt("dc:description", &[(x, "desc text")]),
+        alt("dc:title", &[(x, e::WITH_DESCRIPTION_TITLE)]),
+    );
+    own(
+        e::WITH_DESCRIPTION_ID,
+        blob(xmp_blob(xmp_packet(&inner).as_bytes())),
+    )?;
+    // Skipped photos: 2 gets a valid title, 20 a broken blob.
+    put(1002, 2, blob(title_blob(&[(x, "skipped-missing-title")])))?;
+    own(20, V::Blob(vec![9]))?;
+    c.execute_batch("COMMIT")?;
+    Ok(())
+}

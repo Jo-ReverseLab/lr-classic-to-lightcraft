@@ -8,6 +8,7 @@ description = "Generator for synthetic Lightroom Classic 15 test catalogs"
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
+flate2 = "1"
 
 [dev-dependencies]
 tempfile = "3"
