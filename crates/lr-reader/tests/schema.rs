@@ -112,3 +112,18 @@ fn error_comes_from_open_not_from_reading() {
     let msg = expect_missing(&path, "AgLibraryCollection", None);
     assert!(!msg.starts_with("cannot read catalog"), "message: {msg}");
 }
+
+#[test]
+fn missing_synonym_table_is_reported() {
+    // P5-3: AgLibraryKeywordSynonym (columns id_local, keyword) is required.
+    let dir = tempfile::tempdir().unwrap();
+    let path = damaged(dir.path(), "AgLibraryKeywordSynonym", None);
+    expect_missing(&path, "AgLibraryKeywordSynonym", None);
+}
+
+#[test]
+fn missing_synonym_keyword_column_is_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = damaged(dir.path(), "AgLibraryKeywordSynonym", Some("keyword"));
+    expect_missing(&path, "AgLibraryKeywordSynonym", Some("keyword"));
+}

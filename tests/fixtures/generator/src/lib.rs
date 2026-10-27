@@ -72,6 +72,19 @@ pub mod keyword_edge {
     /// 36 (empty keyword 12).
     pub const ASSIGNMENTS_SKIPPED: [i64; 7] = [20, 31, 32, 33, 34, 35, 36];
     pub const ASSIGNMENTS_CONVERTED: i64 = 30;
+    /// Rows in `AgLibraryKeywordSynonym` (small fixture: none). Ids 1 and 2
+    /// belong to keyword 3, id 3 to the skipped keyword 16, id 4 points to the
+    /// non-existent keyword 999.
+    pub const SYNONYMS: i64 = 4;
+    /// `(synonym id, keyword id)` of the rows above.
+    pub const SYNONYM_ROWS: [(i64, i64); 4] = [(1, 3), (2, 3), (3, 16), (4, 999)];
+    /// Synonym texts, in id order. They must never appear in any output.
+    pub const SYNONYM_TEXTS: [&str; 4] = [
+        "Zyx-Synonym-Alpha",
+        "Zyx-Synonym-Bär",
+        "Zyx-Synonym-Gamma",
+        "Zyx-Synonym-Orphan",
+    ];
 }
 
 const SCHEMA: &str = "
@@ -82,6 +95,7 @@ CREATE TABLE AgLibraryFile (id_local INTEGER PRIMARY KEY, id_global NOT NULL, ba
 CREATE TABLE Adobe_images (id_local INTEGER PRIMARY KEY, id_global NOT NULL, aspectRatioCache NOT NULL, bitDepth NOT NULL, colorChannels NOT NULL, colorLabels NOT NULL, colorMode NOT NULL, copyCreationTime NOT NULL, captureTime, copyName, copyReason, fileHeight, fileWidth, orientation, rating, editLock INTEGER NOT NULL, fileFormat NOT NULL, pick NOT NULL, positionInFolder NOT NULL, touchCount NOT NULL, touchTime NOT NULL, hasMissingSidecars INTEGER, masterImage INTEGER, originalRootEntity INTEGER, rootFile INTEGER NOT NULL);
 CREATE TABLE AgLibraryKeyword (id_local INTEGER PRIMARY KEY, id_global NOT NULL, dateCreated NOT NULL, genealogy NOT NULL, includeOnExport INTEGER NOT NULL, includeParents INTEGER NOT NULL, includeSynonyms INTEGER NOT NULL, imageCountCache, keywordType, lastApplied, lc_name, name, parent INTEGER);
 CREATE TABLE AgLibraryKeywordImage (id_local INTEGER PRIMARY KEY, image INTEGER NOT NULL, tag INTEGER NOT NULL);
+CREATE TABLE AgLibraryKeywordSynonym (id_local INTEGER PRIMARY KEY, keyword INTEGER NOT NULL DEFAULT 0, lc_name, name);
 CREATE TABLE Adobe_AdditionalMetadata (id_local INTEGER PRIMARY KEY, id_global, image INTEGER, xmp, embeddedXmp INTEGER, externalXmpIsDirty INTEGER);
 CREATE TABLE Adobe_imageProperties (id_local INTEGER PRIMARY KEY, id_global, image, propertiesString);
 CREATE TABLE AgLibraryCollection (id_local INTEGER PRIMARY KEY, creationId NOT NULL, genealogy NOT NULL, imageCount, name NOT NULL, parent INTEGER, systemOnly NOT NULL);
@@ -336,6 +350,13 @@ fn add_keyword_edges(path: &Path) -> Result<()> {
         c.execute(
             "INSERT INTO AgLibraryKeywordImage (image, tag) VALUES (?1, ?2)",
             params![image, tag],
+        )?;
+    }
+    for (i, (id, keyword)) in keyword_edge::SYNONYM_ROWS.iter().enumerate() {
+        let name = keyword_edge::SYNONYM_TEXTS[i];
+        c.execute(
+            "INSERT INTO AgLibraryKeywordSynonym (id_local, keyword, lc_name, name) VALUES (?1, ?2, ?3, ?4)",
+            params![id, keyword, name.to_lowercase(), name],
         )?;
     }
     c.execute_batch("COMMIT")?;

@@ -22,3 +22,23 @@ fn missing_collection_table_exits_1_without_report() {
     assert!(err.contains("AgLibraryCollection"), "stderr: {err}");
     assert!(!report.exists(), "no report may be written");
 }
+
+#[test]
+fn missing_synonym_table_exits_1_without_report() {
+    // P5-3: the synonym table is required too.
+    let dir = tempfile::tempdir().unwrap();
+    let cat = dir.path().join("damaged.lrcat");
+    lrcat_fixtures::write_small_catalog_without(&cat, "AgLibraryKeywordSynonym", None).unwrap();
+    let report = dir.path().join("report.json");
+    let out = Command::new(env!("CARGO_BIN_EXE_lr2lc"))
+        .current_dir(dir.path())
+        .arg(&cat)
+        .arg("--report")
+        .arg(&report)
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "stderr: {err}");
+    assert!(err.contains("AgLibraryKeywordSynonym"), "stderr: {err}");
+    assert!(!report.exists(), "no report may be written");
+}
