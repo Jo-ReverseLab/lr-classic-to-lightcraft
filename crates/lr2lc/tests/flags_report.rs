@@ -56,7 +56,6 @@ fn fixture() -> (tempfile::TempDir, PathBuf) {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn report_json_counts_converted_photos_per_flag() {
     let (_d, cat) = fixture();
     let (_, v, _) = run_report(&cat);
@@ -69,7 +68,6 @@ fn report_json_counts_converted_photos_per_flag() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn flag_counts_add_up_to_converted() {
     let (_d, cat) = fixture();
     let (_, v, _) = run_report(&cat);
@@ -83,7 +81,6 @@ fn flag_counts_add_up_to_converted() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn skipped_photos_with_flags_are_not_counted() {
     // Photo 20 (virtual copy, pick), photo 2 (missing, reject) and photo 3
     // (missing, unknown value) are skipped and must not show up in the counts.
@@ -99,7 +96,6 @@ fn skipped_photos_with_flags_are_not_counted() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn stdout_has_the_flags_line() {
     let (_d, cat) = fixture();
     let (text, _, _) = run_report(&cat);
@@ -118,7 +114,6 @@ fn stdout_has_the_flags_line() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn photo_balance_is_unchanged() {
     let (_d, cat) = fixture();
     let (text, v, _) = run_report(&cat);
@@ -156,7 +151,6 @@ fn photo_balance_is_unchanged() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn catalog_without_flags_prints_a_zero_line() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_small_catalog_with_files(dir.path()).unwrap();
@@ -173,7 +167,6 @@ fn catalog_without_flags_prints_a_zero_line() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-1"]
 fn catalog_unchanged_second_run_identical_and_nothing_written() {
     let (_d, cat) = fixture();
     let before = fs::read(&cat).unwrap();

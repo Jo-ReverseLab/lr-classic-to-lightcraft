@@ -1,6 +1,6 @@
 //! Readable summary and `report.json`.
 
-use crate::dry_run::{KeywordAttributes, Outcome};
+use crate::dry_run::{FlagCounts, KeywordAttributes, Outcome};
 use model::Report;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -38,6 +38,28 @@ pub struct PhotosJson<'a> {
     pub area: AreaJson<'a>,
     /// Skipped videos; they are also listed in `skipped`.
     pub videos: usize,
+    /// Converted photos per flag.
+    pub flags: FlagsJson,
+}
+
+/// Converted photos per flag; the fields add up to the converted photos.
+#[derive(Debug, Serialize)]
+pub struct FlagsJson {
+    pub pick: usize,
+    pub reject: usize,
+    pub none: usize,
+    pub unknown: usize,
+}
+
+impl From<FlagCounts> for FlagsJson {
+    fn from(f: FlagCounts) -> Self {
+        FlagsJson {
+            pick: f.pick,
+            reject: f.reject,
+            none: f.none,
+            unknown: f.unknown,
+        }
+    }
 }
 
 /// Counts of keywords, plus attribute counts over the converted keywords.
@@ -84,6 +106,7 @@ pub fn report_json(outcome: &Outcome) -> String {
         photos: PhotosJson {
             area: AreaJson::new(&outcome.photos),
             videos: outcome.videos,
+            flags: outcome.flags.into(),
         },
         collections: AreaJson::new(&outcome.collections),
         keywords: KeywordsJson {
@@ -140,6 +163,7 @@ pub fn summary(outcome: &Outcome) -> String {
         }
     }
     let _ = writeln!(out, "{}", ratings_line(&outcome.ratings));
+    let _ = writeln!(out, "{}", flags_line(&outcome.flags));
     if outcome.catalog_unchanged {
         let _ = writeln!(out, "catalog unchanged (checksum verified)");
     }
@@ -180,6 +204,14 @@ fn ratings_line(ratings: &[usize; 6]) -> String {
         .map(|(stars, count)| format!("{stars}: {count}"))
         .collect();
     format!("ratings: {}", parts.join(", "))
+}
+
+/// Formats the flag counts as `flags: pick P, reject R, none N, unknown U`.
+fn flags_line(f: &FlagCounts) -> String {
+    format!(
+        "flags: pick {}, reject {}, none {}, unknown {}",
+        f.pick, f.reject, f.none, f.unknown
+    )
 }
 
 /// Groups skip reasons without the leading `<kind> <id>: ` prefix, sorted
@@ -270,6 +302,12 @@ mod tests {
             keyword_assignments,
             keyword_synonyms,
             ratings: [0, 0, 0, 1, 0, 0],
+            flags: FlagCounts {
+                pick: 1,
+                reject: 0,
+                none: 0,
+                unknown: 0,
+            },
         }
     }
 
@@ -345,6 +383,29 @@ mod tests {
         assert_eq!(k["no_synonyms_on_export"], 4);
         assert_eq!(k["unknown_type"], 5);
         assert_eq!(k["unused"], 6);
+    }
+
+    #[test]
+    fn flags_are_in_summary_and_json() {
+        let mut o = outcome();
+        o.flags = FlagCounts {
+            pick: 1,
+            reject: 2,
+            none: 3,
+            unknown: 4,
+        };
+        let text = summary(&o);
+        assert!(
+            text.lines()
+                .any(|l| l == "flags: pick 1, reject 2, none 3, unknown 4"),
+            "{text}"
+        );
+        let v: serde_json::Value = serde_json::from_str(&report_json(&o)).unwrap();
+        let f = &v["photos"]["flags"];
+        assert_eq!(f["pick"], 1);
+        assert_eq!(f["reject"], 2);
+        assert_eq!(f["none"], 3);
+        assert_eq!(f["unknown"], 4);
     }
 
     #[test]

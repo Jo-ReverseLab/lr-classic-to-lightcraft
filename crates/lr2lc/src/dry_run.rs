@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result, bail};
 use lr_reader::{Catalog, KeywordData, VIDEO_SKIP_REASON, checksum, drop_missing_originals};
-use model::{Folder, Keyword, PathMappings, Photo, Rating, Report};
+use model::{Flag, Folder, Keyword, PathMappings, Photo, Rating, Report};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -27,6 +27,39 @@ pub struct Outcome {
     pub keyword_synonyms: Report,
     /// Number of converted photos per star rating, index 0 to 5.
     pub ratings: [usize; 6],
+    /// Pick/reject counts over the converted photos.
+    pub flags: FlagCounts,
+}
+
+/// Number of converted photos per flag. `none` does not include `unknown`,
+/// so the four fields add up to the converted photos.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FlagCounts {
+    pub pick: usize,
+    pub reject: usize,
+    pub none: usize,
+    /// Photos whose stored flag value is not known; converted without flag.
+    pub unknown: usize,
+}
+
+impl FlagCounts {
+    /// Counts the flags of `photos`; ids in `unknown` (sorted ascending)
+    /// count as unknown instead of their flag.
+    fn count(photos: &[Photo], unknown: &[i64]) -> Self {
+        let mut counts = FlagCounts::default();
+        for p in photos {
+            if unknown.binary_search(&p.lightroom_id).is_ok() {
+                counts.unknown += 1;
+                continue;
+            }
+            match p.flag {
+                Flag::Pick => counts.pick += 1,
+                Flag::Reject => counts.reject += 1,
+                Flag::None => counts.none += 1,
+            }
+        }
+        counts
+    }
 }
 
 /// Counts of keyword attributes, over converted keywords only.
@@ -78,6 +111,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         keyword_assignments,
         keyword_synonyms,
         ratings,
+        flags,
     ) = {
         let catalog = Catalog::open(path)?;
         let mut folders = Report::new();
@@ -86,7 +120,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         let mut keywords = Report::new();
         let mut keyword_assignments = Report::new();
         let found_folders = catalog.folders(&mut folders)?;
-        let found_photos = catalog.photos(&mut photos)?;
+        let photo_data = catalog.photo_data(&mut photos)?;
         catalog.collections(&mut collections)?;
         let mapped_folders: Vec<Folder> = found_folders
             .into_iter()
@@ -95,7 +129,8 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         for _ in &mapped_folders {
             folders.converted();
         }
-        let mapped_photos = found_photos
+        let mapped_photos = photo_data
+            .photos
             .into_iter()
             .map(|mut p| {
                 p.path = mappings.map(&p.path);
@@ -130,6 +165,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
             keyword_assignments,
             keyword_synonyms,
             rating_counts(&kept_photos),
+            FlagCounts::count(&kept_photos, &photo_data.unknown_flag),
         )
     };
     let after = checksum(path).context("cannot read catalog file after the run")?;
@@ -157,6 +193,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         keyword_assignments,
         keyword_synonyms,
         ratings,
+        flags,
     })
 }
 
@@ -228,6 +265,27 @@ mod tests {
                 unused: 2,
             }
         );
+    }
+
+    #[test]
+    fn flags_are_counted_with_unknown_apart() {
+        let photos = [
+            photo(1, 0).with_flag(Flag::Pick),
+            photo(2, 0).with_flag(Flag::Reject),
+            photo(3, 0),
+            photo(4, 0),
+            photo(5, 0).with_flag(Flag::Pick),
+        ];
+        assert_eq!(
+            FlagCounts::count(&photos, &[4, 9]),
+            FlagCounts {
+                pick: 2,
+                reject: 1,
+                none: 1,
+                unknown: 1,
+            }
+        );
+        assert_eq!(FlagCounts::count(&[], &[1]), FlagCounts::default());
     }
 
     #[test]
