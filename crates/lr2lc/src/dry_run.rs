@@ -14,6 +14,7 @@ pub struct Outcome {
     pub catalog_unchanged: bool,
     pub folders: Report,
     pub photos: Report,
+    pub collections: Report,
 }
 
 /// Runs the dry run on the catalog at `path`.
@@ -22,12 +23,14 @@ pub struct Outcome {
 /// an error here; the caller decides after writing the report.
 pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
     let before = checksum(path).context("cannot read catalog file")?;
-    let (catalog_version, folders, photos) = {
+    let (catalog_version, folders, photos, collections) = {
         let catalog = Catalog::open(path)?;
         let mut folders = Report::new();
         let mut photos = Report::new();
+        let mut collections = Report::new();
         let found_folders = catalog.folders(&mut folders)?;
         let found_photos = catalog.photos(&mut photos)?;
+        catalog.collections(&mut collections)?;
         let mapped_folders: Vec<Folder> = found_folders
             .into_iter()
             .map(|f| Folder::new(mappings.map(&f.path)))
@@ -45,10 +48,14 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         for _ in drop_missing_originals(mapped_photos, &mut photos) {
             photos.converted();
         }
-        (catalog.version().to_string(), folders, photos)
+        (catalog.version().to_string(), folders, photos, collections)
     };
     let after = checksum(path).context("cannot read catalog file after the run")?;
-    for (area, report) in [("folders", &folders), ("photos", &photos)] {
+    for (area, report) in [
+        ("folders", &folders),
+        ("photos", &photos),
+        ("collections", &collections),
+    ] {
         if !report.is_balanced() {
             bail!("internal error: {area} do not add up (read != converted + skipped)");
         }
@@ -58,5 +65,6 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         catalog_unchanged: before == after,
         folders,
         photos,
+        collections,
     })
 }

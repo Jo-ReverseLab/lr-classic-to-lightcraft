@@ -15,6 +15,7 @@ pub struct ReportJson<'a> {
     pub catalog_unchanged: bool,
     pub folders: AreaJson<'a>,
     pub photos: AreaJson<'a>,
+    pub collections: AreaJson<'a>,
 }
 
 /// Counts of one kind of element.
@@ -54,6 +55,7 @@ pub fn report_json(outcome: &Outcome) -> String {
         catalog_unchanged: outcome.catalog_unchanged,
         folders: AreaJson::new(&outcome.folders),
         photos: AreaJson::new(&outcome.photos),
+        collections: AreaJson::new(&outcome.collections),
     };
     let mut text = serde_json::to_string_pretty(&json).expect("report serializes");
     text.push('\n');
@@ -69,7 +71,7 @@ pub fn summary(outcome: &Outcome) -> String {
         env!("CARGO_PKG_VERSION")
     );
     let _ = writeln!(out, "catalog version {}", outcome.catalog_version);
-    for (area, report) in [("folders", &outcome.folders), ("photos", &outcome.photos)] {
+    for (area, report) in areas(outcome) {
         let _ = writeln!(
             out,
             "{area}: read {}, would convert {}, skipped {}",
@@ -78,7 +80,7 @@ pub fn summary(outcome: &Outcome) -> String {
             report.skipped_count()
         );
     }
-    for (area, report) in [("folders", &outcome.folders), ("photos", &outcome.photos)] {
+    for (area, report) in areas(outcome) {
         let groups = group_reasons(report);
         if groups.is_empty() {
             continue;
@@ -92,6 +94,15 @@ pub fn summary(outcome: &Outcome) -> String {
         let _ = writeln!(out, "catalog unchanged (checksum verified)");
     }
     out
+}
+
+/// The report areas in output order.
+fn areas(outcome: &Outcome) -> [(&'static str, &Report); 3] {
+    [
+        ("folders", &outcome.folders),
+        ("photos", &outcome.photos),
+        ("collections", &outcome.collections),
+    ]
 }
 
 /// Groups skip reasons without the leading `<kind> <id>: ` prefix, sorted
@@ -140,11 +151,19 @@ mod tests {
         photos.skipped("photo 2: original file is missing");
         photos.skipped("photo 3: original file is missing");
         photos.skipped("photo 9: virtual copy of photo 1 is not converted");
+        let mut collections = Report::new();
+        for id in [1, 2] {
+            collections.read();
+            collections.skipped(format!(
+                "collection {id}: smart collection is not converted"
+            ));
+        }
         Outcome {
             catalog_version: "1500000".into(),
             catalog_unchanged: true,
             folders,
             photos,
+            collections,
         }
     }
 
@@ -167,6 +186,9 @@ mod tests {
         assert!(lines.contains(&"folders: read 1, would convert 1, skipped 0"));
         assert!(lines.contains(&"photos: read 4, would convert 1, skipped 3"));
         assert!(lines.contains(&"2 x original file is missing"), "{text}");
+        assert!(lines.contains(&"collections: read 2, would convert 0, skipped 2"));
+        assert!(lines.contains(&"skipped collections:"));
+        assert!(lines.contains(&"2 x smart collection is not converted"));
         assert!(text.contains("dry run"));
         assert!(!text.contains("skipped folders:"));
     }
@@ -182,6 +204,7 @@ mod tests {
             [
                 "catalog_unchanged",
                 "catalog_version",
+                "collections",
                 "dry_run",
                 "folders",
                 "photos",
@@ -196,5 +219,11 @@ mod tests {
             "photo 2: original file is missing"
         );
         assert_eq!(v["folders"]["skipped"].as_array().unwrap().len(), 0);
+        assert_eq!(v["collections"]["read"], 2);
+        assert_eq!(v["collections"]["converted"], 0);
+        assert_eq!(
+            v["collections"]["skipped"][1]["reason"],
+            "collection 2: smart collection is not converted"
+        );
     }
 }

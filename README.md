@@ -10,7 +10,8 @@ only to describe compatibility.
 ## Status
 
 Early development. The dry run reads folders and photos from a catalog,
-applies path mappings and checks that the original files exist. Writing to
+applies path mappings and checks that the original files exist. Collections
+are read and counted, but not converted yet: each one is listed as skipped. Writing to
 LightCraft (`--apply`) is not implemented yet.
 
 ## Usage
@@ -28,7 +29,7 @@ checksum before and after the run proves it was not changed.
 ### Dry run (default)
 
 Without `--apply`, lr2lc only reads the catalog and prints a summary: how
-many folders and photos it read, how many it would convert and how many it
+many folders, photos and collections it read, how many it would convert and how many it
 skips, with the reasons grouped. Nothing is written except the optional
 report file.
 
@@ -72,12 +73,18 @@ Writes a machine-readable report to `FILE` after the run:
     "read": 3,
     "converted": 2,
     "skipped": [{ "reason": "photo 7: original file is missing" }]
+  },
+  "collections": {
+    "read": 1,
+    "converted": 0,
+    "skipped": [{ "reason": "collection 4: smart collection is not converted" }]
   }
 }
 ```
 
 For each area, `read` equals `converted` plus the number of `skipped`
-entries. Reasons name the catalog id, never a file path.
+entries. Reasons name the catalog id, never a file path or a
+collection name.
 
 To protect the catalog and your files, `FILE` is checked before anything is
 read, and lr2lc stops with exit code 2 if:
