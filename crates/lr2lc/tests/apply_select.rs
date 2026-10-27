@@ -145,6 +145,23 @@ fn commands_of(fake: &FakeLightCraft, from: usize) -> Vec<(String, Value)> {
     fake.commands()[from..].to_vec()
 }
 
+/// The commands without album steps (P5b-3b): `album.*` commands and the
+/// `library.select` directly before `album.addPhotos` or
+/// `album.removePhotos` are removed.
+fn without_album_steps(commands: &[(String, Value)]) -> Vec<(String, Value)> {
+    let is_member_change =
+        |c: &(String, Value)| c.0 == "album.addPhotos" || c.0 == "album.removePhotos";
+    commands
+        .iter()
+        .enumerate()
+        .filter(|(i, (c, _))| {
+            !c.starts_with("album.")
+                && !(c == "library.select" && commands.get(i + 1).is_some_and(is_member_change))
+        })
+        .map(|(_, c)| c.clone())
+        .collect()
+}
+
 fn photo_commands(commands: &[(String, Value)]) -> usize {
     commands
         .iter()
@@ -183,7 +200,7 @@ fn apply_selects_each_photo_before_its_updates_and_counts_no_select() {
     let s = setup();
     let fake = FakeLightCraft::start(Config::new(&s.library));
     let (report, _) = s.ok(fake.port(), true);
-    let commands = commands_of(&fake, 0);
+    let commands = without_album_steps(&commands_of(&fake, 0));
     let updates = photo_commands(&commands);
     assert!(updates > 0, "the fixture must have something to set");
     assert!(select_count(&commands) > 0);
@@ -291,7 +308,7 @@ fn script_has_a_select_line_before_the_updates_of_each_new_photo() {
     let o = s.dry_script(fake.port(), &script);
     assert_eq!(o.status.code(), Some(0));
     assert_eq!(fake.connections(), 0, "a dry run must not connect");
-    let lines = script_lines(&script);
+    let lines = without_album_steps(&script_lines(&script));
     let selects = assert_script_selects(&lines);
     let updates = photo_commands(&lines);
     assert!(selects > 0 && selects <= updates);
