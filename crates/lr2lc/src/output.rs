@@ -14,7 +14,7 @@ pub struct ReportJson<'a> {
     pub dry_run: bool,
     pub catalog_unchanged: bool,
     pub folders: AreaJson<'a>,
-    pub photos: AreaJson<'a>,
+    pub photos: PhotosJson<'a>,
     pub collections: AreaJson<'a>,
     pub keywords: AreaJson<'a>,
     pub keyword_assignments: AreaJson<'a>,
@@ -29,6 +29,15 @@ pub struct AreaJson<'a> {
     pub read: usize,
     pub converted: usize,
     pub skipped: Vec<SkippedJson<'a>>,
+}
+
+/// Counts of photos, plus how many of the skipped photos are videos.
+#[derive(Debug, Serialize)]
+pub struct PhotosJson<'a> {
+    #[serde(flatten)]
+    pub area: AreaJson<'a>,
+    /// Skipped videos; they are also listed in `skipped`.
+    pub videos: usize,
 }
 
 /// One skipped element.
@@ -59,7 +68,10 @@ pub fn report_json(outcome: &Outcome) -> String {
         dry_run: true,
         catalog_unchanged: outcome.catalog_unchanged,
         folders: AreaJson::new(&outcome.folders),
-        photos: AreaJson::new(&outcome.photos),
+        photos: PhotosJson {
+            area: AreaJson::new(&outcome.photos),
+            videos: outcome.videos,
+        },
         collections: AreaJson::new(&outcome.collections),
         keywords: AreaJson::new(&outcome.keywords),
         keyword_assignments: AreaJson::new(&outcome.keyword_assignments),
@@ -94,6 +106,7 @@ pub fn summary(outcome: &Outcome) -> String {
             report.skipped_count()
         );
     }
+    let _ = writeln!(out, "videos: skipped {}", outcome.videos);
     for (area, report) in areas(outcome) {
         let groups = group_reasons(report);
         if groups.is_empty() {
@@ -207,6 +220,7 @@ mod tests {
             catalog_unchanged: true,
             folders,
             photos,
+            videos: 0,
             collections,
             keywords,
             keyword_assignments,
@@ -249,6 +263,23 @@ mod tests {
         assert!(lines.contains(&"skipped keyword synonyms:"));
         assert!(lines.contains(&"1 x keyword 9 is unknown"));
         assert!(lines.contains(&"ratings: 0: 0, 1: 0, 2: 0, 3: 1, 4: 0, 5: 0"));
+        assert!(lines.contains(&"videos: skipped 0"));
+    }
+
+    #[test]
+    fn videos_are_counted_in_summary_and_json() {
+        let mut o = outcome();
+        o.photos.read();
+        o.photos
+            .skipped("photo 5: video files are not supported by LightCraft");
+        o.videos = 1;
+        let lines: Vec<String> = summary(&o).lines().map(|l| l.trim().to_owned()).collect();
+        assert!(lines.contains(&"videos: skipped 1".to_owned()));
+        assert!(lines.contains(&"1 x video files are not supported by LightCraft".to_owned()));
+        let v: serde_json::Value = serde_json::from_str(&report_json(&o)).unwrap();
+        assert_eq!(v["photos"]["videos"], 1);
+        assert_eq!(v["photos"]["read"], 5);
+        assert_eq!(v["photos"]["skipped"].as_array().unwrap().len(), 4);
     }
 
     #[test]
@@ -284,6 +315,7 @@ mod tests {
         assert_eq!(v["dry_run"], true);
         assert_eq!(v["photos"]["read"], 4);
         assert_eq!(v["photos"]["converted"], 1);
+        assert_eq!(v["photos"]["videos"], 0);
         assert_eq!(
             v["photos"]["skipped"][0]["reason"],
             "photo 2: original file is missing"

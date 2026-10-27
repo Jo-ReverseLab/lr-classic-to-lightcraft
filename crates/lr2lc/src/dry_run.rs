@@ -3,7 +3,7 @@
 //! Nothing is written except the optional report file.
 
 use anyhow::{Context, Result, bail};
-use lr_reader::{Catalog, checksum, drop_missing_originals};
+use lr_reader::{Catalog, VIDEO_SKIP_REASON, checksum, drop_missing_originals};
 use model::{Folder, PathMappings, Photo, Rating, Report};
 use std::path::Path;
 
@@ -14,6 +14,9 @@ pub struct Outcome {
     pub catalog_unchanged: bool,
     pub folders: Report,
     pub photos: Report,
+    /// Photos skipped because they are videos; a subset of the skipped
+    /// photos.
+    pub videos: usize,
     pub collections: Report,
     pub keywords: Report,
     pub keyword_assignments: Report,
@@ -107,6 +110,7 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         catalog_version,
         catalog_unchanged: before == after,
         folders,
+        videos: count_videos(&photos),
         photos,
         collections,
         keywords,
@@ -114,6 +118,25 @@ pub fn run(path: &Path, mappings: &PathMappings) -> Result<Outcome> {
         keyword_synonyms,
         ratings,
     })
+}
+
+/// Counts the photos skipped as videos.
+fn count_videos(photos: &Report) -> usize {
+    photos
+        .skipped_items()
+        .iter()
+        .filter(|s| is_video_reason(&s.reason))
+        .count()
+}
+
+/// True for the reader's video reason `photo {id}: <VIDEO_SKIP_REASON>`.
+fn is_video_reason(reason: &str) -> bool {
+    reason
+        .strip_prefix("photo ")
+        .and_then(|rest| rest.split_once(": "))
+        .is_some_and(|(id, text)| {
+            !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) && text == VIDEO_SKIP_REASON
+        })
 }
 
 /// Counts photos per star rating; index `n` holds the photos with `n` stars.
@@ -142,5 +165,30 @@ mod tests {
     #[test]
     fn rating_counts_of_no_photos_are_zero() {
         assert_eq!(rating_counts(&[]), [0; 6]);
+    }
+
+    #[test]
+    fn only_video_reasons_are_counted_as_videos() {
+        let mut photos = Report::new();
+        for _ in 0..5 {
+            photos.read();
+        }
+        photos.skipped(format!("photo 2: {VIDEO_SKIP_REASON}"));
+        photos.skipped(format!("photo 4: {VIDEO_SKIP_REASON}"));
+        photos.skipped("photo 3: original file is missing");
+        photos.skipped("photo 9: virtual copy of photo 4 is not converted");
+        photos.converted();
+        assert_eq!(count_videos(&photos), 2);
+        assert_eq!(count_videos(&Report::new()), 0);
+    }
+
+    #[test]
+    fn video_reason_needs_a_photo_id() {
+        assert!(is_video_reason(&format!("photo 12: {VIDEO_SKIP_REASON}")));
+        assert!(!is_video_reason(&format!("photo x: {VIDEO_SKIP_REASON}")));
+        assert!(!is_video_reason(&format!("photo : {VIDEO_SKIP_REASON}")));
+        assert!(!is_video_reason(&format!("keyword 1: {VIDEO_SKIP_REASON}")));
+        assert!(!is_video_reason(VIDEO_SKIP_REASON));
+        assert!(!is_video_reason("photo 1: video files"));
     }
 }
