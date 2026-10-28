@@ -9,20 +9,43 @@ only to describe compatibility.
 
 ## Status
 
-Early development. The dry run reads folders and photos from a catalog,
-applies path mappings and checks that the original files exist. It also
-reads keywords with their hierarchy and synonyms, their assignments to
-photos, the star ratings, the pick/reject flags and the colour labels.
-It reads collections as albums and collection sets as album folders, with
-their members, folder stacks and the Quick Collection.
-With `--apply`, lr2lc writes keywords, photos (as references), ratings,
-flags, labels, titles, captions, copyright and creator, and the
-collections as albums and album folders with their members, and the
-stacks (always expanded) and the Quick Collection, into a
-LightCraft library through the control port of the running LightCraft app.
+Early development; the version is 0.x and the command line may still
+change. Not every part of a catalog is converted yet (see
+[Known limits](#known-limits)).
 
-Once the repository is on GitHub, CI runs formatting, lint and tests on
-Linux, macOS and Windows.
+What lr2lc reads from a catalog, read-only: folders and photos (with a check
+that the original files exist, after an optional path mapping), keywords with
+their hierarchy, synonyms and attributes and their assignments to photos, star
+ratings, pick/reject flags, colour labels, titles, captions, copyright and
+creator, collections as albums and collection sets as album folders (with
+their members), smart collections, folder stacks and the Quick Collection.
+
+What `--apply` writes into a LightCraft library, through the control port of
+the running LightCraft app: keywords, photos (as references to the existing
+files), ratings, flags, labels, titles, captions, copyright and creator,
+albums and album folders with their members, smart albums (only when the rule
+translates exactly), stacks (always written expanded) and the Quick
+Collection (only adding photos). Development settings are not converted yet.
+
+Without `--apply`, lr2lc only reports what it would do. Everything that is
+not converted is listed with a reason in the summary and in `report.json`.
+
+CI runs formatting, lint and tests on Linux, macOS and Windows.
+
+## Options
+
+| Option | Purpose |
+| --- | --- |
+| `--apply` | Write the LightCraft library (default: dry run); needs `--library` |
+| `--library DIR` | The LightCraft library to write; also used by the dry run to read the mapping file |
+| `--port N` | Control port of the running LightCraft app (default 7980) |
+| `--allow-xmp` | Write even if the library writes XMP sidecars next to the originals |
+| `--map OLD=NEW` | Replace a path prefix, repeatable |
+| `--label-set SET` | Names of the colour labels: `en`, `de`, `auto` or a JSON file |
+| `--report FILE` | Write `report.json` |
+| `--script FILE` | Write the planned commands as JSON lines |
+
+Each option is described below.
 
 ## Usage
 
@@ -369,10 +392,16 @@ line a JSON object with `"method":"engine.execute"`).
 lr2lc catalog.lrcat --library ~/Pictures/Photos.lightcraft --apply
 ```
 
+Before the first real run, try it on a throw-away or test library: start
+LightCraft with `--control <port>` (for example `--control 7980`) and a
+library you can delete, run lr2lc with `--apply` against it and look at the
+result. `--apply` changes the selection in LightCraft (see below), and the
+photos, keywords and albums it creates stay in the library.
+
 `--apply` needs `--library DIR`, the LightCraft library to write; without
 it lr2lc stops with exit code 2. LightCraft must be running with that
-library open and its control port enabled (`--port N`, default 7980; only
-`127.0.0.1` is contacted). lr2lc reads the catalog as in a dry run, then
+library open and its control port enabled (start the app with `--control N`;
+lr2lc uses `--port N`, default 7980, and contacts only `127.0.0.1`). lr2lc reads the catalog as in a dry run, then
 checks the app before it writes anything and stops with exit code 1 if:
 
 - the app runs a temporary in-memory session or has another library open;
@@ -549,6 +578,25 @@ After `--apply` the `writer` section has `smart_created`, `smart_known`,
 `smart_existing`, `smart_rules_changed`, `smart_no_longer_translatable`
 and `smart_skipped` (with `smart_skipped_by_code`). `collections.smart`
 counts the smart collections converted as smart albums.
+
+### Known limits
+
+- Videos are skipped (`video files are not supported by LightCraft`).
+- Virtual copies are skipped; so are their collection and stack memberships.
+- Smart collections become smart albums only when every rule translates
+  exactly, which currently means star-rating rules; all others are only
+  reported, with a code.
+- The collapsed or expanded state of stacks is only counted, not written;
+  stacks are always written expanded.
+- Development settings (the Lightroom edit state) are not converted yet.
+- A second run adds what is new and changes only what you did not change in
+  LightCraft; lr2lc does not yet compare the live LightCraft values with the
+  catalog, so a value you changed in LightCraft may be overwritten if the
+  same value also changed in Lightroom. Removals and renames are only
+  counted, never applied.
+- Windows is covered by the CI workflow but has not been tested by hand.
+- Only `127.0.0.1` is contacted; a LightCraft app on another machine is not
+  supported.
 
 ### Exit codes
 
