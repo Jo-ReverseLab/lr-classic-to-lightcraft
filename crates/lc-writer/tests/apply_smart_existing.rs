@@ -273,11 +273,14 @@ fn two_equal_smart_albums_are_reported_not_guessed() {
     assert!(!s.smart_skipped[0].reason.contains("Twin"));
     assert!(of(&commands, "album.createSmart").is_empty());
     assert_eq!(named(&fake, "Twin").len(), 2);
-    assert!(
-        state(&env)["collections"]
-            .as_object()
-            .is_none_or(|c| c.is_empty())
-    );
+    // The run stored nothing, so the mapping file may not exist at all.
+    if env.state_file.exists() {
+        assert!(
+            state(&env)["collections"]
+                .as_object()
+                .is_none_or(|c| c.is_empty())
+        );
+    }
 
     // Both still in Lightroom: two collections want two albums, and none of
     // them can tell which is which.
