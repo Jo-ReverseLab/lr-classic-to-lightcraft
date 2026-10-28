@@ -21,9 +21,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 const COLLECTIONS: i64 = small::COLLECTIONS;
-/// Small fixture: set 1 and albums 2, 3, 4 are converted; smart 5 and 6,
-/// quick 7 and 8 and unknown 9 are skipped.
-const COLLECTIONS_OK: i64 = 4;
+/// Small fixture: set 1, albums 2, 3, 4 and the quick collection 7 are
+/// converted; smart 5 and 6, quick 8 ("more than one") and unknown 9 are
+/// skipped.
+const COLLECTIONS_OK: i64 = 5;
 const COLLECTIONS_SKIPPED: i64 = COLLECTIONS - COLLECTIONS_OK;
 
 const PHOTOS_OK: i64 = small::PHOTOS - small::MISSING_PHOTO_IDS.len() as i64;
@@ -142,7 +143,7 @@ fn report_file_has_documented_structure_and_balance() {
     assert_eq!(v["catalog_unchanged"], true);
     check_area(&v, "folders", small::FOLDERS, small::FOLDERS, 0);
     check_area(&v, "photos", small::PHOTOS, PHOTOS_OK, PHOTOS_MISSING);
-    // Task P5b-3a: set 1 and albums 2..=4 are converted, the rest skipped.
+    // Task P5b-3a: set 1, albums 2..=4 and quick collection 7 are converted.
     check_area(
         &v,
         "collections",

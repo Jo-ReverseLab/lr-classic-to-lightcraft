@@ -87,7 +87,16 @@ fn edge_fixture_counts_and_balance() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_collection_catalog_with_files(dir.path()).unwrap();
     let (out, _err, v, _) = run(&cat);
-    check(&v, "collections", e::COLLECTIONS, e::CONVERTED, e::SKIPPED);
+    // Quick collection 14 is converted (13 in all), 15 is skipped. Its member
+    // (photo 2) has no original, so the member counts do not change.
+    check(
+        &v,
+        "collections",
+        e::COLLECTIONS,
+        e::CONVERTED + 1,
+        e::SKIPPED - 1,
+    );
+    assert_eq!(v["collections"]["quick"], 1);
     check(
         &v,
         "collection_members",
@@ -103,8 +112,8 @@ fn edge_fixture_counts_and_balance() {
         &format!(
             "collections: read {}, would convert {}, skipped {}",
             e::COLLECTIONS,
-            e::CONVERTED,
-            e::SKIPPED
+            e::CONVERTED + 1,
+            e::SKIPPED - 1
         )
     ));
     assert!(has_line(
@@ -125,20 +134,23 @@ fn small_fixture_counts_with_missing_originals() {
     let cat = write_small_catalog_with_files(dir.path()).unwrap();
     let (out, _err, v, _) = run(&cat);
     // Set 1 and albums 2, 3, 4 are converted.
-    check(&v, "collections", small::COLLECTIONS, 4, 5);
+    // The quick collection 7 is converted too, 8 is skipped.
+    check(&v, "collections", small::COLLECTIONS, 5, 4);
+    assert_eq!(v["collections"]["quick"], 1);
     assert_eq!(v["collections"]["albums"], 3);
     assert_eq!(v["collections"]["folders"], 1);
     assert_eq!(v["collections"]["duplicate_names"], 0);
     // Member rows: (2,1) (2,2) (3,3) (3,4) (4,5) (7,1) (8,6). Photos 2 and 3
-    // have no original (skipped), 7 and 8 are skipped collections.
-    check(&v, "collection_members", small::COLLECTION_IMAGES, 3, 4);
+    // have no original (skipped), (7,1) is a quick collection member
+    // (converted), 8 is a skipped collection.
+    check(&v, "collection_members", small::COLLECTION_IMAGES, 4, 3);
     assert!(has_line(
         &out,
-        "collections: read 9, would convert 4, skipped 5"
+        "collections: read 9, would convert 5, skipped 4"
     ));
     assert!(has_line(
         &out,
-        "collection members: read 7, would convert 3, skipped 4"
+        "collection members: read 7, would convert 4, skipped 3"
     ));
 }
 
@@ -170,7 +182,7 @@ fn members_of_photos_skipped_by_the_cli_are_skipped_members() {
             .iter()
             .filter(|r| r.contains("collection skipped"))
             .count(),
-        2
+        1
     );
 }
 
@@ -206,7 +218,6 @@ fn no_collection_name_in_any_output() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-6: the quick collection counts as converted, not skipped"]
 fn skipped_collection_reasons_are_listed_in_stdout() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_collection_catalog_with_files(dir.path()).unwrap();

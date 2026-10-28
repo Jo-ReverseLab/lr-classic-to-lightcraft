@@ -42,10 +42,11 @@ fn small_fixture_collections_are_converted_or_skipped() {
     let d = read(&small_fixture(dir.path()));
     assert_eq!(d.report.read_count() as i64, small::COLLECTIONS);
     assert_eq!(d.collections.len(), 4);
-    assert_eq!(d.report.skipped_count(), 5);
+    // Quick collection 7 is converted (not an album), 8 is skipped.
+    assert_eq!(d.report.skipped_count(), 4);
     assert_eq!(
         d.report.read_count(),
-        d.collections.len() + d.report.skipped_count()
+        d.collections.len() + 1 + d.report.skipped_count()
     );
     let folders: Vec<i64> = d
         .collections
@@ -83,11 +84,12 @@ fn small_fixture_parents_and_members() {
 fn small_fixture_member_balance() {
     let dir = tempfile::tempdir().unwrap();
     let d = read(&small_fixture(dir.path()));
-    let kept: usize = d.collections.iter().map(|c| c.members.len()).sum();
+    // Quick collection 7 keeps its member 1 (see quick_collection.rs).
+    let kept: usize = d.collections.iter().map(|c| c.members.len()).sum::<usize>() + 1;
     assert_eq!(d.members.read_count() as i64, small::COLLECTION_IMAGES);
-    assert_eq!(kept, 5);
-    // (7,1) and (8,6) belong to skipped collections.
-    assert_eq!(d.members.skipped_count(), 2);
+    assert_eq!(kept, 6);
+    // Only (8,6) belongs to a skipped collection.
+    assert_eq!(d.members.skipped_count(), 1);
     assert_eq!(d.members.read_count(), kept + d.members.skipped_count());
     assert!(
         reasons(&d.members)
