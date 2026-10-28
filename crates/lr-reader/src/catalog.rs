@@ -351,7 +351,11 @@ mod tests {
     #[test]
     fn opens_path_with_special_characters() {
         let dir = tempfile::tempdir().unwrap();
-        let sub = dir.path().join("a #b?c%20 ü");
+        // A real directory is needed here, so the name holds only characters
+        // every platform allows: `?` is illegal in a Windows file name. `?`
+        // and the other reserved marks are covered by
+        // `encodes_special_characters`, which needs no file system.
+        let sub = dir.path().join("a #b+c%20 ü");
         std::fs::create_dir(&sub).unwrap();
         let path = sub.join("cat & co.lrcat");
         lrcat_fixtures::write_small_catalog(&path).unwrap();
