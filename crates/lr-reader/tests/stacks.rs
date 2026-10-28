@@ -39,8 +39,6 @@
 //! - Reasons name ids, never anything else. The catalog stays unchanged.
 //!   Both reports balance: read == converted + skipped.
 
-#![cfg(any())]
-
 use lr_reader::{Catalog, StackData, checksum};
 use lrcat_fixtures::stack_edge as e;
 use model::{Photo, Report};

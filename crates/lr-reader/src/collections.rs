@@ -314,7 +314,7 @@ fn text(value: ValueRef<'_>) -> Option<&str> {
 }
 
 /// A row id stored as INTEGER or as a whole REAL.
-fn as_id(value: ValueRef<'_>) -> Option<i64> {
+pub(crate) fn as_id(value: ValueRef<'_>) -> Option<i64> {
     match value {
         ValueRef::Integer(n) => Some(n),
         ValueRef::Real(f) if f.fract() == 0.0 && f.abs() < 9.0e15 => Some(f as i64),
@@ -324,7 +324,7 @@ fn as_id(value: ValueRef<'_>) -> Option<i64> {
 
 /// True if a `systemOnly` value is anything other than zero or NULL.
 /// Numeric text such as `"0"` or `"0.0"` counts as zero.
-fn is_nonzero(value: ValueRef<'_>) -> bool {
+pub(crate) fn is_nonzero(value: ValueRef<'_>) -> bool {
     match value {
         ValueRef::Null => false,
         ValueRef::Integer(n) => n != 0,

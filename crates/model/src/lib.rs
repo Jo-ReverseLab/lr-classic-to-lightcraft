@@ -299,6 +299,19 @@ pub struct Collection {
     pub members: Vec<i64>,
 }
 
+/// A folder stack: photos grouped behind a top photo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stack {
+    /// Lightroom's `id_local` of the stack (provenance).
+    pub lightroom_id: i64,
+    /// `lightroom_id`s of the member photos, the top photo first. At least
+    /// two after reading.
+    pub members: Vec<i64>,
+    /// Whether the stack is collapsed in Lightroom. Only reported, never
+    /// written (stacks are written expanded).
+    pub collapsed: bool,
+}
+
 /// An element that could not be converted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Skipped {
