@@ -1,4 +1,4 @@
-//! Acceptance tests for captions in the CLI dry run (task P5b-7).
+//! Acceptance tests for captions in the CLI dry run.
 //!
 //! Fixture: `lrcat_fixtures::write_caption_catalog_with_files` (17 converted
 //! photos, 3 skipped; 3 converted photos carry a caption, see

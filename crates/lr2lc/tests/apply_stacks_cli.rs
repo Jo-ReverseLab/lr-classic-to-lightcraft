@@ -1,4 +1,4 @@
-//! CLI acceptance tests for writing stacks (task P5b-5), with the generator
+//! CLI acceptance tests for writing stacks, with the generator
 //! fixture `stack_edge`, against the stateful fake LightCraft.
 //!
 //! `report.json`, section `writer`:

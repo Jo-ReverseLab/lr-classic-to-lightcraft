@@ -1,4 +1,4 @@
-//! Acceptance tests for pick/reject counts in the CLI dry run (task P5b-1).
+//! Acceptance tests for pick/reject counts in the CLI dry run.
 //!
 //! Expected behaviour of `lr2lc <CATALOG> [--report FILE]` on the flag
 //! fixture (`lrcat_fixtures::write_flag_catalog_with_files`, counts in

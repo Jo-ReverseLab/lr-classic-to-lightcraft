@@ -1,5 +1,4 @@
-//! CLI acceptance tests for writing smart collections as smart albums (task
-//! P5b-4b), with the generator fixture
+//! CLI acceptance tests for writing smart collections as smart albums, with the generator fixture
 //! `write_smart_translate_catalog_with_files`, against the stateful fake
 //! LightCraft.
 //!
@@ -161,7 +160,7 @@ fn dry_run_counts_translatable_collections_as_converted_and_writes_nothing() {
         .iter()
         .map(|s| s["reason"].as_str().unwrap())
         .collect();
-    // 25 (P5b-4a) + 3 new smart collections - 3 that now translate.
+    // 25 + 3 new smart collections - 3 that now translate.
     // Collections 101, 201, 202 and 203 are not skipped any more.
     for id in t::TRANSLATABLE {
         assert!(

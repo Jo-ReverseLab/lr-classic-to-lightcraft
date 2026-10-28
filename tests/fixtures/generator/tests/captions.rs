@@ -1,4 +1,4 @@
-//! Checks of the caption fixture itself (task P5b-7).
+//! Checks of the caption fixture itself.
 
 use lrcat_fixtures::caption_edge as e;
 use lrcat_fixtures::write_caption_catalog_with_files;

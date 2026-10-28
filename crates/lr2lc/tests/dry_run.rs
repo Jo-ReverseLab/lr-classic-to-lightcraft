@@ -1,4 +1,4 @@
-//! Acceptance tests for the CLI dry run (task P4-5).
+//! Acceptance tests for the CLI dry run.
 //!
 //! Expected behaviour of `lr2lc [OPTIONS] <CATALOG>`:
 //! - Options: `--map OLD=NEW` (repeatable, invalid -> exit 2), `--report FILE`
@@ -6,7 +6,7 @@
 //!   (needs `--library`; without it: exit 2, nothing read or written), `-h`, `-V`.
 //! - stdout contains a line `folders: read N, would convert N, skipped N`, a
 //!   line `photos: read N, would convert N, skipped N`, a line
-//!   `collections: read N, would convert N, skipped N` (P5b-3a: sets and
+//!   `collections: read N, would convert N, skipped N` (sets and
 //!   plain collections are converted, the rest is skipped), and the words
 //!   "dry run".
 //! - report.json: `{"tool_version", "catalog_version", "dry_run": true,
@@ -141,7 +141,7 @@ fn report_file_has_documented_structure_and_balance() {
     assert_eq!(v["catalog_unchanged"], true);
     check_area(&v, "folders", small::FOLDERS, small::FOLDERS, 0);
     check_area(&v, "photos", small::PHOTOS, PHOTOS_OK, PHOTOS_MISSING);
-    // Task P5b-3a: set 1, albums 2..=4 and quick collection 7 are converted.
+    // Set 1, albums 2..=4 and quick collection 7 are converted.
     check_area(
         &v,
         "collections",
@@ -382,7 +382,7 @@ fn skipped_reasons_in_report_do_not_name_paths() {
     }
 }
 
-// --- Empty mapping target (task P4-9) ---------------------------------------
+// --- Empty mapping target ---------------------------------------
 // The CLI rejects an empty or whitespace-only new prefix: exit 2, stderr
 // mentions "empty", nothing is read or written. The library keeps allowing it.
 

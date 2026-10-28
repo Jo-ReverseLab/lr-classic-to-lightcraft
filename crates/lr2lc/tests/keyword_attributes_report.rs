@@ -1,4 +1,4 @@
-//! Acceptance tests for keyword attribute counts in the CLI dry run (P5-7).
+//! Acceptance tests for keyword attribute counts in the CLI dry run.
 //!
 //! Expected behaviour of `lr2lc <CATALOG> [--report FILE]`:
 //! - report.json: the `keywords` object keeps `read`, `converted`,

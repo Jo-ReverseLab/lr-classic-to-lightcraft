@@ -1,5 +1,4 @@
-//! Acceptance tests for `--apply` and the writer options of the CLI (task
-//! P5-4c), against a stateful fake LightCraft (`tests/support`).
+//! Acceptance tests for `--apply` and the writer options of the CLI, against a stateful fake LightCraft (`tests/support`).
 //!
 //! New options: `--library <folder>`, `--port <n>` (default 7980),
 //! `--allow-xmp`, `--script <file>`.
@@ -366,7 +365,7 @@ fn script_in_a_dry_run_contains_valid_json_lines() {
         .lines()
         .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("{l}: {e}")))
         .collect();
-    // Album commands and the selects before them (P5b-3b) are checked in
+    // Album commands and the selects before them are checked in
     // `apply_albums_cli.rs`; the numbers of this line do not count them.
     let command = |l: &serde_json::Value| l["params"]["command"].as_str().unwrap_or("").to_string();
     let is_album = |l: &serde_json::Value| command(l).starts_with("album.");
@@ -384,7 +383,7 @@ fn script_in_a_dry_run_contains_valid_json_lines() {
         })
         .map(|(_, l)| l.clone())
         .collect();
-    // `library.select` lines (P5-4e) are not updates: one per photo with
+    // `library.select` lines are not updates: one per photo with
     // updates, before them.
     let selects = lines
         .iter()

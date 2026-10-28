@@ -1,4 +1,4 @@
-//! Acceptance tests for collections in the CLI dry run (task P5b-3a).
+//! Acceptance tests for collections in the CLI dry run.
 //!
 //! Fixtures: `lrcat_fixtures::write_collection_catalog_with_files`
 //! (see `lrcat_fixtures::collection_edge`) and the small fixture.

@@ -1,8 +1,6 @@
 //! CLI acceptance test for a written smart album whose Lightroom collection
-//! still exists but can no longer be translated (task K-6 part 2). Writer
+//! still exists but can no longer be translated. Writer
 //! API: see `crates/lc-writer/tests/smart_untranslatable.rs`.
-//!
-//! STATUS: RED ON PURPOSE until the report key exists.
 //!
 //! Setup: run once with `--apply` (writes the smart albums of the
 //! `smart_translate` fixture), then change the rules of collection 101 in

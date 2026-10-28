@@ -1,4 +1,4 @@
-//! Acceptance tests for catalog detection by file identity (task P4-12).
+//! Acceptance tests for catalog detection by file identity.
 //!
 //! A hard link to the catalog has a different path but is the same file.
 //! `--report` pointing at it must be refused with the reason "catalog"

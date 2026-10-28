@@ -1,4 +1,4 @@
-//! Checks of the rights fixture itself (task P5b-7b).
+//! Checks of the rights fixture itself.
 
 use lrcat_fixtures::rights_edge as e;
 use lrcat_fixtures::{write_copyright_only_catalog_with_files, write_rights_catalog_with_files};

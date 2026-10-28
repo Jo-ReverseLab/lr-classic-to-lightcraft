@@ -1,4 +1,4 @@
-//! Acceptance test for task P4-11: a catalog without a table the readers
+//! Acceptance test: a catalog without a table the readers
 //! need ends the run with exit 1 (read error), names the table on stderr
 //! and writes no report.
 
@@ -25,7 +25,7 @@ fn missing_collection_table_exits_1_without_report() {
 
 #[test]
 fn missing_synonym_table_exits_1_without_report() {
-    // P5-3: the synonym table is required too.
+    // the synonym table is required too.
     let dir = tempfile::tempdir().unwrap();
     let cat = dir.path().join("damaged.lrcat");
     lrcat_fixtures::write_small_catalog_without(&cat, "AgLibraryKeywordSynonym", None).unwrap();

@@ -1,4 +1,4 @@
-//! CLI acceptance tests for the quick collection (task P5b-6), against the
+//! CLI acceptance tests for the quick collection, against the
 //! stateful fake LightCraft.
 //!
 //! Fixtures: `quick_edge` (one quick collection with three converted

@@ -1538,7 +1538,7 @@ pub enum RuleDamage {
 }
 
 /// Makes the rules of smart collection `id` unreadable while the
-/// collection row itself stays (task K-7).
+/// collection row itself stays.
 pub fn break_smart_rules(path: &Path, id: i64, damage: RuleDamage) -> Result<()> {
     let c = Connection::open(path)?;
     match damage {

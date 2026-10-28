@@ -1,4 +1,4 @@
-//! Checks of the title fixture itself (task P5b-7c).
+//! Checks of the title fixture itself.
 
 use flate2::read::ZlibDecoder;
 use lrcat_fixtures::title_edge::{self as e, Variant};

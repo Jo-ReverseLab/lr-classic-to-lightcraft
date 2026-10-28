@@ -1,4 +1,4 @@
-//! Checks of the stack fixture itself (task P5b-5).
+//! Checks of the stack fixture itself.
 
 use lrcat_fixtures::stack_edge as e;
 use lrcat_fixtures::{drop_stack_tables, write_stack_catalog_with_files};

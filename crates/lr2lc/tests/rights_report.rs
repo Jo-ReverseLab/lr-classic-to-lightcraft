@@ -1,4 +1,4 @@
-//! Acceptance tests for copyright and creator in the CLI dry run (task P5b-7b).
+//! Acceptance tests for copyright and creator in the CLI dry run.
 //!
 //! Fixtures: `lrcat_fixtures::write_rights_catalog_with_files` (17 converted
 //! photos, 3 skipped) and `write_copyright_only_catalog_with_files`; see

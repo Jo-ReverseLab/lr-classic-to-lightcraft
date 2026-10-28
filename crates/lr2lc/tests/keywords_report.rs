@@ -1,4 +1,4 @@
-//! Acceptance tests for keywords and ratings in the CLI dry run (task P5-2).
+//! Acceptance tests for keywords and ratings in the CLI dry run.
 //!
 //! Fixture: `write_keyword_edge_catalog_with_files` (small fixture plus
 //! keyword edge cases; photos 2, 3 and 20 have missing originals).
@@ -270,6 +270,6 @@ fn ratings_sum_matches_photos_on_small_fixture() {
     assert_eq!(r.len(), 6);
     let sum: i64 = r.values().map(|x| x.as_i64().unwrap()).sum();
     assert_eq!(sum, PHOTOS_OK);
-    // One keyword has an empty name and is skipped (see the P5-1 reader test).
+    // One keyword has an empty name and is skipped (see the keyword reader test).
     check_area(&v, "keywords", small::KEYWORDS, small::KEYWORDS - 1, 1);
 }

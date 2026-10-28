@@ -1,4 +1,4 @@
-//! Acceptance tests for stacks in the CLI dry run (task P5b-5).
+//! Acceptance tests for stacks in the CLI dry run.
 //!
 //! Fixtures: `lrcat_fixtures::write_stack_catalog_with_files` (see
 //! `lrcat_fixtures::stack_edge`), the video fixture (no stack tables) and the

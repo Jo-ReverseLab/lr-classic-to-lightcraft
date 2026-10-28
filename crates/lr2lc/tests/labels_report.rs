@@ -1,4 +1,4 @@
-//! Acceptance tests for colour labels in the CLI dry run (task P5b-2).
+//! Acceptance tests for colour labels in the CLI dry run.
 //!
 //! Fixtures: `lrcat_fixtures::write_label_catalog_with_files` with the
 //! variants of `lrcat_fixtures::label_edge::Fixture` (17 converted photos in

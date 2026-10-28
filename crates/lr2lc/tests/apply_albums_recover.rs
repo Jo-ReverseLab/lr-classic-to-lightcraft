@@ -1,5 +1,5 @@
 //! CLI acceptance tests for recovering albums after the mapping file was lost
-//! (task P5b-3c, principle 5), with the generator fixture `collection_edge`,
+//! (principle 5), with the generator fixture `collection_edge`,
 //! against the stateful fake LightCraft.
 //!
 //! After a first complete run and deleting the mapping file, a second run

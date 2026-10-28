@@ -1,4 +1,4 @@
-//! CLI acceptance tests for the selection before photo commands (task P5-4e),
+//! CLI acceptance tests for the selection before photo commands,
 //! against the stateful fake LightCraft, which behaves like the real app
 //! (photo commands fail with `no photos selected` while nothing is selected).
 //!
@@ -142,9 +142,9 @@ fn commands_of(fake: &FakeLightCraft, from: usize) -> Vec<(String, Value)> {
     fake.commands()[from..].to_vec()
 }
 
-/// The commands without album steps (P5b-3b): `album.*` commands and the
+/// The commands without album steps: `album.*` commands and the
 /// `library.select` directly before `album.addPhotos`,
-/// `album.removePhotos` or `album.toggleTarget` (P5b-6) are removed.
+/// `album.removePhotos` or `album.toggleTarget` are removed.
 fn without_album_steps(commands: &[(String, Value)]) -> Vec<(String, Value)> {
     let is_member_change = |c: &(String, Value)| {
         c.0 == "album.addPhotos" || c.0 == "album.removePhotos" || c.0 == "album.toggleTarget"

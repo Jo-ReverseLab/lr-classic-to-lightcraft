@@ -1,4 +1,4 @@
-//! Acceptance tests for stable identity in the CLI (task P5-8).
+//! Acceptance tests for stable identity in the CLI.
 //!
 //! The dry run never prints or stores global ids (they are internal
 //! identity, not report content): neither stdout nor report.json contains

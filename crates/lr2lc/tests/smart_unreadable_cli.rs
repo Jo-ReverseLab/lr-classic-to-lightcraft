@@ -1,12 +1,7 @@
-//! CLI acceptance test (task K-7): a smart collection that was written
+//! CLI acceptance test: a smart collection that was written
 //! earlier and whose rules are now UNREADABLE (not merely untranslatable)
 //! counts as `smart_no_longer_translatable`, not as removed. It still
 //! exists in Lightroom.
-//!
-//! STATUS: RED ON PURPOSE until the reader delivers
-//! `CollectionData.smart_ids: BTreeSet<i64>` (ids of all smart collections,
-//! see `crates/lr-reader/tests/smart_ids.rs`) and `dry_run.rs` uses it for
-//! `WriteInput.smart_untranslatable_ids`.
 //!
 //! Setup: first run with `--apply` writes the smart albums of the
 //! `smart_translate` fixture; then the rules of collection 101 are

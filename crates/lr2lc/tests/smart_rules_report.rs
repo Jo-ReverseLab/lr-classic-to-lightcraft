@@ -1,10 +1,7 @@
-//! Acceptance tests for smart collections in the CLI dry run (task P5b-4a),
+//! Acceptance tests for smart collections in the CLI dry run,
 //! on `lrcat_fixtures::write_smart_catalog_with_files`.
 //!
-//! STATUS: RED until the reader reads smart rules (see
-//! `crates/lr-reader/tests/smart_rules.rs` for the API and the reasons).
-//!
-//! Nothing is translated in P5b-4a, so every smart collection is skipped:
+//! At this stage nothing is translated, so every smart collection is skipped:
 //! - `collections`: read == converted + skipped; the smart collections are
 //!   all in `skipped` (25 reasons containing "smart collection").
 //! - Reasons name the first criterion (`rating`, `pick`, ...) or say
@@ -61,7 +58,7 @@ fn smart_collections_are_skipped_and_balance() {
         a["read"].as_i64().unwrap(),
         a["converted"].as_i64().unwrap() + skipped
     );
-    // Collection 101 (rating >= 3) is the one that P5b-4b translates; it is
+    // Collection 101 (rating >= 3) is the one that is translated; it is
     // then converted and no longer skipped.
     let n = smart_reasons(&v).len() as i64;
     assert!(n == e::SMART_TOTAL || n == e::SMART_TOTAL - 1, "{n}");

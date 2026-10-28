@@ -1,4 +1,4 @@
-//! Checks of the colour label fixtures themselves (task P5b-2).
+//! Checks of the colour label fixtures themselves.
 
 use lrcat_fixtures::label_edge::{self, Fixture};
 use lrcat_fixtures::write_label_catalog_with_files;

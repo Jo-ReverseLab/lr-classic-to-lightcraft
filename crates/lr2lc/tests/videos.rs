@@ -1,6 +1,5 @@
-//! Acceptance tests for videos in the CLI dry run (task P5-6, user decision
-//! F-013: LightCraft cannot read videos, so they are skipped with their own
-//! reason and counted separately).
+//! Acceptance tests for videos in the CLI dry run (LightCraft cannot read videos, so
+//! they are skipped with their own reason and counted separately).
 //!
 //! Expected behaviour of `lr2lc <CATALOG> [--report FILE]` on the video
 //! fixture (`lrcat_fixtures::write_video_catalog_with_files`):

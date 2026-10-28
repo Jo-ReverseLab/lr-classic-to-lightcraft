@@ -1,8 +1,6 @@
-//! Acceptance tests for keyword synonyms in the CLI dry run (task P5-3,
-//! mapping F-009: synonyms are counted, not converted).
+//! Acceptance tests for keyword synonyms in the CLI dry run (synonyms are counted, not converted).
 //!
-//! Expected behaviour of `lr2lc <CATALOG> [--report FILE]` (user decision:
-//! synonyms are converted with their keyword):
+//! Expected behaviour of `lr2lc <CATALOG> [--report FILE]` (synonyms are converted with their keyword):
 //! - report.json gains `keyword_synonyms` (`{"read", "converted", "skipped":
 //!   [{"reason"}]}`, read == converted + len(skipped)).
 //! - Keyword edge catalog: read 6, converted 2 (both on keyword 3), skipped 4:

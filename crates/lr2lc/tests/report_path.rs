@@ -1,4 +1,4 @@
-//! Acceptance tests for the `--report` target (task P4-5, attempt 2).
+//! Acceptance tests for the `--report` target.
 //!
 //! `--report FILE` must never destroy the catalog or any other user file:
 //! - FILE is the catalog or its `-wal`/`-journal`/`-shm` companion (also via

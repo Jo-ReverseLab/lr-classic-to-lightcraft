@@ -1,4 +1,4 @@
-//! Acceptance tests for titles in the CLI dry run (task P5b-7c).
+//! Acceptance tests for titles in the CLI dry run.
 //!
 //! Fixture: `lrcat_fixtures::write_title_catalog_with_files` (17 converted
 //! photos, 3 skipped), see `lrcat_fixtures::title_edge`.

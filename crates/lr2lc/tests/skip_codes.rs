@@ -1,6 +1,6 @@
-//! Acceptance tests for machine-readable skip codes (task P4-15).
+//! Acceptance tests for machine-readable skip codes.
 //!
-//! Background: the evaluation of the Mac check must not depend on free
+//! Background: the evaluation of a run must not depend on free
 //! texts. Every skipped (or incomplete) entry in `report.json` gets a stable
 //! snake_case `code` next to the unchanged free text `reason`.
 //!

@@ -1,4 +1,4 @@
-//! Checks of the flag fixture itself (task P5b-1).
+//! Checks of the flag fixture itself.
 
 use lrcat_fixtures::{flag_edge, write_flag_catalog_with_files};
 use rusqlite::{Connection, OpenFlags, types::Value};

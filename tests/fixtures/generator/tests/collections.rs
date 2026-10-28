@@ -1,4 +1,4 @@
-//! Checks of the collection fixture itself (task P5b-3a).
+//! Checks of the collection fixture itself.
 
 use lrcat_fixtures::collection_edge as e;
 use lrcat_fixtures::write_collection_catalog_with_files;

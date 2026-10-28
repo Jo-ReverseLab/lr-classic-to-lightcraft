@@ -1,5 +1,4 @@
-//! CLI acceptance tests for the photo balance in EVERY run (task P5-4d,
-//! extension), against the stateful fake LightCraft.
+//! CLI acceptance tests for the photo balance in EVERY run, against the stateful fake LightCraft.
 //!
 //! `writer` of an applied run has `photos_imported`, `photos_existing`,
 //! `photos_updated`, `photos_unchanged` and `photos_skipped` (a list):
@@ -170,7 +169,7 @@ fn planned_line(text: &str) -> (u64, u64, u64) {
         .filter(|p| !p.is_empty())
         .map(|p| p.parse().unwrap())
         .collect();
-    // P5b-3b appends the numbers of albums and album members to the line.
+    // The album step appends the numbers of albums and album members to the line.
     assert!(numbers.len() >= 3, "line must start as it did: {line}");
     (numbers[0], numbers[1], numbers[2])
 }
