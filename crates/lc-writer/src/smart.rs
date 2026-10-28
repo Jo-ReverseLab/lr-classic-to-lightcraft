@@ -22,8 +22,8 @@ const MAX_STARS: f64 = 5.0;
 /// `album.createSmart`: `{"ruleSet": {"match": "all" | "any", "rules":
 /// [{"field", "op", "value"}]}}`, rules in stored order.
 ///
-/// `Err` is the reason why the whole collection is not translated. `value2`
-/// and units are ignored.
+/// `Err` is the reason why the whole collection is not translated. A rule
+/// with a second value or units is not translated (strict reading).
 pub fn translate(rules: &model::SmartRules) -> Result<Value, String> {
     translate_coded(rules).map_err(|(_, why)| why)
 }
@@ -66,7 +66,7 @@ pub fn translate_coded(rules: &model::SmartRules) -> Result<Value, (SkipCode, St
 
 /// One rule, or `None` if it has no exact equivalent.
 fn translate_rule(rule: &SmartRule) -> Option<Value> {
-    if rule.criterion != "rating" {
+    if rule.criterion != "rating" || rule.value2.is_some() || rule.units.is_some() {
         return None;
     }
     let op = match rule.operation.as_str() {
@@ -97,10 +97,8 @@ pub fn convertible(
             .iter()
             .any(|c| c.lightroom_id == parent && c.kind == CollectionKind::Folder)
     {
-        // The acceptance table books every reason of a smart collection
-        // that the writer cannot create under `smart_untranslatable`.
         return Err((
-            SkipCode::SmartUntranslatable,
+            SkipCode::ParentNotSet,
             format!("its parent collection {parent} is not a converted collection set"),
         ));
     }
@@ -158,6 +156,16 @@ mod tests {
         assert!(
             translate_rule(&rule("rating", ">=", Some(SmartValue::Text("3".into())))).is_none()
         );
+    }
+
+    #[test]
+    fn a_second_value_or_units_spoil_a_rating_rule() {
+        let mut r = stars(">=", 3.0);
+        r.value2 = Some(SmartValue::Number(0.0));
+        assert!(translate_rule(&r).is_none());
+        let mut r = stars(">=", 3.0);
+        r.units = Some(String::new());
+        assert!(translate_rule(&r).is_none());
     }
 
     #[test]
@@ -233,7 +241,7 @@ mod tests {
         assert!(convertible(&smart(Some(1)), &cols).is_ok());
         for parent in [2, 3] {
             let (code, why) = convertible(&smart(Some(parent)), &cols).unwrap_err();
-            assert_eq!(code, SkipCode::SmartUntranslatable);
+            assert_eq!(code, SkipCode::ParentNotSet);
             assert!(why.contains("parent") && why.contains(&parent.to_string()));
         }
         let bad = SmartCollection {
