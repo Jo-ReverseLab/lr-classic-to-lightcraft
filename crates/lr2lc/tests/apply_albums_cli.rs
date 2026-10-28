@@ -135,7 +135,9 @@ fn n(v: &Value) -> usize {
 fn assert_balance(r: &Run) {
     let w = &r.report["writer"];
     assert_eq!(
-        n(&r.report["collections"]["converted"]),
+        // The quick collection (0 or 1) is converted but is no album.
+        n(&r.report["collections"]["converted"])
+            - r.report["collections"]["quick"].as_u64().unwrap_or(0) as usize,
         n(&w["folders_created"])
             + n(&w["albums_created"])
             + n(&w["collections_known"])
