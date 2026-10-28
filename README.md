@@ -62,14 +62,14 @@ Collections become albums and collection sets become album folders, with
 their nesting and names unchanged. Web, print and other kinds of
 collections are skipped with a reason. Smart collections become smart
 albums (see [Smart collections](#smart-collections)) only when every rule
-translates exactly; otherwise they are skipped. A collection whose parent is missing,
-skipped, not a collection set or part of a cycle is skipped, and so is
-everything below it. Empty collections are kept. Members keep Lightroom's
-order; a member is skipped if its photo is not converted (for example a
-missing original or a virtual copy), if it repeats a photo already in the
-collection, if its collection is skipped, or if it belongs to a collection
-set, which holds no photos. Collection names never appear in the output or
-in the report.
+translates exactly; otherwise they are skipped. A collection whose parent
+is missing, skipped, not a collection set or part of a cycle is skipped,
+and so is everything below it. Empty collections are kept. Members keep
+Lightroom's order; a member is skipped if its photo is not converted (for
+example a missing original or a virtual copy), if it repeats a photo
+already in the collection, if its collection is skipped, or if it belongs
+to a collection set, which holds no photos. Collection names never appear
+in the output or in the report.
 
 The first system collection (`systemOnly` not zero) by id is the Quick
 Collection. It counts as converted (`collections.quick` is 1, and
@@ -325,10 +325,11 @@ LightCraft N` follows.
 `report.json` then has a `writer` section with `planned` (`keywords`,
 `photos`, `updates`, `photos_updated`, `photos_unchanged`, `folders`,
 `albums`, `members_added`, `members_removed`, `collections_known`,
-`collections_removed`, `stacks`, `stacks_known`, `stack_members_removed`), `photos_skipped`,
-`keywords_skipped`, `members_skipped` and `stacks_skipped` (each a list of
-`{"reason": ...}`; `members_skipped` holds album members whose photo is
-not converted or has no global id).
+`collections_removed`, `stacks`, `stacks_known`,
+`stack_members_removed`), `photos_skipped`, `keywords_skipped`,
+`members_skipped` and `stacks_skipped` (each a list of `{"reason": ...}`;
+`members_skipped` holds album members whose photo is not converted or has
+no global id).
 `planned.photos` counts the imports, `photos_updated` the photos from the
 mapping file with at least one update and `photos_unchanged` those that
 need no command. Every converted photo counts once:
@@ -522,9 +523,12 @@ every rule translates exactly; lr2lc never writes half a rule set.
 Currently that holds only for `rating` with `==` or `>=` and a whole
 number from 0 to 5, without a second value or units, combined with "all"
 or "any", and placed at top level or below a collection set
-(LightCraft nests smart albums only in folders). Any other smart collection is skipped (`smart_untranslatable`,
-`smart_no_criteria` or `smart_unreadable`); the reason names the first
-criterion without an exact equivalent, never a value.
+(LightCraft nests smart albums only in folders). Any other smart
+collection is skipped (`smart_untranslatable`, `smart_no_criteria` or
+`smart_unreadable`). The reason never contains a value: it names the first
+criterion without an exact equivalent; if all criteria translate but the
+combine mode does not, it reads "the combine mode has no exact LightCraft
+equivalent"; without any criteria it reads "no criteria".
 
 With `--apply`, smart albums are written as the very last step. The
 mapping file keeps them, so a second run creates nothing again. Rules
