@@ -1,4 +1,4 @@
-//! Acceptance tests for keyword attributes (task P5-7).
+//! Acceptance tests for keyword attributes.
 //!
 //! Expected API:
 //! - `model::Keyword` gets public `bool` fields `include_on_export`,

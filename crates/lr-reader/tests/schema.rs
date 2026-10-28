@@ -1,4 +1,4 @@
-//! Acceptance tests for the schema check in `Catalog::open` (task P4-11).
+//! Acceptance tests for the schema check in `Catalog::open`.
 //!
 //! Expected API: `ReadError::MissingSchema { table: String, column:
 //! Option<String> }`, returned by `Catalog::open` right after the version
@@ -115,7 +115,7 @@ fn error_comes_from_open_not_from_reading() {
 
 #[test]
 fn missing_synonym_table_is_reported() {
-    // P5-3: AgLibraryKeywordSynonym (columns id_local, keyword) is required.
+    // AgLibraryKeywordSynonym (columns id_local, keyword) is required.
     let dir = tempfile::tempdir().unwrap();
     let path = damaged(dir.path(), "AgLibraryKeywordSynonym", None);
     expect_missing(&path, "AgLibraryKeywordSynonym", None);
@@ -130,7 +130,7 @@ fn missing_synonym_keyword_column_is_reported() {
 
 #[test]
 fn missing_pick_column_is_reported() {
-    // P5b-1: Adobe_images.pick is required.
+    // Adobe_images.pick is required.
     let dir = tempfile::tempdir().unwrap();
     let path = damaged(dir.path(), "Adobe_images", Some("pick"));
     expect_missing(&path, "Adobe_images", Some("pick"));
@@ -138,7 +138,7 @@ fn missing_pick_column_is_reported() {
 
 #[test]
 fn missing_color_labels_column_is_reported() {
-    // P5b-2: Adobe_images.colorLabels is required.
+    // Adobe_images.colorLabels is required.
     let dir = tempfile::tempdir().unwrap();
     let path = damaged(dir.path(), "Adobe_images", Some("colorLabels"));
     expect_missing(&path, "Adobe_images", Some("colorLabels"));
@@ -146,7 +146,7 @@ fn missing_color_labels_column_is_reported() {
 
 #[test]
 fn missing_iptc_table_is_reported() {
-    // P5b-7: AgLibraryIPTC (columns image, caption) is required.
+    // AgLibraryIPTC (columns image, caption) is required.
     let dir = tempfile::tempdir().unwrap();
     let path = damaged(dir.path(), "AgLibraryIPTC", None);
     expect_missing(&path, "AgLibraryIPTC", None);
@@ -168,7 +168,7 @@ fn missing_iptc_image_column_is_reported() {
 
 #[test]
 fn missing_iptc_copyright_column_is_reported() {
-    // P5b-7b: AgLibraryIPTC.copyright is required (the creator tables are not).
+    // AgLibraryIPTC.copyright is required (the creator tables are not).
     let dir = tempfile::tempdir().unwrap();
     let path = damaged(dir.path(), "AgLibraryIPTC", Some("copyright"));
     expect_missing(&path, "AgLibraryIPTC", Some("copyright"));
@@ -176,7 +176,7 @@ fn missing_iptc_copyright_column_is_reported() {
 
 #[test]
 fn missing_xmp_column_or_metadata_table_is_not_an_error() {
-    // P5b-7c: Adobe_AdditionalMetadata.xmp is optional (titles become None).
+    // Adobe_AdditionalMetadata.xmp is optional (titles become None).
     let dir = tempfile::tempdir().unwrap();
     let t = dir.path().join("no-table.lrcat");
     lrcat_fixtures::write_small_catalog_without(&t, "Adobe_AdditionalMetadata", None).unwrap();

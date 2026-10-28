@@ -1,6 +1,5 @@
-//! Acceptance tests for reading collections from the small fixture
-//! (task P5b-3a; replaces the P4-10 tests, which expected every collection
-//! to be skipped).
+//! Acceptance tests for reading collections from the small fixture.
+//!
 //!
 //! Expected API (see `collection_edge.rs` for the full rules):
 //! `Catalog::collection_data(&self, photos: &[model::Photo])

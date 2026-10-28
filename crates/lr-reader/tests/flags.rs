@@ -1,4 +1,4 @@
-//! Acceptance tests for reading pick/reject flags (task P5b-1).
+//! Acceptance tests for reading pick/reject flags.
 //!
 //! Expected behaviour (needs `model::Flag`, `model::Photo::flag`):
 //! - `Catalog::photos` maps `Adobe_images.pick`: 1 = `Flag::Pick`,
@@ -7,7 +7,7 @@
 //!   `Flag::None`; the photo is still returned (not skipped) and nothing is
 //!   added to the photo report's skipped list. The count of such "unknown
 //!   flag" photos is made visible by the CLI (see the CLI tests); how the
-//!   reader hands it over is left to the developer.
+//!   reader hands it over is an implementation detail.
 //! - The flag of a skipped photo (virtual copy) is not read; the skipped list
 //!   and `report.read()` count stay as before (read = every row).
 //! - `AgLibraryCollectionImage.pick` is never read: every row of that table

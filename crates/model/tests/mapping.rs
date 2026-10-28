@@ -1,4 +1,4 @@
-//! Acceptance tests for path mapping (principle 6, task P4-4).
+//! Acceptance tests for path mapping (principle 6).
 //!
 //! # Expected API (crate `model`, module `mapping`, re-exported at the root)
 //!

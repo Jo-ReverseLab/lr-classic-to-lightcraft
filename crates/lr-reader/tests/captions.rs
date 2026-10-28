@@ -1,4 +1,4 @@
-//! Acceptance tests for reading captions (task P5b-7).
+//! Acceptance tests for reading captions.
 //!
 //! API under test: `Photo::caption: Option<String>`, filled by
 //! `Catalog::photo_data` from `AgLibraryIPTC.caption` (joined by `image`):

@@ -1,8 +1,4 @@
-//! Acceptance tests for boolean values in smart collection rules (task
-//! K-5 rest), on `lrcat_fixtures::write_smart_bool_catalog`.
-//!
-//! STATUS: RED ON PURPOSE. The file does not compile until
-//! `model::SmartValue::Bool` exists.
+//! Acceptance tests for boolean values in smart collection rules, on `lrcat_fixtures::write_smart_bool_catalog`.
 //!
 //! API under test:
 //!

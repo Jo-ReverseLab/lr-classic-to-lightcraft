@@ -1,4 +1,4 @@
-//! Acceptance tests for reading titles (task P5b-7c).
+//! Acceptance tests for reading titles.
 //!
 //! API under test: `Photo::title` (`Option<String>`), filled by
 //! `Catalog::photo_data`, and `PhotoData::title_unreadable: Vec<i64>`

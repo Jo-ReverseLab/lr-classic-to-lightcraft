@@ -1,4 +1,4 @@
-//! Acceptance tests for reading folder stacks into the model (task P5b-5),
+//! Acceptance tests for reading folder stacks into the model,
 //! on the stack fixture (`lrcat_fixtures::stack_edge`).
 //!
 //! ```ignore
@@ -31,7 +31,7 @@
 //! - No member at position 1: the first by position is the top, counted in
 //!   `no_top`.
 //! - `collapsed` counts converted stacks whose `collapsed` is not 0; it is
-//!   not part of the stacks' identity or reasons (F-019 point 9).
+//!   not part of the stacks' identity or reasons.
 //! - Missing stack tables: no stacks, no error, empty reports.
 //! - Reasons name ids, never anything else. The catalog stays unchanged.
 //!   Both reports balance: read == converted + skipped.

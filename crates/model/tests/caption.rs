@@ -1,4 +1,4 @@
-//! Acceptance tests for captions in the model (task P5b-7).
+//! Acceptance tests for captions in the model.
 //!
 //! API under test: `model::Photo` gets `pub caption: Option<String>`.
 //! `Photo::new` sets `None`; `with_caption(self, impl Into<String>) -> Self`

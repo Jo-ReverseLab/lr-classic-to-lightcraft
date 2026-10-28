@@ -1,4 +1,4 @@
-//! Acceptance tests for reading keywords (task P5-1).
+//! Acceptance tests for reading keywords.
 //!
 //! Expected API (new file `crates/lr-reader/src/keywords.rs`, re-exported
 //! from `lib.rs`):

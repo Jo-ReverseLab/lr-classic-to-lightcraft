@@ -1,4 +1,4 @@
-//! Acceptance tests for reading colour labels (task P5b-2).
+//! Acceptance tests for reading colour labels.
 //!
 //! API under test: `PhotoData::color_labels: Vec<(i64, String)>`, filled by
 //! `Catalog::photo_data`:

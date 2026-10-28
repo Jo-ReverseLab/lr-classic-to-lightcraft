@@ -1,5 +1,4 @@
-//! Acceptance tests for skipping videos in the reader (task P5-6, user
-//! decision F-013: LightCraft cannot read videos).
+//! Acceptance tests for skipping videos in the reader (LightCraft cannot read videos).
 //!
 //! Expected behaviour (no new API; `Catalog::photos` changes):
 //! - A photo is a video if `Adobe_images.fileFormat` is `VIDEO`, or if the

@@ -206,7 +206,7 @@ fn keyword_new_rejects_empty_path_and_empty_parts() {
     ));
 }
 
-// --- Stable identity (task P5-8) -------------------------------------------
+// --- Stable identity -------------------------------------------
 // Expected API: `Photo::global_id` and `Keyword::global_id`, both
 // `Option<String>`, `None` after `new`; `with_global_id(impl Into<String>)`
 // sets it; the derived `PartialEq` compares it.

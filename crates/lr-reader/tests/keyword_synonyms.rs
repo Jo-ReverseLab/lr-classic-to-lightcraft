@@ -1,12 +1,12 @@
-//! Acceptance tests for reading keyword synonyms (task P5-3; user decision:
-//! synonyms are converted together with their keyword).
+//! Acceptance tests for reading keyword synonyms (synonyms are converted together
+//! with their keyword).
 //!
 //! Expected API changes (no new `Catalog` method):
 //! - `model::Keyword` gets a public field `pub synonyms: Vec<String>`
 //!   (empty by default, set by `Keyword::new`). The tests read the field; how
-//!   `PartialEq` treats it is up to the developer (existing keyword tests
+//!   `PartialEq` treats it is an implementation detail (existing keyword tests
 //!   compare against `Keyword::new(path)`, so those expectations may need to
-//!   compare `path()` instead - the test author will adapt them on request).
+//!   compare `path()` instead).
 //! - `lr_reader::KeywordData` gets `pub synonym_report: model::Report`.
 //!   `Catalog::keywords` fills `KeywordData::keywords[i].synonyms` with the
 //!   texts of that keyword's `AgLibraryKeywordSynonym` rows, ordered by

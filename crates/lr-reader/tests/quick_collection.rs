@@ -1,4 +1,4 @@
-//! Acceptance tests for reading the quick collection (task P5b-6).
+//! Acceptance tests for reading the quick collection.
 //!
 //! API: `CollectionData.quick: Option<model::QuickCollection>` with
 //! `QuickCollection { lightroom_id: i64, members: Vec<i64> }`.

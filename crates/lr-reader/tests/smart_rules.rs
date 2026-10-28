@@ -1,9 +1,5 @@
-//! Acceptance tests for reading smart collection rules (task P5b-4a), on the
+//! Acceptance tests for reading smart collection rules, on the
 //! smart fixture (`lrcat_fixtures::smart_edge`, `write_smart_catalog`).
-//!
-//! STATUS: RED ON PURPOSE. These tests fix the API before the developer
-//! implements it; the file does not compile until `model::SmartRules` and
-//! `lr_reader::parse_smart_rules` exist.
 //!
 //! Expected API:
 //!

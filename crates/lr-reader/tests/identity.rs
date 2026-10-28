@@ -1,4 +1,4 @@
-//! Acceptance tests for stable identity (task P5-8, principle 5).
+//! Acceptance tests for stable identity (principle 5).
 //!
 //! Expected API:
 //! - `model::Photo` and `model::Keyword` get `pub global_id: Option<String>`.

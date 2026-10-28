@@ -1,5 +1,5 @@
 //! Acceptance tests for reading collections and collection sets into the
-//! model (task P5b-3a), on the collection fixture
+//! model, on the collection fixture
 //! (`lrcat_fixtures::collection_edge`).
 //!
 //! Expected API:
@@ -26,7 +26,7 @@
 //! - `…library.collection` with `systemOnly` 0/NULL (INTEGER or REAL): Album.
 //!   `…library.group`: Folder. Smart: skipped ("smart collection").
 //!   `systemOnly` != 0 (REAL 1.0 or INTEGER 1): the first one by id is the
-//!   quick collection (converted, `CollectionData.quick`, see P5b-6); the
+//!   quick collection (converted, `CollectionData.quick`); the
 //!   others are skipped ("more than one quick collection").
 //!   Any other `creationId`: skipped, reason names the kind, not the name.
 //! - parent NULL: top level. Parent is a converted Folder: kept. Parent

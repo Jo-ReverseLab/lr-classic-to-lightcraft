@@ -1,4 +1,4 @@
-//! Acceptance tests for reading photos (task P4-3).
+//! Acceptance tests for reading photos.
 //!
 //! Expected API:
 //! - `Catalog::photos(&self, report: &mut model::Report)

@@ -1,4 +1,4 @@
-//! Acceptance tests for the pick/reject flag in the model (task P5b-1).
+//! Acceptance tests for the pick/reject flag in the model.
 //!
 //! Expected API:
 //! - `pub enum Flag { None, Pick, Reject }` in `model`, deriving at least

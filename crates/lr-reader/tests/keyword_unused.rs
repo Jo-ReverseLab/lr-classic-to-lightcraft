@@ -1,4 +1,4 @@
-//! Counter-check for P5-7: keywords without any converted assignment stay in
+//! Counter-check: keywords without any converted assignment stay in
 //! the reader result. Uses only the existing API, so it runs today.
 
 use lr_reader::Catalog;

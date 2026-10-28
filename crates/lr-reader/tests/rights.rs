@@ -1,4 +1,4 @@
-//! Acceptance tests for reading copyright and creator (task P5b-7b).
+//! Acceptance tests for reading copyright and creator.
 //!
 //! API under test: `Photo::copyright` and `Photo::creator` (`Option<String>`),
 //! filled by `Catalog::photo_data`:

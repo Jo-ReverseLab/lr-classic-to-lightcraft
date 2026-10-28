@@ -1,6 +1,4 @@
-//! Acceptance test for the id list of ALL smart collections (task K-7).
-//!
-//! STATUS: RED ON PURPOSE (does not compile until the field exists).
+//! Acceptance test for the id list of ALL smart collections.
 //!
 //! API: `CollectionData` gets one more field
 //!

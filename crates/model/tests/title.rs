@@ -1,4 +1,4 @@
-//! Acceptance tests for the title in the model (task P5b-7c).
+//! Acceptance tests for the title in the model.
 //!
 //! API under test: `model::Photo` gets `pub title: Option<String>`.
 //! `Photo::new` sets it to `None`; `with_title` (`impl Into<String>`) sets

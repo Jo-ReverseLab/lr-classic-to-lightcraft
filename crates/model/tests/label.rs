@@ -1,4 +1,4 @@
-//! Acceptance tests for colour labels in the model (task P5b-2).
+//! Acceptance tests for colour labels in the model.
 //!
 //! API under test in `model`:
 //! - `pub enum ColorLabel { Red, Yellow, Green, Blue, Purple }`, deriving at

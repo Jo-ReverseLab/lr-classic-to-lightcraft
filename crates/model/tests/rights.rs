@@ -1,4 +1,4 @@
-//! Acceptance tests for copyright and creator in the model (task P5b-7b).
+//! Acceptance tests for copyright and creator in the model.
 //!
 //! API under test: `model::Photo` gets `pub copyright: Option<String>` and
 //! `pub creator: Option<String>`. `Photo::new` sets both to `None`;

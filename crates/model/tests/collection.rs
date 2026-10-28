@@ -1,4 +1,4 @@
-//! Acceptance tests for the collection model (task P5b-3a).
+//! Acceptance tests for the collection model.
 //!
 //! Expected API (new in `crates/model/src/lib.rs`):
 //!
