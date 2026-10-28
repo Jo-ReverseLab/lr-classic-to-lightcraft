@@ -19,7 +19,8 @@ use std::time::Duration;
 
 /// The commands that only read or only change the selection; everything else
 /// may change the library.
-pub const READ_COMMANDS: [&str; 7] = [
+pub const READ_COMMANDS: [&str; 8] = [
+    "photo.inspect",
     "library.select",
     "catalog.query",
     "albums.list",
@@ -136,6 +137,43 @@ impl SeedAlbum {
     }
 }
 
+/// A photo the fake library already has at start, with its field values as
+/// `catalog.query` summaries and `photo.inspect` report them. Its file path
+/// is `/Users/example/Pictures/seed-<id>.jpg`.
+#[derive(Clone, Debug)]
+pub struct SeedPhoto {
+    pub id: i64,
+    pub rating: i64,
+    /// `none`, `pick` or `reject`.
+    pub flag: String,
+    pub label: Option<String>,
+    /// An empty LightCraft title is `""`.
+    pub title: String,
+    /// Keyword path texts (`a|b`).
+    pub keywords: Vec<String>,
+    pub caption: Option<String>,
+    pub copyright: Option<String>,
+    pub creator: Option<String>,
+}
+
+impl SeedPhoto {
+    /// A photo as LightCraft creates it on import: no stars, no flag, no
+    /// label, empty texts, no keywords.
+    pub fn plain(id: i64) -> SeedPhoto {
+        SeedPhoto {
+            id,
+            rating: 0,
+            flag: "none".to_string(),
+            label: None,
+            title: String::new(),
+            keywords: Vec::new(),
+            caption: None,
+            copyright: None,
+            creator: None,
+        }
+    }
+}
+
 /// An error reply for a command, optionally only for one photo id.
 #[derive(Clone, Debug)]
 pub struct Failure {
@@ -185,6 +223,14 @@ pub struct Config {
     /// `album.create`, `album.createSmart` and `library.import` apply, then
     /// answer `saved in memory but not written to disk` (no id).
     pub not_saved_creates: bool,
+    /// Photos the library has at start (read side: `catalog.query`
+    /// summaries and `photo.inspect`).
+    pub seed_photos: Vec<SeedPhoto>,
+    /// Members of seeded albums: `(index in `albums`, photo id)`. The photo
+    /// id need not exist (a member the mapping file does not know).
+    pub seed_members: Vec<(usize, i64)>,
+    /// `catalog.query` summaries carry `rating` as a text, not a number.
+    pub summary_broken: bool,
 }
 
 impl Config {
@@ -209,6 +255,9 @@ impl Config {
             albums_no_id: false,
             import_no_id: false,
             not_saved_creates: false,
+            seed_photos: Vec::new(),
+            seed_members: Vec::new(),
+            summary_broken: false,
         }
     }
 }
@@ -226,6 +275,8 @@ struct Library {
     /// file path -> photo id
     photos: BTreeMap<String, i64>,
     ratings: BTreeMap<i64, i64>,
+    /// Field values of the seeded photos, by photo id.
+    seeds: BTreeMap<i64, SeedPhoto>,
     /// The ids of the selected photos (empty: nothing selected).
     selection: Vec<i64>,
     /// album id -> album
@@ -284,6 +335,22 @@ impl FakeLightCraft {
                     quick: parent.is_none() && !seed.folder && seed.name == "Quick Collection",
                 },
             );
+        }
+        for seed in &config.seed_photos {
+            library.photos.insert(
+                format!("/Users/example/Pictures/seed-{}.jpg", seed.id),
+                seed.id,
+            );
+            library.seeds.insert(seed.id, seed.clone());
+        }
+        for (index, photo) in &config.seed_members {
+            let id = 5001 + *index as u64;
+            library
+                .albums
+                .get_mut(&id)
+                .expect("seed album")
+                .photos
+                .push(*photo);
         }
         let shared = Arc::new(Shared {
             config,
@@ -521,7 +588,37 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             Ok(json!({}))
         }
         "album.toggleTarget" => toggle_target(config, lib, params),
-        "catalog.query" => catalog_query(lib, params),
+        "catalog.query" => catalog_query(config, lib, params),
+        "photo.inspect" => {
+            let id = params["ids"][0]
+                .as_i64()
+                .or_else(|| params["id"].as_i64())
+                .ok_or("id is missing")?;
+            if !lib.photos.values().any(|p| *p == id) {
+                return Err("unknown photo id".into());
+            }
+            let seed = lib
+                .seeds
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| SeedPhoto::plain(id));
+            let albums: Vec<u64> = lib
+                .albums
+                .values()
+                .filter(|a| a.photos.contains(&id))
+                .map(|a| a.id)
+                .collect();
+            Ok(json!({
+                "id": id,
+                "albums": albums,
+                "meta": {
+                    "caption": seed.caption,
+                    "copyright": seed.copyright,
+                    "creator": seed.creator,
+                    "keywords": seed.keywords,
+                },
+            }))
+        }
         "stack.group" => stack_group(config, lib, params),
         "keyword.list" => Ok(keyword_list(&config.keyword_list, &lib.keywords)),
         "keyword.create" => {
@@ -998,7 +1095,7 @@ fn toggle_target(config: &Config, lib: &mut Library, params: &Value) -> Result<V
 /// fileName}]}`; `filter.album` lists the members of that album, sorted by
 /// photo id (not by insertion order, like the real app); without it all
 /// photos. The default `limit` is 200.
-fn catalog_query(lib: &Library, params: &Value) -> Result<Value, String> {
+fn catalog_query(config: &Config, lib: &Library, params: &Value) -> Result<Value, String> {
     let mut ids: Vec<i64> = match params["filter"].get("album") {
         Some(v) => {
             let id = v.as_u64().ok_or("album must be a number")?;
@@ -1014,7 +1111,24 @@ fn catalog_query(lib: &Library, params: &Value) -> Result<Value, String> {
         .iter()
         .skip(offset)
         .take(limit)
-        .map(|id| json!({"id": id, "fileName": format!("{id}.jpg")}))
+        .map(|id| {
+            let mut v = json!({"id": id, "fileName": format!("{id}.jpg")});
+            let seed = lib
+                .seeds
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| SeedPhoto::plain(*id));
+            v["rating"] = json!(seed.rating);
+            v["flag"] = json!(seed.flag);
+            v["label"] = json!(seed.label);
+            v["title"] = json!(seed.title);
+            v["keywords"] = json!(seed.keywords);
+            v["deleted"] = json!(false);
+            if config.summary_broken {
+                v["rating"] = json!("many");
+            }
+            v
+        })
         .collect();
     Ok(json!({"total": ids.len(), "photos": photos}))
 }
