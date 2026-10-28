@@ -23,6 +23,7 @@ pub enum WriterJson {
         photos_skipped: Vec<ReasonJson>,
         keywords_skipped: Vec<ReasonJson>,
         members_skipped: Vec<ReasonJson>,
+        stacks_skipped: Vec<ReasonJson>,
     },
     /// `--apply`: what was sent.
     Applied {
@@ -48,6 +49,11 @@ pub enum WriterJson {
         collections_skipped: Vec<ReasonJson>,
         collections_incomplete: Vec<ReasonJson>,
         members_skipped: Vec<ReasonJson>,
+        stacks_grouped: usize,
+        stacks_known: usize,
+        stack_members_removed: usize,
+        stacks_skipped: Vec<ReasonJson>,
+        stacks_incomplete: Vec<ReasonJson>,
         /// Why the run stopped early; absent after a complete run.
         #[serde(skip_serializing_if = "Option::is_none")]
         aborted: Option<String>,
@@ -58,7 +64,9 @@ pub enum WriterJson {
 /// without updates. Every converted photo counts once in `photos`,
 /// `photos_updated`, `photos_unchanged` or the writer's skipped photos;
 /// every converted collection once in `folders`, `albums` or
-/// `collections_known`. `members_added` and `members_removed` count photos.
+/// `collections_known`; every converted stack once in `stacks`,
+/// `stacks_known` or the writer's skipped stacks. `members_added` and
+/// `members_removed` count photos.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct PlannedJson {
     pub keywords: usize,
@@ -71,6 +79,12 @@ pub struct PlannedJson {
     pub members_added: usize,
     pub members_removed: usize,
     pub collections_known: usize,
+    /// Stacks to group (new or changed).
+    pub stacks: usize,
+    pub stacks_known: usize,
+    /// Recorded stack members that left their stack in Lightroom; only
+    /// counted.
+    pub stack_members_removed: usize,
 }
 
 /// The writer input from the converted elements of the catalog.
@@ -80,6 +94,7 @@ pub fn input(converted: &Converted) -> WriteInput {
         keywords: converted.keywords.clone(),
         photo_keywords: converted.photo_keywords.clone(),
         collections: converted.collections.clone(),
+        stacks: converted.stacks.clone(),
     }
 }
 
@@ -98,6 +113,8 @@ pub fn planned(plan: &Plan) -> PlannedJson {
         photos_updated: plan.photos_updated(),
         photos_unchanged: plan.photos_unchanged(),
         collections_known: plan.collections_known(),
+        stacks_known: plan.stacks_known(),
+        stack_members_removed: plan.stack_members_removed(),
         ..PlannedJson::default()
     };
     for step in &plan.steps {
@@ -114,6 +131,7 @@ pub fn planned(plan: &Plan) -> PlannedJson {
             }
             Step::AddMembers { gids, .. } => out.members_added += gids.len(),
             Step::RemoveMembers { gids, .. } => out.members_removed += gids.len(),
+            Step::GroupStack { .. } => out.stacks += 1,
         }
     }
     out
@@ -126,6 +144,7 @@ pub fn planned_json(plan: &Plan) -> WriterJson {
         photos_skipped: reasons(plan.photo_skips()),
         keywords_skipped: reasons(plan.keyword_skips()),
         members_skipped: reasons(plan.member_skips()),
+        stacks_skipped: reasons(plan.stack_skips()),
     }
 }
 
@@ -155,6 +174,11 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         collections_skipped: reasons(&s.collections_skipped),
         collections_incomplete: reasons(&s.collections_incomplete),
         members_skipped: reasons(&s.members_skipped),
+        stacks_grouped: s.stacks_grouped,
+        stacks_known: s.stacks_known,
+        stack_members_removed: s.stack_members_removed,
+        stacks_skipped: reasons(&s.stacks_skipped),
+        stacks_incomplete: reasons(&s.stacks_incomplete),
         aborted: aborted.map(WriteError::short_reason),
     }
 }
@@ -184,6 +208,12 @@ pub fn planned_summary(plan: &Plan) -> String {
         "writer would skip album members",
         plan.member_skips(),
     );
+    let _ = writeln!(
+        out,
+        "writer stacks: to group {}, already in the library {}, members left in LightCraft {}",
+        p.stacks, p.stacks_known, p.stack_members_removed
+    );
+    skipped_lines(&mut out, "writer would skip stacks", plan.stack_skips());
     out
 }
 
@@ -222,6 +252,16 @@ pub fn applied_summary(s: &ApplySummary) -> String {
         s.collections_incomplete.len(),
         s.members_skipped.len()
     );
+    let _ = writeln!(
+        out,
+        "written stacks: grouped {}, already in the library {}, skipped {}, incomplete {}, \
+         members left in LightCraft {}",
+        s.stacks_grouped,
+        s.stacks_known,
+        s.stacks_skipped.len(),
+        s.stacks_incomplete.len(),
+        s.stack_members_removed
+    );
     if s.collections_renamed + s.collections_moved + s.collections_removed > 0 {
         let _ = writeln!(
             out,
@@ -240,6 +280,8 @@ pub fn applied_summary(s: &ApplySummary) -> String {
         &s.collections_incomplete,
     );
     skipped_lines(&mut out, "skipped album members", &s.members_skipped);
+    skipped_lines(&mut out, "skipped stacks", &s.stacks_skipped);
+    skipped_lines(&mut out, "incomplete stacks", &s.stacks_incomplete);
     out
 }
 
@@ -337,10 +379,12 @@ mod tests {
                 "planned": {"keywords": 0, "photos": 0, "updates": 0,
                         "photos_updated": 0, "photos_unchanged": 0,
                         "folders": 0, "albums": 0, "members_added": 0,
-                        "members_removed": 0, "collections_known": 0},
+                        "members_removed": 0, "collections_known": 0,
+                        "stacks": 0, "stacks_known": 0, "stack_members_removed": 0},
                 "photos_skipped": [],
                 "keywords_skipped": [],
                 "members_skipped": [],
+                "stacks_skipped": [],
             })
         );
         let s = ApplySummary {
@@ -365,6 +409,9 @@ mod tests {
             "collections_renamed",
             "collections_moved",
             "collections_removed",
+            "stacks_grouped",
+            "stacks_known",
+            "stack_members_removed",
         ] {
             assert_eq!(v[key], 0, "{key}");
         }
@@ -372,6 +419,8 @@ mod tests {
             "collections_skipped",
             "collections_incomplete",
             "members_skipped",
+            "stacks_skipped",
+            "stacks_incomplete",
         ] {
             assert!(v[key].is_array(), "{key}");
         }

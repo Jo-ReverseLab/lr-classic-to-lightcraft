@@ -3,8 +3,9 @@
 //!
 //! A stack keeps the members that are converted photos and not already in
 //! an earlier stack (smaller id). With fewer than two such members it is
-//! skipped. Members are ordered top first: the photo at `position` 1, then
-//! by `position`, then by row id.
+//! skipped. Members are ordered by `position` (Lightroom puts the top photo
+//! at 1), then by row id; the first kept member is the top. A stack whose
+//! top is not at position 1 is counted in [`StackData::no_top`].
 //!
 //! Both tables are optional: without them the catalog has no stacks.
 //! Reasons name ids only.
@@ -27,8 +28,8 @@ pub struct StackData {
     pub members: Report,
     /// Converted stacks that are collapsed in Lightroom.
     pub collapsed: usize,
-    /// Converted stacks without a kept member at position 1; their first
-    /// member by position is the top.
+    /// Converted stacks whose top (first kept member by position) is not
+    /// at position 1.
     pub no_top: usize,
 }
 
@@ -93,14 +94,14 @@ impl Catalog {
         rows.collect::<Result<_, _>>().map_err(ReadError::Query)
     }
 
-    /// Every member row, ordered by stack, position 1 first, then by
-    /// position (NULL last), then by row id.
+    /// Every member row, ordered by stack, then by position (NULL last),
+    /// then by row id.
     fn stack_member_rows(&self) -> Result<Vec<MemberRow>, ReadError> {
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT id_local, stack, image, position = 1 FROM AgLibraryFolderStackImage \
-                 ORDER BY stack, position = 1 DESC, position IS NULL, position, id_local",
+                 ORDER BY stack, position IS NULL, position, id_local",
             )
             .map_err(ReadError::Query)?;
         let rows = stmt

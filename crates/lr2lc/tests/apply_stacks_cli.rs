@@ -18,8 +18,6 @@
 //! every stack is grouped with `collapsed: false` (also stack 2, which is
 //! collapsed in the catalog), and no command removes, ungroups or splits.
 
-#![cfg(any())]
-
 use lrcat_fixtures::stack_edge as e;
 use lrcat_fixtures::write_stack_catalog_with_files;
 use serde_json::Value;
