@@ -336,6 +336,9 @@ member change has a `library.select` line of exactly its photos before it.
 Stack commands come between the photo and the album commands: for each
 stack a `library.select` of its photos with the top one active, then
 `stack.group` with `ids`, `top` and `collapsed: false`.
+The Quick Collection is not in the script: `album.toggleTarget` removes
+photos that are all in it already, and only `--apply` reads its members
+first.
 The same protection as for `--report` applies:
 the catalog and its companion files are refused, and an existing `FILE` is
 only overwritten if it is empty or an earlier lr2lc script (every non-empty

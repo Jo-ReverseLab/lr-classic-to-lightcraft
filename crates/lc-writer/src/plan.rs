@@ -106,7 +106,8 @@ pub enum Step {
     },
     /// Add photos to the Quick Collection (`album.setTarget {id: null}`,
     /// then, for the photos it does not hold yet, `library.select` and
-    /// `album.toggleTarget`).
+    /// `album.toggleTarget`). Only run by `--apply`; never part of a
+    /// script, since the members must be read first.
     QuickAdd {
         /// Lightroom global ids of the photos, in Lightroom order.
         gids: Vec<String>,
@@ -255,7 +256,8 @@ impl Plan {
     /// id, or the placeholder `lr:<global id>` for a photo that is imported
     /// by this plan. Member changes are preceded by a `library.select` of
     /// exactly their photos and name the album by its LightCraft id or the
-    /// placeholder `lr-collection:<Lightroom id>`.
+    /// placeholder `lr-collection:<Lightroom id>`. The Quick Collection
+    /// step is not part of the script (see [`Step::QuickAdd`]).
     pub fn to_script(&self, state: &State) -> String {
         let mut out = String::new();
         let mut push = |command: &str, params: Value| {
@@ -305,12 +307,11 @@ impl Plan {
                     let album = album_ref(state, *collection_id);
                     push(command, json!({"id": album, "ids": ids}));
                 }
-                Step::QuickAdd { gids } => {
-                    selected = None;
-                    let ids: Vec<Value> = gids.iter().map(|g| photo_ref(state, g)).collect();
-                    push("album.setTarget", json!({"id": null}));
-                    push("library.select", members_select_params(&ids));
-                    push("album.toggleTarget", json!({"ids": ids}));
+                Step::QuickAdd { .. } => {
+                    // Left out: `album.toggleTarget` removes photos that are
+                    // all in the Quick Collection already, and a script
+                    // cannot read its members first. Only `--apply` writes
+                    // it.
                 }
                 Step::Update {
                     global_id,
@@ -779,6 +780,17 @@ mod tests {
 
     fn kw(parts: &[&str]) -> Keyword {
         Keyword::new(parts.iter().map(|s| s.to_string()).collect()).unwrap()
+    }
+
+    #[test]
+    fn the_quick_step_is_not_in_the_script() {
+        let p = Plan {
+            steps: vec![Step::QuickAdd {
+                gids: vec!["g1".into()],
+            }],
+            ..Plan::default()
+        };
+        assert_eq!(p.to_script(&State::default()), "");
     }
 
     #[test]
