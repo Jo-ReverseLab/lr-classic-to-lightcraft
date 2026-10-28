@@ -96,7 +96,6 @@ fn check_area(v: &serde_json::Value, area: &str, read: i64, conv: i64, skipped: 
 }
 
 #[test]
-#[ignore = "waiting for P5b-6: the quick collection counts as converted, not skipped"]
 fn dry_run_exits_zero_and_prints_counts() {
     let (dir, cat) = with_files();
     let cwd = tempfile::tempdir().unwrap();
@@ -126,7 +125,6 @@ fn dry_run_exits_zero_and_prints_counts() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-6: the quick collection counts as converted, not skipped"]
 fn report_file_has_documented_structure_and_balance() {
     let (dir, cat) = with_files();
     let cwd = tempfile::tempdir().unwrap();

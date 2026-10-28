@@ -82,7 +82,6 @@ fn check(v: &Value, area: &str, read: i64, converted: i64, skipped: i64) {
 }
 
 #[test]
-#[ignore = "waiting for P5b-6: the quick collection counts as converted, not skipped"]
 fn edge_fixture_counts_and_balance() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_collection_catalog_with_files(dir.path()).unwrap();
@@ -128,7 +127,6 @@ fn edge_fixture_counts_and_balance() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-6: the quick collection counts as converted, not skipped"]
 fn small_fixture_counts_with_missing_originals() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_small_catalog_with_files(dir.path()).unwrap();
@@ -155,7 +153,6 @@ fn small_fixture_counts_with_missing_originals() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-6: the quick collection counts as converted, not skipped"]
 fn members_of_photos_skipped_by_the_cli_are_skipped_members() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_small_catalog_with_files(dir.path()).unwrap();

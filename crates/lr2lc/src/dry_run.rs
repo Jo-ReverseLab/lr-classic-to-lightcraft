@@ -6,7 +6,8 @@ use crate::labels::{self, LabelCounts, LabelMode};
 use anyhow::{Context, Result, bail};
 use lr_reader::{Catalog, KeywordData, VIDEO_SKIP_REASON, checksum, drop_missing_originals};
 use model::{
-    Collection, CollectionKind, Flag, Folder, Keyword, PathMappings, Photo, Rating, Report, Stack,
+    Collection, CollectionKind, Flag, Folder, Keyword, PathMappings, Photo, QuickCollection,
+    Rating, Report, Stack,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -72,6 +73,8 @@ pub struct Converted {
     pub collections: Vec<Collection>,
     /// Converted stacks, ascending by Lightroom id.
     pub stacks: Vec<Stack>,
+    /// The converted Quick Collection.
+    pub quick: Option<QuickCollection>,
 }
 
 /// Counts over the converted stacks.
@@ -92,6 +95,8 @@ pub struct CollectionCounts {
     /// Collections that repeat the exact name of an earlier converted
     /// sibling below the same parent (two equal names count as 1).
     pub duplicate_names: usize,
+    /// 1 if a Quick Collection was converted, else 0.
+    pub quick: usize,
 }
 
 impl CollectionCounts {
@@ -252,7 +257,10 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
             folders,
             photos,
             collection_data.report,
-            CollectionCounts::count(&collection_data.collections),
+            CollectionCounts {
+                quick: usize::from(collection_data.quick.is_some()),
+                ..CollectionCounts::count(&collection_data.collections)
+            },
             collection_data.members,
             (
                 stack_data.report,
@@ -283,6 +291,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
                 photo_keywords: data.assignments,
                 collections: collection_data.collections,
                 stacks: stack_data.stacks,
+                quick: collection_data.quick,
             },
         )
     };
@@ -455,6 +464,7 @@ mod tests {
                 albums: 6,
                 folders: 1,
                 duplicate_names: 3,
+                quick: 0,
             }
         );
         assert_eq!(CollectionCounts::count(&[]), CollectionCounts::default());

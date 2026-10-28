@@ -234,7 +234,7 @@ fn classify(
 ) -> Result<CollectionKind, String> {
     if system_only {
         return Err(format!(
-            "collection {id}: more than one quick collection, only the first is converted"
+            "collection {id}: more than one quick collection; not converted"
         ));
     }
     match creation_id {
@@ -415,10 +415,7 @@ mod tests {
         for creation in [Some(PLAIN), Some(SET), Some(SMART), None] {
             assert_eq!(
                 classify(8, creation, true),
-                Err(
-                    "collection 8: more than one quick collection, only the first is converted"
-                        .into()
-                )
+                Err("collection 8: more than one quick collection; not converted".into())
             );
         }
     }

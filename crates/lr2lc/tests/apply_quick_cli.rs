@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! CLI acceptance tests for the quick collection (task P5b-6), against the
 //! stateful fake LightCraft.
 //!

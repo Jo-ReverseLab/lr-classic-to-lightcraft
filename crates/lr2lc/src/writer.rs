@@ -24,6 +24,7 @@ pub enum WriterJson {
         keywords_skipped: Vec<ReasonJson>,
         members_skipped: Vec<ReasonJson>,
         stacks_skipped: Vec<ReasonJson>,
+        quick_skipped: Vec<ReasonJson>,
     },
     /// `--apply`: what was sent.
     Applied {
@@ -54,6 +55,11 @@ pub enum WriterJson {
         stack_members_removed: usize,
         stacks_skipped: Vec<ReasonJson>,
         stacks_incomplete: Vec<ReasonJson>,
+        quick_added: usize,
+        quick_already: usize,
+        quick_removed: usize,
+        quick_skipped: Vec<ReasonJson>,
+        quick_incomplete: Vec<ReasonJson>,
         /// Why the run stopped early; absent after a complete run.
         #[serde(skip_serializing_if = "Option::is_none")]
         aborted: Option<String>,
@@ -85,6 +91,14 @@ pub struct PlannedJson {
     /// Recorded stack members that left their stack in Lightroom; only
     /// counted.
     pub stack_members_removed: usize,
+    /// Quick Collection members to add (LightCraft may already hold some;
+    /// they are not sent).
+    pub quick_add: usize,
+    /// Quick Collection members already recorded in the mapping file.
+    pub quick_already: usize,
+    /// Recorded Quick Collection members that left it in Lightroom; only
+    /// counted.
+    pub quick_removed: usize,
 }
 
 /// The writer input from the converted elements of the catalog.
@@ -95,6 +109,7 @@ pub fn input(converted: &Converted) -> WriteInput {
         photo_keywords: converted.photo_keywords.clone(),
         collections: converted.collections.clone(),
         stacks: converted.stacks.clone(),
+        quick: converted.quick.clone(),
     }
 }
 
@@ -115,6 +130,8 @@ pub fn planned(plan: &Plan) -> PlannedJson {
         collections_known: plan.collections_known(),
         stacks_known: plan.stacks_known(),
         stack_members_removed: plan.stack_members_removed(),
+        quick_already: plan.quick_already(),
+        quick_removed: plan.quick_removed(),
         ..PlannedJson::default()
     };
     for step in &plan.steps {
@@ -132,6 +149,7 @@ pub fn planned(plan: &Plan) -> PlannedJson {
             Step::AddMembers { gids, .. } => out.members_added += gids.len(),
             Step::RemoveMembers { gids, .. } => out.members_removed += gids.len(),
             Step::GroupStack { .. } => out.stacks += 1,
+            Step::QuickAdd { gids } => out.quick_add += gids.len(),
         }
     }
     out
@@ -145,6 +163,7 @@ pub fn planned_json(plan: &Plan) -> WriterJson {
         keywords_skipped: reasons(plan.keyword_skips()),
         members_skipped: reasons(plan.member_skips()),
         stacks_skipped: reasons(plan.stack_skips()),
+        quick_skipped: reasons(plan.quick_skips()),
     }
 }
 
@@ -179,6 +198,11 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         stack_members_removed: s.stack_members_removed,
         stacks_skipped: reasons(&s.stacks_skipped),
         stacks_incomplete: reasons(&s.stacks_incomplete),
+        quick_added: s.quick_added,
+        quick_already: s.quick_already,
+        quick_removed: s.quick_removed,
+        quick_skipped: reasons(&s.quick_skipped),
+        quick_incomplete: reasons(&s.quick_incomplete),
         aborted: aborted.map(WriteError::short_reason),
     }
 }
@@ -214,6 +238,16 @@ pub fn planned_summary(plan: &Plan) -> String {
         p.stacks, p.stacks_known, p.stack_members_removed
     );
     skipped_lines(&mut out, "writer would skip stacks", plan.stack_skips());
+    let _ = writeln!(
+        out,
+        "writer quick collection: to add {}, already in it {}, members left in LightCraft {}",
+        p.quick_add, p.quick_already, p.quick_removed
+    );
+    skipped_lines(
+        &mut out,
+        "writer would skip quick collection members",
+        plan.quick_skips(),
+    );
     out
 }
 
@@ -262,6 +296,16 @@ pub fn applied_summary(s: &ApplySummary) -> String {
         s.stacks_incomplete.len(),
         s.stack_members_removed
     );
+    let _ = writeln!(
+        out,
+        "written quick collection: added {}, already in it {}, skipped {}, incomplete {}, \
+         members left in LightCraft {}",
+        s.quick_added,
+        s.quick_already,
+        s.quick_skipped.len(),
+        s.quick_incomplete.len(),
+        s.quick_removed
+    );
     if s.collections_renamed + s.collections_moved + s.collections_removed > 0 {
         let _ = writeln!(
             out,
@@ -282,6 +326,8 @@ pub fn applied_summary(s: &ApplySummary) -> String {
     skipped_lines(&mut out, "skipped album members", &s.members_skipped);
     skipped_lines(&mut out, "skipped stacks", &s.stacks_skipped);
     skipped_lines(&mut out, "incomplete stacks", &s.stacks_incomplete);
+    skipped_lines(&mut out, "skipped quick collection", &s.quick_skipped);
+    skipped_lines(&mut out, "incomplete quick collection", &s.quick_incomplete);
     out
 }
 
@@ -380,11 +426,13 @@ mod tests {
                         "photos_updated": 0, "photos_unchanged": 0,
                         "folders": 0, "albums": 0, "members_added": 0,
                         "members_removed": 0, "collections_known": 0,
-                        "stacks": 0, "stacks_known": 0, "stack_members_removed": 0},
+                        "stacks": 0, "stacks_known": 0, "stack_members_removed": 0,
+                        "quick_add": 0, "quick_already": 0, "quick_removed": 0},
                 "photos_skipped": [],
                 "keywords_skipped": [],
                 "members_skipped": [],
                 "stacks_skipped": [],
+                "quick_skipped": [],
             })
         );
         let s = ApplySummary {
@@ -412,6 +460,9 @@ mod tests {
             "stacks_grouped",
             "stacks_known",
             "stack_members_removed",
+            "quick_added",
+            "quick_already",
+            "quick_removed",
         ] {
             assert_eq!(v[key], 0, "{key}");
         }
@@ -421,6 +472,8 @@ mod tests {
             "members_skipped",
             "stacks_skipped",
             "stacks_incomplete",
+            "quick_skipped",
+            "quick_incomplete",
         ] {
             assert!(v[key].is_array(), "{key}");
         }
