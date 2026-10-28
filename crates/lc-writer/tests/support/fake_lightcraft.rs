@@ -85,6 +85,11 @@ pub struct AlbumView {
     pub parent: Option<u64>,
     /// The ids of the member photos, in the order they were added.
     pub photos: Vec<i64>,
+    /// Internal mark of the Quick Collection, like the real app: set only
+    /// when `album.toggleTarget` creates it (or for a seeded top-level album
+    /// of that name), never by `album.create`, and not shown by
+    /// `albums.list`.
+    quick: bool,
 }
 
 /// An album or album folder the fake library already has at start.
@@ -248,6 +253,7 @@ impl FakeLightCraft {
                     folder: seed.folder,
                     parent,
                     photos: Vec::new(),
+                    quick: parent.is_none() && !seed.folder && seed.name == "Quick Collection",
                 },
             );
         }
@@ -682,6 +688,7 @@ fn album_command(
                     folder,
                     parent,
                     photos: Vec::new(),
+                    quick: false,
                 },
             );
             Ok(json!({"id": id, "skipped": 0}))
@@ -820,12 +827,9 @@ fn stack_group(config: &Config, lib: &mut Library, params: &Value) -> Result<Val
     Ok(json!({"stack": id, "count": count}))
 }
 
-/// The id of the Quick Collection: the first top-level album of that name.
+/// The id of the Quick Collection: the first album marked `quick`.
 fn quick_id(lib: &Library) -> Option<u64> {
-    lib.albums
-        .values()
-        .find(|a| a.parent.is_none() && !a.folder && a.name == "Quick Collection")
-        .map(|a| a.id)
+    lib.albums.values().find(|a| a.quick).map(|a| a.id)
 }
 
 /// `album.toggleTarget {ids?}` with the real rules (research A4): gated by a
@@ -866,6 +870,7 @@ fn toggle_target(config: &Config, lib: &mut Library, params: &Value) -> Result<V
                         folder: false,
                         parent: None,
                         photos: Vec::new(),
+                        quick: true,
                     },
                 );
                 id
