@@ -1,6 +1,6 @@
 //! A stateful stand-in for a running LightCraft app, for tests only.
 //!
-//! Speaks the control-port protocol (JSON lines, `engine.execute`) on
+//! Speaks the control-port protocol (JSON lines, `engine.execute` plus the port method `ui.inspect`) on
 //! `127.0.0.1:0` and keeps a tiny library: keywords, imported files and the
 //! rating of each photo. Records every received line. Built with `std::net`
 //! and `serde_json` only. The same file lives in `crates/lc-writer/tests/support`
@@ -393,16 +393,27 @@ impl FakeLightCraft {
         self.shared.log.lock().unwrap().clone()
     }
 
-    /// `(command, params)` of every received `engine.execute` request.
+    /// `(command, params)` of every received request. An `engine.execute`
+    /// request yields its inner command; a request to a method of the port
+    /// itself (such as `ui.inspect`) yields the method name and its params.
     pub fn commands(&self) -> Vec<(String, Value)> {
         self.received()
             .iter()
             .map(|r| {
                 let v: Value = serde_json::from_str(&r.line).expect("client sent invalid JSON");
-                (
-                    v["params"]["command"].as_str().unwrap_or("").to_string(),
-                    v["params"]["params"].clone(),
-                )
+                request_parts(&v)
+            })
+            .collect()
+    }
+
+    /// The methods of the received requests, in order (`engine.execute` or
+    /// the name of a port method).
+    pub fn methods(&self) -> Vec<String> {
+        self.received()
+            .iter()
+            .map(|r| {
+                let v: Value = serde_json::from_str(&r.line).expect("client sent invalid JSON");
+                v["method"].as_str().unwrap_or("").to_string()
             })
             .collect()
     }
@@ -497,6 +508,29 @@ impl Drop for FakeLightCraft {
     }
 }
 
+/// Methods the port answers itself, outside `engine.execute`. The real app
+/// does not know these as engine commands ("unknown command").
+const PORT_METHODS: [&str; 1] = ["ui.inspect"];
+
+/// `(command, params)` of a request: the inner command of `engine.execute`,
+/// or the method name and params of a port method.
+pub fn request_parts(request: &Value) -> (String, Value) {
+    if request["method"].as_str() == Some("engine.execute") {
+        (
+            request["params"]["command"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+            request["params"]["params"].clone(),
+        )
+    } else {
+        (
+            request["method"].as_str().unwrap_or("").to_string(),
+            request["params"].clone(),
+        )
+    }
+}
+
 fn serve(stream: TcpStream, index: usize, shared: &Shared) {
     let _ = stream.set_nonblocking(false);
     // Never let a connection thread live forever.
@@ -518,8 +552,14 @@ fn serve(stream: TcpStream, index: usize, shared: &Shared) {
         });
         let request: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
         let id = request.get("id").cloned().unwrap_or(Value::Null);
-        let command = request["params"]["command"].as_str().unwrap_or("");
-        let params = &request["params"]["params"];
+        let (command, params) = request_parts(&request);
+        let (command, params) = (command.as_str(), &params);
+        let is_engine = request["method"].as_str() == Some("engine.execute");
+        let known = if is_engine {
+            !PORT_METHODS.contains(&command)
+        } else {
+            PORT_METHODS.contains(&command)
+        };
 
         let mut lib = shared.library.lock().unwrap();
         lib.seen += 1;
@@ -533,7 +573,14 @@ fn serve(stream: TcpStream, index: usize, shared: &Shared) {
             let _ = writer.shutdown(Shutdown::Both);
             return;
         }
-        let out = match run(shared, &mut lib, command, params) {
+        let result = if known {
+            run(shared, &mut lib, command, params)
+        } else if is_engine {
+            Err(format!("unknown command: {command}"))
+        } else {
+            Err(format!("unknown method: {command}"))
+        };
+        let out = match result {
             Ok(result) => json!({"id": id, "ok": true, "result": result}),
             Err(text) => json!({"id": id, "ok": false, "error": text}),
         };

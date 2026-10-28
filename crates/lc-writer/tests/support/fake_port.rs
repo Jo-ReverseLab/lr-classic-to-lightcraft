@@ -95,23 +95,42 @@ impl FakePort {
             .collect()
     }
 
-    /// `(command, params)` of every received `engine.execute` request.
+    /// `(command, params)` of every received request: the inner command of
+    /// `engine.execute`, or the method name and params of a request to a
+    /// method of the port itself (such as `ui.inspect`).
     pub fn commands(&self) -> Vec<(String, Value)> {
+        self.requests().iter().map(request_parts).collect()
+    }
+
+    /// The `method` of every received request, in order.
+    pub fn methods(&self) -> Vec<String> {
         self.requests()
             .iter()
-            .map(|r| {
-                let p = &r["params"];
-                (
-                    p["command"].as_str().unwrap_or("").to_string(),
-                    p["params"].clone(),
-                )
-            })
+            .map(|r| r["method"].as_str().unwrap_or("").to_string())
             .collect()
     }
 
     /// Number of connections accepted so far.
     pub fn connections(&self) -> usize {
         self.conns.load(Ordering::SeqCst)
+    }
+}
+
+/// `(command, params)` of a request, covering both forms.
+pub fn request_parts(request: &Value) -> (String, Value) {
+    if request["method"].as_str() == Some("engine.execute") {
+        (
+            request["params"]["command"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+            request["params"]["params"].clone(),
+        )
+    } else {
+        (
+            request["method"].as_str().unwrap_or("").to_string(),
+            request["params"].clone(),
+        )
     }
 }
 

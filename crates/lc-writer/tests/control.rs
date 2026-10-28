@@ -19,8 +19,10 @@
 //!   unusable: the next `execute` opens a new connection; a lost connection
 //!   is never retried (the command is received exactly once);
 //! - `preflight(&mut client, library, allow_xmp)` sends only the three
-//!   read-only commands `library.info`, `ui.inspect`, `library.xmpPreferences`,
-//!   always with empty params.
+//!   read-only requests `library.info`, `ui.inspect` and
+//!   `library.xmpPreferences`, always with empty params; `ui.inspect` goes as
+//!   a method of the port itself (`ControlClient::call`), the others through
+//!   `engine.execute`.
 //!
 //! The fake port is in `tests/support/fake_port.rs`; it records every line.
 //!
@@ -194,7 +196,7 @@ fn invalid_reply_line_is_protocol_error_and_next_execute_reconnects() {
             err(client.execute("library.info", json!({}))),
             WriteError::Protocol(_)
         ));
-        let outcome = client.execute("ui.inspect", json!({})).unwrap();
+        let outcome = client.execute("library.info", json!({})).unwrap();
         assert!(matches!(outcome, Outcome::Applied(v) if v == json!("fine")));
 
         let received = port.received();
@@ -273,14 +275,23 @@ const READ_COMMANDS: [&str; 3] = ["library.info", "ui.inspect", "library.xmpPref
 
 /// A fake port answering the three read commands with the given results.
 fn preflight_port(info: Value, inspect: Value, xmp: Value) -> FakePort {
-    FakePort::start(
-        move |_, request| match request["params"]["command"].as_str().unwrap_or("") {
-            "library.info" => Reply::Ok(info.clone()),
-            "ui.inspect" => Reply::Ok(inspect.clone()),
-            "library.xmpPreferences" => Reply::Ok(xmp.clone()),
-            other => Reply::Err(format!("unexpected command {other}")),
-        },
-    )
+    FakePort::start(move |_, request| {
+        // Like the real app: `ui.inspect` is a method of the port, and
+        // unknown as an `engine.execute` command.
+        let is_engine = request["method"] == "engine.execute";
+        let name = if is_engine {
+            request["params"]["command"].as_str().unwrap_or("")
+        } else {
+            request["method"].as_str().unwrap_or("")
+        };
+        match (is_engine, name) {
+            (true, "library.info") => Reply::Ok(info.clone()),
+            (false, "ui.inspect") => Reply::Ok(inspect.clone()),
+            (true, "library.xmpPreferences") => Reply::Ok(xmp.clone()),
+            (true, "ui.inspect") => Reply::Err("unknown command: ui.inspect".into()),
+            (_, other) => Reply::Err(format!("unexpected request {other}")),
+        }
+    })
 }
 
 fn info_for(path: &Path) -> Value {
@@ -306,12 +317,16 @@ fn assert_only_reads(port: &FakePort) {
         );
         assert_eq!(params, json!({}), "pre-flight sent params with {command}");
     }
-    assert!(
-        port.requests()
-            .iter()
-            .all(|r| r["method"] == "engine.execute"),
-        "pre-flight must use engine.execute"
-    );
+    // `ui.inspect` goes as a method of the port, everything else through
+    // `engine.execute`.
+    for request in port.requests() {
+        let expected = if request["method"] == "ui.inspect" {
+            true
+        } else {
+            request["method"] == "engine.execute" && request["params"]["command"] != "ui.inspect"
+        };
+        assert!(expected, "wrong request form: {request}");
+    }
 }
 
 fn run_preflight(port: &FakePort, library: &Path, allow_xmp: bool) -> Result<(), WriteError> {
@@ -436,5 +451,172 @@ fn xmp_auto_write_is_accepted_with_allow_xmp_and_never_changed() {
         run_preflight(&port, dir.path(), true).unwrap();
         // Still read-only: the preference is left as the user set it.
         assert_only_reads(&port);
+    });
+}
+
+#[test]
+fn preflight_sends_ui_inspect_as_its_own_method_with_empty_params() {
+    with_timeout(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let port = preflight_port(info_for(dir.path()), healthy_inspect(), xmp_off());
+        run_preflight(&port, dir.path(), false).unwrap();
+        let requests = port.requests();
+        let inspects: Vec<_> = requests
+            .iter()
+            .filter(|r| r["method"] == "ui.inspect")
+            .collect();
+        assert_eq!(inspects.len(), 1, "exactly one ui.inspect request");
+        assert_eq!(inspects[0]["params"], json!({}));
+        assert!(
+            requests
+                .iter()
+                .all(|r| r["params"]["command"] != "ui.inspect"),
+            "ui.inspect must never be sent through engine.execute"
+        );
+        assert_eq!(
+            port.methods(),
+            ["engine.execute", "ui.inspect", "engine.execute"]
+        );
+    });
+}
+
+#[test]
+fn library_problem_stops_the_preflight_before_the_xmp_check() {
+    with_timeout(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let inspect = json!({"libraryProblem": "journal is damaged"});
+        let port = preflight_port(info_for(dir.path()), inspect, xmp_off());
+        let e = err(run_preflight(&port, dir.path(), false));
+        assert!(matches!(e, WriteError::LibraryProblem(_)), "got {e:?}");
+        let commands: Vec<String> = port.commands().into_iter().map(|(c, _)| c).collect();
+        assert_eq!(commands, ["library.info", "ui.inspect"]);
+    });
+}
+
+#[test]
+fn preflight_error_reply_to_ui_inspect_is_not_retried_or_repeated() {
+    with_timeout(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let info = info_for(dir.path());
+        let port = FakePort::start(move |_, request| {
+            if request["method"] == "ui.inspect" {
+                Reply::Err("unknown method".into())
+            } else {
+                Reply::Ok(info.clone())
+            }
+        });
+        let e = err(run_preflight(&port, dir.path(), false));
+        assert!(matches!(e, WriteError::Command { .. }), "got {e:?}");
+        thread::sleep(Duration::from_millis(300));
+        let inspects = port.methods().iter().filter(|m| *m == "ui.inspect").count();
+        assert_eq!(inspects, 1, "ui.inspect must be sent once");
+    });
+}
+
+#[test]
+fn preflight_lost_connection_during_ui_inspect_is_never_retried() {
+    with_timeout(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let info = info_for(dir.path());
+        let port = FakePort::start(move |_, request| {
+            if request["method"] == "ui.inspect" {
+                Reply::Close
+            } else {
+                Reply::Ok(info.clone())
+            }
+        });
+        match err(run_preflight(&port, dir.path(), false)) {
+            WriteError::ConnectionLost { command } => assert_eq!(command, "ui.inspect"),
+            other => panic!("expected ConnectionLost, got {other:?}"),
+        }
+        thread::sleep(Duration::from_millis(300));
+        let inspects = port.methods().iter().filter(|m| *m == "ui.inspect").count();
+        assert_eq!(inspects, 1, "ui.inspect must be sent once");
+        assert_eq!(port.connections(), 1, "client must not reconnect to retry");
+    });
+}
+
+// ------------------------------------------------------------------ call
+
+#[test]
+fn call_sends_a_method_of_the_port_itself_not_engine_execute() {
+    with_timeout(|| {
+        let port = FakePort::start(|_, _| Reply::Ok(json!({"libraryProblem": null})));
+        let mut client = ControlClient::connect(port.port()).unwrap();
+        let outcome = client.call("ui.inspect", json!({})).unwrap();
+        assert_eq!(outcome, Outcome::Applied(json!({"libraryProblem": null})));
+        let requests = port.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["method"], "ui.inspect");
+        assert_eq!(requests[0]["params"], json!({}));
+        assert!(requests[0]["id"].is_number());
+    });
+}
+
+#[test]
+fn call_error_reply_is_a_command_error_naming_the_method() {
+    with_timeout(|| {
+        let port = FakePort::start(|_, _| Reply::Err("boom".into()));
+        let mut client = ControlClient::connect(port.port()).unwrap();
+        match err(client.call("ui.inspect", json!({}))) {
+            WriteError::Command { command, message } => {
+                assert_eq!(command, "ui.inspect");
+                assert_eq!(message, "boom");
+            }
+            other => panic!("expected Command, got {other:?}"),
+        }
+    });
+}
+
+#[test]
+fn call_is_sent_once_and_a_lost_connection_is_never_retried() {
+    with_timeout(|| {
+        let port = FakePort::start(|_, _| Reply::Close);
+        let mut client = ControlClient::connect(port.port()).unwrap();
+        match err(client.call("ui.inspect", json!({}))) {
+            WriteError::ConnectionLost { command } => assert_eq!(command, "ui.inspect"),
+            other => panic!("expected ConnectionLost, got {other:?}"),
+        }
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(port.received().len(), 1, "must be received exactly once");
+        assert_eq!(port.connections(), 1, "client must not reconnect to retry");
+    });
+}
+
+#[test]
+fn call_after_a_protocol_error_reconnects_for_the_next_request() {
+    with_timeout(|| {
+        let port = FakePort::start(|conn, _| {
+            if conn == 0 {
+                Reply::Raw("not json".into())
+            } else {
+                Reply::Ok(json!("fine"))
+            }
+        });
+        let mut client = ControlClient::connect(port.port()).unwrap();
+        assert!(matches!(
+            err(client.call("ui.inspect", json!({}))),
+            WriteError::Protocol(_)
+        ));
+        let outcome = client.call("ui.inspect", json!({})).unwrap();
+        assert_eq!(outcome, Outcome::Applied(json!("fine")));
+        assert_eq!(port.connections(), 2);
+    });
+}
+
+#[test]
+fn execute_still_wraps_commands_in_engine_execute() {
+    with_timeout(|| {
+        let port = FakePort::start(|_, _| Reply::Ok(json!(1)));
+        let mut client = ControlClient::connect(port.port()).unwrap();
+        client.execute("library.info", json!({"a": 1})).unwrap();
+        let requests = port.requests();
+        assert_eq!(requests[0]["method"], "engine.execute");
+        assert_eq!(requests[0]["params"]["command"], "library.info");
+        assert_eq!(requests[0]["params"]["params"], json!({"a": 1}));
+        assert_eq!(
+            port.commands(),
+            [("library.info".to_string(), json!({"a": 1}))]
+        );
     });
 }
