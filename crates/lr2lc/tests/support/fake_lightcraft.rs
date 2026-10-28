@@ -85,6 +85,9 @@ pub struct AlbumView {
     pub parent: Option<u64>,
     /// The ids of the member photos, in the order they were added.
     pub photos: Vec<i64>,
+    /// The rules of a smart album (`album.createSmart`), as received;
+    /// `None` for regular albums and folders.
+    pub rules: Option<Value>,
     /// Internal mark of the Quick Collection, like the real app: set only
     /// when `album.toggleTarget` creates it (or for a seeded top-level album
     /// of that name), never by `album.create`, and not shown by
@@ -253,6 +256,7 @@ impl FakeLightCraft {
                     folder: seed.folder,
                     parent,
                     photos: Vec::new(),
+                    rules: None,
                     quick: parent.is_none() && !seed.folder && seed.name == "Quick Collection",
                 },
             );
@@ -476,9 +480,8 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             lib.selection = ids;
             Ok(json!({}))
         }
-        "album.create" | "album.addPhotos" | "album.removePhotos" | "albums.list" => {
-            album_command(config, lib, command, params)
-        }
+        "album.create" | "album.createSmart" | "album.addPhotos" | "album.removePhotos"
+        | "albums.list" => album_command(config, lib, command, params),
         "album.setTarget" => {
             let target = match params.get("id") {
                 None | Some(Value::Null) => None,
@@ -642,7 +645,7 @@ fn album_command(
     params: &Value,
 ) -> Result<Value, String> {
     let album_name = match command {
-        "album.create" => params["name"].as_str().map(str::to_string),
+        "album.create" | "album.createSmart" => params["name"].as_str().map(str::to_string),
         _ => params["id"]
             .as_u64()
             .and_then(|id| lib.albums.get(&id))
@@ -688,10 +691,54 @@ fn album_command(
                     folder,
                     parent,
                     photos: Vec::new(),
+                    rules: None,
                     quick: false,
                 },
             );
             Ok(json!({"id": id, "skipped": 0}))
+        }
+        "album.createSmart" => {
+            // Like the real app, but `rules` is mandatory here: without it
+            // the real command would save the current view.
+            let name = params["name"].as_str().ok_or("name is missing")?.trim();
+            if name.is_empty() {
+                return Err("empty name".into());
+            }
+            let rules = params.get("rules").ok_or("rules is missing")?;
+            if !rules.is_object() {
+                return Err("rules must be an object".into());
+            }
+            if let Some(set) = rules.get("ruleSet") {
+                let mode = set["match"].as_str().unwrap_or("");
+                if !["all", "any", "none"].contains(&mode) || !set["rules"].is_array() {
+                    return Err("rule 1: bad rule set".into());
+                }
+            }
+            let parent = match params.get("parent") {
+                None | Some(Value::Null) => None,
+                Some(v) => {
+                    let id = v.as_u64().ok_or("parent must be a number")?;
+                    if !lib.albums.get(&id).is_some_and(|a| a.folder) {
+                        return Err("parent must be an existing folder".into());
+                    }
+                    Some(id)
+                }
+            };
+            let id = lib.next_album_id;
+            lib.next_album_id += 1;
+            lib.albums.insert(
+                id,
+                AlbumView {
+                    id,
+                    name: name.to_string(),
+                    folder: false,
+                    parent,
+                    photos: Vec::new(),
+                    rules: Some(rules.clone()),
+                    quick: false,
+                },
+            );
+            Ok(json!({"id": id, "count": 0}))
         }
         "album.addPhotos" | "album.removePhotos" => {
             if params.get("addSelected").is_some() {
@@ -710,7 +757,7 @@ fn album_command(
                 return Err(format!("unknown photo id {unknown}"));
             }
             let album = lib.albums.get_mut(&id).ok_or("unknown album id")?;
-            if album.folder {
+            if album.folder || album.rules.is_some() {
                 return Err("smart albums and folders can't hold photos".into());
             }
             if command == "album.addPhotos" {
@@ -739,14 +786,19 @@ fn albums_nested(lib: &Library, parent: Option<u64>) -> Vec<Value> {
         .values()
         .filter(|a| a.parent == parent)
         .map(|a| {
-            json!({
+            let mut node = json!({
                 "id": a.id,
                 "name": a.name,
                 "folder": a.folder,
                 "count": a.photos.len(),
                 "cover": null,
                 "children": albums_nested(lib, Some(a.id)),
-            })
+            });
+            if let Some(rules) = &a.rules {
+                node["smart"] = json!(true);
+                node["rules"] = rules.clone();
+            }
+            node
         })
         .collect()
 }
@@ -870,6 +922,7 @@ fn toggle_target(config: &Config, lib: &mut Library, params: &Value) -> Result<V
                         folder: false,
                         parent: None,
                         photos: Vec::new(),
+                        rules: None,
                         quick: true,
                     },
                 );

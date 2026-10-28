@@ -1311,6 +1311,108 @@ pub fn write_smart_catalog_with_files(dir: &Path) -> Result<PathBuf> {
     Ok(catalog)
 }
 
+/// Smart collections for the translation tests ([`write_smart_translate_catalog_with_files`]),
+/// on top of [`smart_edge`]. Rule values are plain star counts; names carry
+/// [`smart_edge::SECRET`].
+pub mod smart_translate {
+    /// Smart collections that translate: 101 (from [`super::smart_edge`]:
+    /// rating >= 3, top level), 201 (rating == 5, top level), 202
+    /// (rating >= 4, `union`, inside collection set 1), 203 (rating >= 1
+    /// and rating == 5, `intersect`, top level).
+    pub const TRANSLATABLE: [i64; 4] = [101, 201, 202, 203];
+    /// The collection set (id 1 of the small fixture) that holds 202.
+    pub const PARENT_SET: i64 = 1;
+    /// Smart collections that are skipped although their rules are
+    /// readable: 204 (rating and pick), 205 (rating `>`), 206 (rating >= 3
+    /// inside the plain collection 2, which cannot be a parent).
+    pub const NEW_SKIPPED: [i64; 3] = [204, 205, 206];
+    /// Rows added by this fixture.
+    pub const ADDED: i64 = 6;
+    /// The expected `rules` parameters, by collection id, as JSON text.
+    pub const RULES: [(i64, &str); 4] = [
+        (
+            101,
+            r#"{"ruleSet":{"match":"all","rules":[{"field":"rating","op":"gte","value":3}]}}"#,
+        ),
+        (
+            201,
+            r#"{"ruleSet":{"match":"all","rules":[{"field":"rating","op":"is","value":5}]}}"#,
+        ),
+        (
+            202,
+            r#"{"ruleSet":{"match":"any","rules":[{"field":"rating","op":"gte","value":4}]}}"#,
+        ),
+        (
+            203,
+            r#"{"ruleSet":{"match":"all","rules":[{"field":"rating","op":"gte","value":1},{"field":"rating","op":"is","value":5}]}}"#,
+        ),
+    ];
+}
+
+/// Like [`write_smart_catalog_with_files`], plus the collections of
+/// [`smart_translate`].
+pub fn write_smart_translate_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let catalog = write_smart_catalog_with_files(dir)?;
+    let c = Connection::open(&catalog)?;
+    const R: &str = "criteria = \"rating\"";
+    // (id, parent, rule text)
+    let rows: [(i64, Option<i64>, String); 6] = [
+        (
+            201,
+            None,
+            format!(
+                "s = {{\n\t{{\n\t\t{R},\n\t\toperation = \"==\",\n\t\tvalue = 5,\n\t\tvalue2 = 0,\n\t}},\n\tcombine = \"intersect\",\n}}"
+            ),
+        ),
+        (
+            202,
+            Some(smart_translate::PARENT_SET),
+            format!(
+                "s = {{\n\t{{\n\t\t{R},\n\t\toperation = \">=\",\n\t\tvalue = 4,\n\t}},\n\tcombine = \"union\",\n}}"
+            ),
+        ),
+        (
+            203,
+            None,
+            format!(
+                "s = {{\n\t{{\n\t\t{R},\n\t\toperation = \">=\",\n\t\tvalue = 1,\n\t}},\n\t{{\n\t\t{R},\n\t\toperation = \"==\",\n\t\tvalue = 5,\n\t}},\n\tcombine = \"intersect\",\n}}"
+            ),
+        ),
+        (
+            204,
+            None,
+            format!(
+                "s = {{\n\t{{\n\t\t{R},\n\t\toperation = \">=\",\n\t\tvalue = 2,\n\t}},\n\t{{\n\t\tcriteria = \"pick\",\n\t\toperation = \"==\",\n\t\tvalue = 1,\n\t}},\n\tcombine = \"intersect\",\n}}"
+            ),
+        ),
+        (
+            205,
+            None,
+            format!(
+                "s = {{\n\t{{\n\t\t{R},\n\t\toperation = \">\",\n\t\tvalue = 2,\n\t}},\n\tcombine = \"intersect\",\n}}"
+            ),
+        ),
+        (
+            206,
+            Some(2),
+            format!(
+                "s = {{\n\t{{\n\t\t{R},\n\t\toperation = \">=\",\n\t\tvalue = 3,\n\t}},\n\tcombine = \"intersect\",\n}}"
+            ),
+        ),
+    ];
+    for (id, parent, text) in rows {
+        c.execute(
+            "INSERT INTO AgLibraryCollection (id_local, creationId, genealogy, imageCount, name, parent, systemOnly) VALUES (?1, 'com.adobe.ag.library.smart_collection', ?2, 0, ?3, ?4, 0)",
+            params![id, format!("/{id}"), format!("Smart {} {id}", smart_edge::SECRET), parent],
+        )?;
+        c.execute(
+            "INSERT INTO AgLibraryCollectionContent (collection, content, owningModule) VALUES (?1, ?2, ?3)",
+            params![id, text, smart_edge::SMART],
+        )?;
+    }
+    Ok(catalog)
+}
+
 fn add_smart_edges(path: &Path) -> Result<()> {
     let c = Connection::open(path)?;
     c.execute_batch(

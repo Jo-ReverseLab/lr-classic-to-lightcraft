@@ -26,3 +26,29 @@ fn smart_fixture_counts() {
     );
     assert_eq!(e::READABLE_COUNT + e::UNREADABLE_COUNT, e::SMART_TOTAL);
 }
+
+#[test]
+fn smart_translate_fixture_counts() {
+    use lrcat_fixtures::smart_translate as t;
+    let dir = tempfile::tempdir().unwrap();
+    let path = lrcat_fixtures::write_smart_translate_catalog_with_files(dir.path()).unwrap();
+    let c = Connection::open(&path).unwrap();
+    let total: i64 = c
+        .query_row(
+            "SELECT COUNT(*) FROM AgLibraryCollection WHERE creationId LIKE '%smart_collection'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(total, e::SMART_TOTAL + t::ADDED);
+    assert_eq!(t::TRANSLATABLE.len(), t::RULES.len());
+    assert_eq!(t::NEW_SKIPPED.len() as i64 + 3, t::ADDED);
+    let parent: Option<i64> = c
+        .query_row(
+            "SELECT parent FROM AgLibraryCollection WHERE id_local = 202",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(parent, Some(t::PARENT_SET));
+}
