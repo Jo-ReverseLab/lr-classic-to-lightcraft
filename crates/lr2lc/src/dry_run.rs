@@ -205,6 +205,10 @@ fn convert_smart(data: &mut lr_reader::CollectionData) -> (Vec<SmartCollection>,
         let prefix = format!("collection {}:", s.lightroom_id);
         match lc_writer::smart::convertible(s, &data.collections) {
             Ok(_) => {
+                // The reader books every smart collection as skipped, so this
+                // always finds its entry. Should it ever find none, the
+                // collection is not written and its id falls into the
+                // untranslatable ids below, the safe side.
                 if data.report.convert_skipped(&prefix) > 0 {
                     out.push(s.clone());
                 }

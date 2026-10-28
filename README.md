@@ -59,8 +59,10 @@ flags: pick 4, reject 2, none 11, unknown 0
 ```
 
 Collections become albums and collection sets become album folders, with
-their nesting and names unchanged. Smart collections and other kinds such
-as web or print collections are skipped with a reason. A collection whose parent is missing,
+their nesting and names unchanged. Web, print and other kinds of
+collections are skipped with a reason. Smart collections become smart
+albums (see [Smart collections](#smart-collections)) only when every rule
+translates exactly; otherwise they are skipped. A collection whose parent is missing,
 skipped, not a collection set or part of a cycle is skipped, and so is
 everything below it. Empty collections are kept. Members keep Lightroom's
 order; a member is skipped if its photo is not converted (for example a
@@ -73,7 +75,8 @@ The first system collection (`systemOnly` not zero) by id is the Quick
 Collection. It counts as converted (`collections.quick` is 1, and
 `collections.converted` is folders + albums + quick); every further one is
 skipped with `more than one quick collection`. Its members follow the album
-rules above. With `--apply` lr2lc runs, as the very last step and only when
+rules above. With `--apply` lr2lc runs, after the albums (only smart
+albums come later) and only when
 some member is not yet in the mapping file: `album.setTarget {id: null}`
 (so a target album you chose is not used), `albums.list`, then reads the
 members of the one top-level album (not a smart album) named
@@ -217,11 +220,16 @@ Writes a machine-readable report to `FILE` after the run:
   "collections": {
     "read": 3,
     "converted": 2,
-    "skipped": [{ "reason": "collection 4: smart collection is not converted" }],
+    "skipped": [{
+      "reason": "collection 4: smart collection is not converted (criterion \"pick\" has no exact LightCraft equivalent)",
+      "code": "smart_untranslatable"
+    }],
+    "by_code": { "smart_untranslatable": 1 },
     "albums": 1,
     "folders": 1,
     "duplicate_names": 0,
-    "quick": 0
+    "quick": 0,
+    "smart": 0
   },
   "collection_members": {
     "read": 2,
@@ -264,6 +272,15 @@ Writes a machine-readable report to `FILE` after the run:
   "ratings": { "0": 1, "1": 0, "2": 0, "3": 1, "4": 0, "5": 0 }
 }
 ```
+
+The other areas are shortened here: every area, and every skip list in
+the `writer` section, has entries `{"reason": ..., "code": ...}` and a
+`by_code` (`<list>_by_code` in `writer`) count per code. The top-level
+`skipped_by_code` sums the codes over all catalog areas (not `writer`).
+A code is a fixed snake_case key such as `missing`, `video`,
+`smart_untranslatable` or `ambiguous`; it never holds a value from the
+catalog. The summary prints the codes per area in `skip codes <area>:`
+blocks after the reasons.
 
 For each area, `read` equals `converted` plus the number of `skipped`
 entries. Reasons name the catalog id, never a file path, a collection
@@ -497,6 +514,37 @@ Stacks are kept under `stacks`, keyed by the Lightroom stack id:
 first, followed by members that left the stack in Lightroom (they are
 still in the LightCraft stack). The entry is written as soon as the group
 succeeded. Files without `stacks` still load.
+
+### Smart collections
+
+A smart collection becomes a smart album (`album.createSmart`) only if
+every rule translates exactly; lr2lc never writes half a rule set.
+Currently that holds only for `rating` with `==` or `>=` and a whole
+number from 0 to 5, without a second value or units, combined with "all"
+or "any", and placed at top level or below a collection set
+(LightCraft nests smart albums only in folders). Any other smart collection is skipped (`smart_untranslatable`,
+`smart_no_criteria` or `smart_unreadable`); the reason names the first
+criterion without an exact equivalent, never a value.
+
+With `--apply`, smart albums are written as the very last step. The
+mapping file keeps them, so a second run creates nothing again. Rules
+changed in Lightroom since lr2lc wrote the album are only counted
+(`smart_rules_changed`); the smart album is not changed. If the mapping
+file is lost, lr2lc takes over exactly one existing smart album with the
+same name, parent and rules (`smart_existing`), also one you created by
+hand. With several matches it does not guess: the collection is skipped
+as `ambiguous` and nothing is created. A smart collection lr2lc wrote
+earlier whose rules no longer translate or can no longer be read counts
+as `smart_no_longer_translatable` and stays unchanged in LightCraft.
+
+The dry run prints a line `writer smart albums: smart albums to create N,
+already in the library N, rules changed in Lightroom N`; `report.json`
+has `planned.smart_albums`, `planned.smart_known`,
+`planned.smart_rules_changed` and `planned.smart_no_longer_translatable`.
+After `--apply` the `writer` section has `smart_created`, `smart_known`,
+`smart_existing`, `smart_rules_changed`, `smart_no_longer_translatable`
+and `smart_skipped` (with `smart_skipped_by_code`). `collections.smart`
+counts the smart collections converted as smart albums.
 
 ### Exit codes
 
