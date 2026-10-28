@@ -1,4 +1,4 @@
-//! Acceptance tests for writing the quick collection (task P5b-6), module
+//! Acceptance tests for writing the quick collection, module
 //! `lc_writer::apply`, against the stateful fake LightCraft (which has the
 //! real rules of `album.toggleTarget`: all photos already in the target ->
 //! they are removed; target album set by `album.setTarget` wins over the
@@ -10,7 +10,7 @@
 //!   quick_skipped, quick_incomplete: Vec<Skipped> }`;
 //! - the mapping file entry `quick = {members: [global ids lr2lc added]}`.
 //!
-//! Rules (assumptions of the test author in brackets):
+//! Rules (assumptions in brackets):
 //! - the quick step comes last (after albums); it is only run when some
 //!   member is not in `state.quick`;
 //! - run: `album.setTarget {id: null}`, `albums.list`, then members of the

@@ -1,5 +1,4 @@
-//! Acceptance tests for writing smart collections as smart albums (task
-//! P5b-4b), module `lc_writer::apply`, against the stateful fake LightCraft
+//! Acceptance tests for writing smart collections as smart albums, module `lc_writer::apply`, against the stateful fake LightCraft
 //! (which implements `album.createSmart` like the real app: `rules` is
 //! mandatory in the fake, a parent must be an existing folder, names are
 //! trimmed, smart albums refuse `album.addPhotos`).

@@ -1,5 +1,5 @@
 //! Apply-path tests for the skip codes `no_id_returned`,
-//! `applied_not_saved` and `ambiguous` (task K-6 part 4), module
+//! `applied_not_saved` and `ambiguous`, module
 //! `lc_writer::apply`, against the stateful fake LightCraft.
 //!
 //! The implementation exists, so these tests are green from the start. The

@@ -1,5 +1,4 @@
-//! Acceptance tests for the pure planning rules of collections (task
-//! P5b-3b), module `lc_writer::plan`.
+//! Acceptance tests for the pure planning rules of collections, module `lc_writer::plan`.
 //!
 //! API under test (all pub):
 //! - `WriteInput.collections: Vec<model::Collection>`;

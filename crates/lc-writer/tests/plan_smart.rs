@@ -1,5 +1,4 @@
-//! Acceptance tests for the pure planning rules of smart collections (task
-//! P5b-4b), module `lc_writer::plan`.
+//! Acceptance tests for the pure planning rules of smart collections, module `lc_writer::plan`.
 //!
 //! API under test (all pub; the translation itself is tested in
 //! `smart_translate.rs`):

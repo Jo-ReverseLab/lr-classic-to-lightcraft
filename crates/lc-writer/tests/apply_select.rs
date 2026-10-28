@@ -1,4 +1,4 @@
-//! Acceptance tests for the selection before photo commands (task P5-4e),
+//! Acceptance tests for the selection before photo commands,
 //! against the stateful fake LightCraft, which behaves like the real app:
 //! `photo.rate`, `photo.flag`, `photo.label` and `photo.setMeta` fail with
 //! `no photos selected` while nothing is selected, `library.select` sets the

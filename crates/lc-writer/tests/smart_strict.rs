@@ -1,18 +1,15 @@
 //! Acceptance tests for two strictness rules of the smart translation
-//! (tasks K-6 (1) and K-6 (3)), module `lc_writer::smart`.
-//!
-//! STATUS: RED ON PURPOSE (the tests compile, but fail until the developer
-//! implements the rules).
+//! module `lc_writer::smart`.
 //!
 //! Rules:
-//! - K-6 (1): a `rating` rule with `value2` set (any value) or `units` set
+//! - Rating bounds: a `rating` rule with `value2` set (any value) or `units` set
 //!   is not translated (strict reading), so the whole collection is not
 //!   translated. `translate_coded` answers `Err((SkipCode::SmartUntranslatable,
 //!   reason))` and the reason names the criterion `rating`, in the form of
 //!   the other untranslatable rules: `criterion "rating" has no exact
 //!   LightCraft equivalent`. It never contains a value or unit text. A
 //!   rating rule with `value2: None` and `units: None` still translates;
-//! - K-6 (3): `convertible` answers a smart collection whose parent is not
+//! - Parent check: `convertible` answers a smart collection whose parent is not
 //!   a collection set in `collections` (a plain album, a missing id or a
 //!   set that was not converted) with `SkipCode::ParentNotSet`; the free
 //!   text stays `its parent collection <id> is not a converted collection

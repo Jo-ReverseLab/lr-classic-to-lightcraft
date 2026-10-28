@@ -1,4 +1,4 @@
-//! Acceptance tests for running the plan over the control port (task P5-4c),
+//! Acceptance tests for running the plan over the control port,
 //! module `lc_writer::apply`, against a stateful fake LightCraft.
 //!
 //! API under test:
@@ -10,7 +10,7 @@
 //!   once: photos in `photos_skipped` were not written; `photos_incomplete`
 //!   (a subset of imported + existing) lost an update.
 //!
-//! Rules checked (see the lead's design for P5-4c):
+//! Rules checked:
 //! - the first command is `keyword.list {}`; its answer is accepted as an
 //!   array of `a|b` texts, an array of `{name, children}` objects, or an
 //!   object with a `keywords` field holding either; any other answer is
@@ -33,7 +33,7 @@
 //! A second run with an unchanged input sends only read commands.
 //!
 
-// `..WriteInput::default()` stays valid when the struct gains fields (P5b-3b).
+// `..WriteInput::default()` stays valid when the struct gains fields.
 #![allow(clippy::needless_update)]
 
 use lc_writer::apply::{ApplySummary, apply};

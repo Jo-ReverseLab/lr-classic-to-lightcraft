@@ -1,5 +1,5 @@
 //! Acceptance tests for writing collections as LightCraft albums and album
-//! folders (task P5b-3b), module `lc_writer::apply`, against the stateful
+//! folders, module `lc_writer::apply`, against the stateful
 //! fake LightCraft (which has the real selection gates of `album.addPhotos`
 //! and `album.removePhotos`, trims names, allows equal names and refuses
 //! `addSelected` and a parent that is not an existing folder).

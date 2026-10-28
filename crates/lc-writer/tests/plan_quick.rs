@@ -1,4 +1,4 @@
-//! Acceptance tests for planning the quick collection (task P5b-6), module
+//! Acceptance tests for planning the quick collection, module
 //! `lc_writer::plan`.
 //!
 //! API: `WriteInput.quick: Option<model::QuickCollection>`,

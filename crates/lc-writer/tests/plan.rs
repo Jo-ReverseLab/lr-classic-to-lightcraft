@@ -1,4 +1,4 @@
-//! Acceptance tests for the writer plan (task P5-4b), module `lc_writer::plan`.
+//! Acceptance tests for the writer plan, module `lc_writer::plan`.
 //!
 //! API under test (see also `tests/state.rs`):
 //! - `WriteInput { photos, keywords, photo_keywords: BTreeMap<i64, Vec<Keyword>> }`
@@ -19,7 +19,7 @@
 //! deterministic (by global id).
 //!
 
-// `..WriteInput::default()` stays valid when the struct gains fields (P5b-3b).
+// `..WriteInput::default()` stays valid when the struct gains fields.
 #![allow(clippy::needless_update)]
 
 use lc_writer::plan::{Plan, Step, WriteInput, plan};
@@ -162,7 +162,7 @@ fn empty_state_three_photos_gives_the_expected_steps() {
             Step::CreateKeyword { .. } => "kw",
             Step::Import { .. } => "import",
             Step::Update { command, .. } => command.as_str(),
-            // Album steps exist from P5b-3b on; no collections here.
+            // Album steps exist in the writer; no collections here.
             #[allow(unreachable_patterns)]
             _ => "album",
         })
@@ -728,7 +728,7 @@ fn script_has_one_valid_json_line_per_step() {
     let state = State::default();
     let p = plan(&inp, &state, &none());
     let script = p.to_script(&state);
-    // One `library.select` line per photo with updates (P5-4e).
+    // One `library.select` line per photo with updates.
     assert_eq!(script.lines().count(), p.steps.len() + 1);
     assert!(script.lines().all(|l| !l.trim().is_empty()));
     let l = lines(&p, &state);

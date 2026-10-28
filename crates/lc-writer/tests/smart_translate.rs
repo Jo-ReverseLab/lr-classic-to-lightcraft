@@ -1,5 +1,4 @@
-//! Acceptance tests for the translation of smart collection rules (task
-//! P5b-4b), module `lc_writer::smart`.
+//! Acceptance tests for the translation of smart collection rules, module `lc_writer::smart`.
 //!
 //! API under test:
 //! `pub fn translate(rules: &model::SmartRules) -> Result<serde_json::Value, String>`
@@ -9,7 +8,7 @@
 //!   "value"}]}}` (docs/research/lightcraft-albums.md A2);
 //! - `Err` is the skip reason of the whole collection.
 //!
-//! Whitelist (F-017 point 9, strict; F-021 open): only criterion `rating`
+//! Allowlist (strict translation: a rule is translated only if it provably behaves the same in LightCraft): only criterion `rating`
 //! with operation `==` (op `is`) or `>=` (op `gte`), value a number that is
 //! a whole number 0..=5 (a text, a fraction, a negative number, 6 or more,
 //! or no value is not translated; a set `value2` or units is not translated
@@ -25,7 +24,7 @@
 //! Decision on an empty rule list: skipped. Lightroom's meaning of a smart
 //! collection without criteria is unproven (all photos or none), and
 //! LightCraft's empty rule set is "all" for `all` but "none" for `any`.
-//! "Unsure" means not translated (F-017 point 9).
+//! "Unsure" means not translated (strict translation).
 
 use lc_writer::smart::translate;
 use model::{SmartCombine, SmartRule, SmartRules, SmartValue};

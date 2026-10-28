@@ -1,4 +1,4 @@
-//! Acceptance tests for the pure planning rules of stacks (task P5b-5),
+//! Acceptance tests for the pure planning rules of stacks,
 //! module `lc_writer::plan`.
 //!
 //! API under test (all pub):

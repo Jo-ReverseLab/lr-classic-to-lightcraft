@@ -1,9 +1,6 @@
 //! Acceptance tests for recorded smart albums whose Lightroom collection
-//! still exists but can no longer be translated (task K-6 part 2), modules
+//! still exists but can no longer be translated, modules
 //! `lc_writer::plan` and `lc_writer::apply`.
-//!
-//! STATUS: RED ON PURPOSE. The file does not compile until the API below
-//! exists.
 //!
 //! API under test:
 //! - `WriteInput.smart_untranslatable_ids: Vec<i64>`: the Lightroom ids of

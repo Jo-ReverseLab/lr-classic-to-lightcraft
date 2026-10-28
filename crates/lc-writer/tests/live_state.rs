@@ -1,4 +1,4 @@
-//! Acceptance tests for reading the current LightCraft state (task P5-9a),
+//! Acceptance tests for reading the current LightCraft state,
 //! module `lc_writer::live`, against the stateful fake LightCraft. Nothing is
 //! written and nothing is decided here.
 //!

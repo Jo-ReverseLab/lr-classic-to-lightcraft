@@ -1,9 +1,6 @@
 //! Acceptance tests for recovering smart collections after the mapping file
-//! was lost (task P5b-4c, principle 5), module `lc_writer::apply`, against
-//! the stateful fake LightCraft. Model: `apply_albums_existing.rs` (P5b-3c).
-//!
-//! STATUS: RED ON PURPOSE. The file does not compile until
-//! `ApplySummary::smart_existing` exists.
+//! was lost (principle 5), module `lc_writer::apply`, against
+//! the stateful fake LightCraft. Model: `apply_albums_existing.rs`.
 //!
 //! API under test:
 //! - `ApplySummary.smart_existing: usize`: smart collections adopted from

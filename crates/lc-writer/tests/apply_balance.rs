@@ -1,5 +1,5 @@
 //! Acceptance tests for the photo balance of `lc_writer::apply` in EVERY run
-//! (task P5-4d, extension), against the stateful fake LightCraft.
+//!, against the stateful fake LightCraft.
 //!
 //! New fields of `ApplySummary` (usize):
 //! - `photos_updated`: the photo is already known (mapping file) and at least
@@ -18,7 +18,7 @@
 //!   imported (existing), also when later updates succeed or fail.
 //!
 
-// `..WriteInput::default()` stays valid when the struct gains fields (P5b-3b).
+// `..WriteInput::default()` stays valid when the struct gains fields.
 #![allow(clippy::needless_update)]
 
 use lc_writer::apply::{ApplySummary, apply};

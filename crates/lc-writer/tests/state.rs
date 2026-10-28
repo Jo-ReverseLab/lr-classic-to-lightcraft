@@ -1,4 +1,4 @@
-//! Acceptance tests for the mapping file (task P5-4b), module `lc_writer::state`.
+//! Acceptance tests for the mapping file, module `lc_writer::state`.
 //!
 //! API under test:
 //! - `State::default()` is empty; `State` derives Debug, Clone, PartialEq;

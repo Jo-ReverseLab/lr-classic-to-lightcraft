@@ -1,4 +1,4 @@
-//! Acceptance tests for writing stacks (task P5b-5), module
+//! Acceptance tests for writing stacks, module
 //! `lc_writer::apply`, against the stateful fake LightCraft (which has the
 //! real `stack.group` rules: gate `no photos selected`, at least two photos,
 //! merging of touched stacks, `collapsed` defaulting to true, equal
@@ -16,7 +16,7 @@
 //! - per stack: `library.select {ids, active: <top>}` directly before
 //!   `stack.group {ids, top: <top>, collapsed: false}`; `collapsed` is always
 //!   sent and always `false`, whatever the model says (LightCraft would
-//!   collapse by default and F-019 point 9 says not to map the state);
+//!   collapse by default and the collapsed state is deliberately not mapped);
 //! - members without a LightCraft id (import failed) are not sent; fewer
 //!   than two left: the stack is in `stacks_skipped`, nothing is sent;
 //! - no change, no `stack.*` command and no `library.select`; a changed
@@ -28,7 +28,7 @@
 //!   that stack, the run goes on; a lost connection aborts;
 //! - balance: `input.stacks.len() == stacks_grouped + stacks_known +
 //!   stacks_skipped.len() + stacks_incomplete.len()`, in every run (without
-//!   rejected commands this is the sum of the task description);
+//!   rejected commands this is the sum of the stack counters);
 //! - reasons name the stack's Lightroom id, never a path.
 
 use lc_writer::apply::{ApplySummary, apply, apply_partial};
