@@ -70,7 +70,7 @@ Process cost: spawning `lightcraft-cli` needs the binary on the user's machine a
 
 ## Open questions
 
-1. **Scope vs. built-in importer** (user decision): `library.importLightroom` already does folders-as-paths, ratings, keywords, collections, virtual copies and develop settings. Should lr2lc call it (thin wrapper with dry-run/report/checksum) or reimplement the mapping and feed `library.import`/`photo.*`?
+1. **Scope vs. built-in importer** (open decision): `library.importLightroom` already does folders-as-paths, ratings, keywords, collections, virtual copies and develop settings. Should lr2lc call it (thin wrapper with dry-run/report/checksum) or reimplement the mapping and feed `library.import`/`photo.*`?
 2. How does the native importer handle keyword synonyms, `includeOnExport`, and keywords with no photos? Not examined (it reads only `AgLibraryKeyword` name/parent, `lightroom_catalog.rs:496-518`).
 3. Is the XMP auto-write preference ever on by default in a new library or in the desktop app? Only the struct default (`false`) was read, not the app's library defaults.
 4. Can a photo whose original is missing be created through the public commands other than `library.importLightroom`? No such command found; `Op::AddPhoto` is an internal op.

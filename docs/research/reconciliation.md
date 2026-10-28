@@ -109,7 +109,7 @@ Acceptance: each item of §4 has a test and a report code; renamed keyword by gl
 
 ## Open questions
 
-1. Behaviour for photos already in LightCraft before the first lr2lc run (base unknown): treat defaults as writable and everything else as conflict, or ask? (User decision.)
+1. Behaviour for photos already in LightCraft before the first lr2lc run (base unknown): treat defaults as writable and everything else as conflict, or ask? (Open decision.)
 2. Should Lightroom-side removals (keyword removed from a photo, photo removed from an album) ever be applied, e.g. with an explicit `--prune`? Default here: report only.
 3. May reports contain field values, or only field names and ids?
 4. Is `catalog.query` with `filter: {}` complete (Local-only and deleted photos)? Not verified (`lightcraft-albums.md` A5 assumption).

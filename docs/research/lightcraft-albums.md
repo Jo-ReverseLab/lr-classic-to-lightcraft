@@ -200,7 +200,7 @@ Sources: `docs/research/lrcat-schema-lrc15.md` (structure observed earlier on a 
 
 - Where: the rules are **not** columns of `AgLibraryCollection`. They are a row in `AgLibraryCollectionContent` (`id_local, collection, content, owningModule`) with `owningModule = "ag.library.smart_collection"`; the extractor reads `content` of that row with `lron::Object::from_string` (`lrcat-extractor:src/content.rs:77-103`; table layout `lrcat-schema-lrc15.md`). Other `owningModule` keys in the same table: `com.adobe.ag.library.filter`, `.sortType`, `.sortDirection` (`content.rs:86-98`): view settings, not membership (`lrcat-extractor:doc/lrcat_format.md:84-107`).
 - Format: Lightroom's own text notation "lron" (Lua-table-like: `name = { key = value, … }`, nested braces, strings, integers, floats, booleans; `lrcat-extractor:src/lron.rs:8-31`, value kinds at `:46-53`). The extractor's test file shows the shape of a smart collection: an outer table holding a list of criterion tables, each with `criteria`, `operation`, `value` and `value2`, plus a `combine` key at the outer level, and an embedded escaped sub-object in a further key (`lrcat-extractor:data/test_lron`, a synthetic sample). So per rule: criterion name + operator + one or two values; combination across rules by `combine`. The values of `combine` are *(assumption from general knowledge, not in the sources: `intersect` = all, `union` = any, `exclude` = none)*; the sample only shows `intersect`.
-- Which criteria are common, and the exact value vocabulary (e.g. which `operation` strings exist, how keyword criteria express "any / all / none" and sub-keywords): **not in the sources**. Needs an inventory on the real catalog (Open question, structure-only: a histogram of `criteria`/`operation` names and their counts, no values; to be done by the katalog-tester role).
+- Which criteria are common, and the exact value vocabulary (e.g. which `operation` strings exist, how keyword criteria express "any / all / none" and sub-keywords): **not in the sources**. Needs an inventory on the real catalog (Open question, structure-only: a histogram of `criteria`/`operation` names and their counts, no values).
 - LightCraft itself does not translate them: smart collections become plain albums with the **current membership** read from `AgLibraryCollectionImage` (`lightroom_catalog.rs:1064-1075`; `docs/lightroom-catalog-import.md:105-107`). Whether Lightroom keeps `AgLibraryCollectionImage` rows for a smart collection is unclear (the importer assumes it can read members; with no rows the album would be empty) *(Open question)*.
 - Sibling tables: none needed (`AgLibraryCollectionContent` has `collection` only, `lrcat-schema-lrc15.md`).
 
@@ -285,7 +285,7 @@ What LightCraft offers: `albums.list` (names, tree, counts), `catalog.query` + f
 
 ## Open questions
 
-Needing a live test against a running LightCraft (Mac test):
+Needing a live test against a running LightCraft:
 
 1. Does the control port reply to `library.select` followed by `photo.rate {ids}` as described (gate semantics read from source, not run)? Also whether any command via `app.run` pre-empts `session.execute` (`menus::run_ui_command`, `crates/ui-egui/src/lib.rs:860`) for album and stack commands.
 2. Real reply of `photo.inspect`: exact JSON of `source` (expected `{"type":"file","path":…}`), snake_case names.
@@ -296,7 +296,7 @@ Needing a live test against a running LightCraft (Mac test):
 7. Is the UI thread blocked (no frames) during `library.import`, and does that trigger the 5 s no-frame rejection of the next request?
 8. `stack.group` with `collapsed:true` for many stacks: speed; behaviour with deleted or Local members.
 
-Needing the real Lightroom catalog (structure-only, role katalog-tester; no values):
+Needing the real Lightroom catalog (structure only, no values):
 
 9. Which `creationId` strings exist in LrC 15 and what are their counts (collection, set, smart, quick, others); how the Quick Collection is recognised.
 10. Names and columns of the stack tables (B3) and whether `position` 1 is the top.

@@ -68,7 +68,7 @@ Only exception worth a live test: a **single** keyword with `any`/`==` mapped to
 - Counting rule: collections read = converted + skipped (principle 4); the skip reason is per collection, naming the first untranslatable criterion.
 
 **Smart collections, part b: translation + writer.**
-- Pure function `translate(SmartRules) -> Result<RuleSet, Vec<Reason>>`, a table-driven whitelist from §2 (initially `rating ==/>=`; `pick`, `labelColor` colour names, `keywords empty` enabled only after the live test). Any untranslatable rule → whole collection skipped (a dropped rule changes membership both for `all` and `any`, albums:A2).
+- Pure function `translate(SmartRules) -> Result<RuleSet, Vec<Reason>>`, a table-driven allowlist from §2 (initially `rating ==/>=`; `pick`, `labelColor` colour names, `keywords empty` enabled only after the live test). Any untranslatable rule → whole collection skipped (a dropped rule changes membership both for `all` and `any`, albums:A2).
 - `album.createSmart {name, parent?, rules}` (always pass `rules`; albums:A2); runs after regular albums. Not idempotent: store the Lightroom collection global id → album id in the mapping state, and never call again for a known id; rule changes only reported (first version).
 - Compare `count` from `album.createSmart` with Lightroom's current membership where readable (`AgLibraryCollectionImage`, albums:B2, albums:C2); warn on mismatch.
 - Dry run default: print the translated rule set; `--apply` creates albums.
@@ -93,4 +93,4 @@ Only exception worth a live test: a **single** keyword with `any`/`==` mapped to
 
 ## Recommendation
 
-Implement the parser and model first (report names only). Implement the translation with a whitelist that starts with `rating` only, and enable `pick`, colour-name `labelColor`, and `keywords empty` one by one after the live tests. Skip every other collection whole, with a reason. Do not translate keyword, date or text rules until their semantics are verified against both applications.
+Implement the parser and model first (report names only). Implement the translation with a allowlist that starts with `rating` only, and enable `pick`, colour-name `labelColor`, and `keywords empty` one by one after the live tests. Skip every other collection whole, with a reason. Do not translate keyword, date or text rules until their semantics are verified against both applications.
