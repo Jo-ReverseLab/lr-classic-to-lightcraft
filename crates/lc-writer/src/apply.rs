@@ -27,9 +27,9 @@
 //! 6. last the Quick Collection, only if some member is not in the mapping
 //!    file: `album.setTarget {id: null}` (so a target album the user set is
 //!    not used), `albums.list {}` (the answer of step 5 is reused), then the
-//!    members of the one top-level album named `Quick Collection` are read
-//!    with `catalog.query {filter: {album}, offset, limit: 200}` page by
-//!    page; only the photos it does not hold are sent, with
+//!    members of the one top-level album named `Quick Collection` (not a
+//!    smart album) are read with `catalog.query {filter: {album}, offset,
+//!    limit: 200}` page by page; only the photos it does not hold are sent, with
 //!    `library.select {ids, active: first}` and `album.toggleTarget {ids}`
 //!    (a toggle of photos that are all in it would remove them). Several
 //!    such albums skip the Quick Collection as ambiguous; lr2lc never
@@ -253,6 +253,16 @@ const QUICK_NAME: &str = "Quick Collection";
 
 /// The page size of `catalog.query`.
 const QUERY_PAGE: usize = 200;
+
+/// The ids of the nodes that may be the Quick Collection: top-level albums
+/// named [`QUICK_NAME`] that are neither folders nor smart albums.
+fn quick_candidates(nodes: Vec<Node>) -> Vec<Value> {
+    nodes
+        .into_iter()
+        .filter(|n| n.parent.is_none() && !n.folder && !n.smart && n.name == QUICK_NAME)
+        .map(|n| n.id)
+        .collect()
+}
 
 /// One page of a `catalog.query` answer.
 #[derive(Debug, PartialEq)]
@@ -487,12 +497,7 @@ impl Run<'_> {
         {
             return Ok(());
         }
-        let candidates: Vec<Value> = self
-            .album_nodes()?
-            .into_iter()
-            .filter(|n| n.parent.is_none() && !n.folder && n.name == QUICK_NAME)
-            .map(|n| n.id)
-            .collect();
+        let candidates = quick_candidates(self.album_nodes()?);
         let held: Vec<Value> = match candidates.as_slice() {
             [] => Vec::new(),
             [id] => match self.album_members(id)? {
@@ -1290,6 +1295,25 @@ mod tests {
         assert!(parse_query_page(&json!({"photos": []})).is_err());
         assert!(parse_query_page(&json!({"total": 1, "photos": [{}]})).is_err());
         assert!(parse_query_page(&json!([])).is_err());
+    }
+
+    #[test]
+    fn only_plain_top_level_albums_are_quick_candidates() {
+        let node = |id: i64, name: &str, folder: bool, smart: bool, parent: Option<Value>| Node {
+            id: json!(id),
+            name: name.into(),
+            folder,
+            smart,
+            parent,
+        };
+        let nodes = vec![
+            node(1, QUICK_NAME, false, false, None),
+            node(2, QUICK_NAME, false, true, None),
+            node(3, QUICK_NAME, true, false, None),
+            node(4, QUICK_NAME, false, false, Some(json!(3))),
+            node(5, "quick collection", false, false, None),
+        ];
+        assert_eq!(quick_candidates(nodes), vec![json!(1)]);
     }
 
     #[test]

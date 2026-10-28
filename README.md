@@ -76,7 +76,8 @@ skipped with `more than one quick collection`. Its members follow the album
 rules above. With `--apply` lr2lc runs, as the very last step and only when
 some member is not yet in the mapping file: `album.setTarget {id: null}`
 (so a target album you chose is not used), `albums.list`, then reads the
-members of the one top-level album named `Quick Collection` with
+members of the one top-level album (not a smart album) named
+`Quick Collection` with
 `catalog.query` (200 per page). Only photos it does not hold yet are sent,
 with `library.select` and `album.toggleTarget`; LightCraft creates the
 album when it is missing. Two such albums skip the step as ambiguous
