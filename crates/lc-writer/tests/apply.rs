@@ -32,9 +32,6 @@
 //!
 //! A second run with an unchanged input sends only read commands.
 //!
-//! STATUS: waiting for P5-4c. The whole file is disabled by the crate-level
-//! `cfg(any())` above. The developer may ONLY remove the `#![cfg(any())]`
-//! line. Any other change to this file needs the test author.
 
 // `..WriteInput::default()` stays valid when the struct gains fields (P5b-3b).
 #![allow(clippy::needless_update)]

@@ -31,9 +31,6 @@
 //! - always: the catalog is byte-identical afterwards, originals are not
 //!   touched, a second `--apply` sends only read commands.
 //!
-//! STATUS: waiting for P5-4c. The whole file is disabled by the crate-level
-//! `cfg(any())` above. The developer may ONLY remove the `#![cfg(any())]`
-//! line. Any other change to this file needs the test author.
 
 use lrcat_fixtures::write_keyword_edge_catalog_with_files;
 use std::collections::BTreeMap;

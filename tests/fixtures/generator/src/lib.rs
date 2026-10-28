@@ -1187,7 +1187,7 @@ pub mod smart_edge {
     pub const READABLE: [(i64, &str); 14] = [
         (
             101,
-            "s = {\n\t{\n\t\tcriteria = \"rating\",\n\t\toperation = \">=\",\n\t\tvalue = 3,\n\t\tvalue2 = 0,\n\t},\n\tcombine = \"intersect\",\n}",
+            "s = {\n\t{\n\t\tcriteria = \"rating\",\n\t\toperation = \">=\",\n\t\tvalue = 3,\n\t},\n\tcombine = \"intersect\",\n}",
         ),
         (
             102,
@@ -1361,7 +1361,7 @@ pub fn write_smart_translate_catalog_with_files(dir: &Path) -> Result<PathBuf> {
             201,
             None,
             format!(
-                "s = {{\n\t{{\n\t\t{R},\n\t\toperation = \"==\",\n\t\tvalue = 5,\n\t\tvalue2 = 0,\n\t}},\n\tcombine = \"intersect\",\n}}"
+                "s = {{\n\t{{\n\t\t{R},\n\t\toperation = \"==\",\n\t\tvalue = 5,\n\t}},\n\tcombine = \"intersect\",\n}}"
             ),
         ),
         (
@@ -1457,6 +1457,49 @@ fn add_smart_edges(path: &Path) -> Result<()> {
         smart_edge::SMART,
         Some(smart_edge::READABLE[0].1),
     )?;
+    Ok(())
+}
+
+/// Smart collections with boolean rule values ([`write_smart_bool_catalog`]).
+pub mod smart_bool {
+    /// `(collection id, rule text)`: 301 `value = true`, 302 `value2 =
+    /// false`, 303 `value_units = true`, 304 `value = { 1 }` (a table: still
+    /// unreadable).
+    pub const ROWS: [(i64, &str); 4] = [
+        (
+            301,
+            "s = {\n\t{\n\t\tcriteria = \"hasGps\",\n\t\toperation = \"==\",\n\t\tvalue = true,\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+        (
+            302,
+            "s = {\n\t{\n\t\tcriteria = \"rating\",\n\t\toperation = \">=\",\n\t\tvalue = 3,\n\t\tvalue2 = false,\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+        (
+            303,
+            "s = {\n\t{\n\t\tcriteria = \"captureTime\",\n\t\toperation = \"inLast\",\n\t\tvalue = 30,\n\t\tvalue_units = true,\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+        (
+            304,
+            "s = {\n\t{\n\t\tcriteria = \"pick\",\n\t\toperation = \"==\",\n\t\tvalue = { 1 },\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+    ];
+}
+
+/// Like [`write_smart_catalog`], plus the top-level smart collections of
+/// [`smart_bool`].
+pub fn write_smart_bool_catalog(path: &Path) -> Result<()> {
+    write_smart_catalog(path)?;
+    let c = Connection::open(path)?;
+    for (id, text) in smart_bool::ROWS {
+        c.execute(
+            "INSERT INTO AgLibraryCollection (id_local, creationId, genealogy, imageCount, name, parent, systemOnly) VALUES (?1, 'com.adobe.ag.library.smart_collection', ?2, 0, ?3, NULL, 0)",
+            params![id, format!("/{id}"), format!("Smart {} {id}", smart_edge::SECRET)],
+        )?;
+        c.execute(
+            "INSERT INTO AgLibraryCollectionContent (collection, content, owningModule) VALUES (?1, ?2, ?3)",
+            params![id, text, smart_edge::SMART],
+        )?;
+    }
     Ok(())
 }
 

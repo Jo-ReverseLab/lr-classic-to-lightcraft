@@ -3,10 +3,6 @@
 //! `write_smart_translate_catalog_with_files`, against the stateful fake
 //! LightCraft.
 //!
-//! STATUS: waiting for P5b-4b. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
-//!
 //! Translatable (see `lrcat_fixtures::smart_translate`): 4 collections, all
 //! with a plain `rating` rule. Every other smart collection of the fixture is
 //! skipped with a reason.

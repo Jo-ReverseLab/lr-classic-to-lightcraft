@@ -1,10 +1,6 @@
 //! CLI acceptance tests for writing stacks (task P5b-5), with the generator
 //! fixture `stack_edge`, against the stateful fake LightCraft.
 //!
-//! STATUS: waiting for P5b-5. The whole file is disabled by the crate-level
-//! `cfg(any())` below. The developer may ONLY remove that line. Any other
-//! change to this file needs the test author.
-//!
 //! `report.json`, section `writer`:
 //! - applied run: integers `stacks_grouped`, `stacks_known`,
 //!   `stack_members_removed`; lists of `{reason}`: `stacks_skipped`,

@@ -1,9 +1,6 @@
 //! CLI acceptance tests for the quick collection (task P5b-6), against the
 //! stateful fake LightCraft.
 //!
-//! STATUS: waiting for P5b-6. Disabled by the crate-level `cfg(any())`; the
-//! developer may ONLY remove that line.
-//!
 //! Fixtures: `quick_edge` (one quick collection with three converted
 //! members, see the generator) and `collection_edge` (two quick collections,
 //! the first has a member whose original is missing, so it is empty here).

@@ -20,9 +20,6 @@
 //! DECISION: without an abort the field `aborted` is ABSENT from `writer`
 //! (not `null`), also in dry runs.
 //!
-//! STATUS: waiting for P5-4d. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
 
 use lrcat_fixtures::write_keyword_edge_catalog_with_files;
 use serde_json::Value;

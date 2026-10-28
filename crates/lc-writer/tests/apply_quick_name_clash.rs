@@ -2,9 +2,6 @@
 //! quick collection (task P5b-6a), module `lc_writer::apply`, against the
 //! stateful fake LightCraft.
 //!
-//! STATUS: waiting for P5b-6a. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//!
 //! Rule: albums whose LightCraft id is in `state.collections` (created or
 //! adopted by lr2lc) are never candidates for the quick collection. So a
 //! lr2lc album named "Quick Collection" never makes the quick step

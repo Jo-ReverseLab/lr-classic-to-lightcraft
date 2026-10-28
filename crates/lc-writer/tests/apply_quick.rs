@@ -4,10 +4,6 @@
 //! they are removed; target album set by `album.setTarget` wins over the
 //! Quick Collection; Quick Collection is created when missing).
 //!
-//! STATUS: waiting for P5b-6. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
-//!
 //! API under test:
 //! - `WriteInput.quick: Option<model::QuickCollection>`;
 //! - `ApplySummary { quick_added, quick_already, quick_removed: usize,

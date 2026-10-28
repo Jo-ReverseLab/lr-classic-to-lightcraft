@@ -17,10 +17,6 @@
 //! `lightcraft_id` and `fields` (`rating`, ..., `keywords` as a sorted list of
 //! `a|b|c` path texts).
 //!
-//! STATUS: waiting for P5-4b. The whole file is disabled by the crate-level
-//! `cfg(any())` below. The developer may ONLY remove the `#![cfg(any())]`
-//! line (and add the dependency on `model` and `serde` to `Cargo.toml`). Any
-//! other change to this file needs the test author.
 
 use lc_writer::state::{State, snapshot, state_path};
 use model::{ColorLabel, Flag, Keyword, Photo, Rating};

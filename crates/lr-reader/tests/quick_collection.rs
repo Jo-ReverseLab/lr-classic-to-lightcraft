@@ -1,8 +1,5 @@
 //! Acceptance tests for reading the quick collection (task P5b-6).
 //!
-//! STATUS: waiting for P5b-6. Disabled by the crate-level `cfg(any())`; the
-//! developer may ONLY remove that line.
-//!
 //! API: `CollectionData.quick: Option<model::QuickCollection>` with
 //! `QuickCollection { lightroom_id: i64, members: Vec<i64> }`.
 //!

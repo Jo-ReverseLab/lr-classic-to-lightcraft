@@ -2,10 +2,6 @@
 //! (task P5b-3b), with the generator fixture `collection_edge`, against the
 //! stateful fake LightCraft.
 //!
-//! STATUS: waiting for P5b-3b. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
-//!
 //! `report.json`, section `writer`:
 //! - applied run: integers `folders_created`, `albums_created`,
 //!   `collections_known`, `members_added`, `members_removed`,

@@ -24,11 +24,6 @@
 //!
 //! The fake port is in `tests/support/fake_port.rs`; it records every line.
 //!
-//! STATUS: waiting for P5-4a. The whole file is disabled by the crate-level
-//! `cfg(any())` below, because it needs the `control` module and the
-//! dev-dependencies `serde_json` and `tempfile`. The developer may ONLY
-//! remove the `#![cfg(any())]` line (and add the dev-dependencies to
-//! `Cargo.toml`). Any other change to this file needs the test author.
 
 #[path = "support/fake_port.rs"]
 mod fake_port;

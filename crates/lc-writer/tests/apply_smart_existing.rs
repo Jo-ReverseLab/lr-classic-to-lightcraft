@@ -183,7 +183,10 @@ fn lost_state_file_adopts_smart_albums_and_creates_nothing() {
     assert_eq!(s.smart_existing, 2, "{s:?}");
     assert_eq!((s.smart_created, s.smart_known), (0, 0));
     assert!(s.smart_skipped.is_empty());
-    assert!(of(&commands, "album.createSmart").is_empty(), "{commands:?}");
+    assert!(
+        of(&commands, "album.createSmart").is_empty(),
+        "{commands:?}"
+    );
     assert!(of(&commands, "album.create").is_empty(), "{commands:?}");
     assert_eq!(fake.albums(), albums, "nothing created or changed");
 
@@ -206,7 +209,10 @@ fn lost_state_file_adopts_smart_albums_and_creates_nothing() {
 
     // Now it is stable: no album command, no albums.list.
     let (s, again) = ok(&fake, &env, &inp);
-    assert_eq!((s.smart_known, s.smart_existing, s.smart_created), (2, 0, 0));
+    assert_eq!(
+        (s.smart_known, s.smart_existing, s.smart_created),
+        (2, 0, 0)
+    );
     assert!(of(&again, "albums.list").is_empty());
     assert!(!again.iter().any(|(c, _)| c.starts_with("album.")));
     assert_eq!(fake.albums(), albums);
@@ -218,7 +224,10 @@ fn albums_list_is_read_once_before_the_first_create_smart() {
     let fake = FakeLightCraft::start(Config::new(&env.library));
     let (_, commands) = ok(&fake, &env, &input());
     assert_eq!(of(&commands, "albums.list").len(), 1);
-    let list = commands.iter().position(|(c, _)| c == "albums.list").unwrap();
+    let list = commands
+        .iter()
+        .position(|(c, _)| c == "albums.list")
+        .unwrap();
     let first = commands
         .iter()
         .position(|(c, _)| c == "album.create" || c == "album.createSmart")
@@ -264,13 +273,21 @@ fn two_equal_smart_albums_are_reported_not_guessed() {
     assert!(!s.smart_skipped[0].reason.contains("Twin"));
     assert!(of(&commands, "album.createSmart").is_empty());
     assert_eq!(named(&fake, "Twin").len(), 2);
-    assert!(state(&env)["collections"].as_object().is_none_or(|c| c.is_empty()));
+    assert!(
+        state(&env)["collections"]
+            .as_object()
+            .is_none_or(|c| c.is_empty())
+    );
 
     // Both still in Lightroom: two collections want two albums, and none of
     // them can tell which is which.
     let (s, commands) = ok(&fake, &env, &twins);
     assert_eq!(s.smart_skipped.len(), 2);
-    assert!(s.smart_skipped.iter().all(|k| k.code == SkipCode::Ambiguous));
+    assert!(
+        s.smart_skipped
+            .iter()
+            .all(|k| k.code == SkipCode::Ambiguous)
+    );
     assert!(of(&commands, "album.createSmart").is_empty());
     assert_eq!(named(&fake, "Twin").len(), 2);
 }
@@ -294,7 +311,10 @@ fn same_name_with_other_rules_is_created_not_adopted() {
     assert_eq!(of(&commands, "album.createSmart").len(), 1);
     let both = named(&fake, "Picks");
     assert_eq!(both.len(), 2);
-    assert!(both.iter().any(|b| b.rules == Some(translate(&rules(">=", 4.0)).unwrap())));
+    assert!(
+        both.iter()
+            .any(|b| b.rules == Some(translate(&rules(">=", 4.0)).unwrap()))
+    );
 }
 
 #[test]
@@ -378,11 +398,17 @@ fn a_smart_album_claimed_by_another_entry_is_not_adopted_twice() {
     ok(&fake, &env, &first);
     // Collection 11 is equal to collection 10; the state keeps 10.
     let both = WriteInput {
-        smart: vec![smart(10, "Twin", None, r.clone()), smart(11, "Twin", None, r)],
+        smart: vec![
+            smart(10, "Twin", None, r.clone()),
+            smart(11, "Twin", None, r),
+        ],
         ..WriteInput::default()
     };
     let (s, commands) = ok(&fake, &env, &both);
-    assert_eq!((s.smart_known, s.smart_created, s.smart_existing), (1, 1, 0));
+    assert_eq!(
+        (s.smart_known, s.smart_created, s.smart_existing),
+        (1, 1, 0)
+    );
     assert_eq!(of(&commands, "album.createSmart").len(), 1);
     assert_eq!(named(&fake, "Twin").len(), 2);
     let st = state(&env);
@@ -417,7 +443,13 @@ fn no_smart_album_is_written_without_the_apply_call_and_the_library_is_not_chang
     ok(&fake, &env, &inp);
     lose_state(&env);
     let (_, commands) = ok(&fake, &env, &inp);
-    for word in ["album.delete", "album.rename", "album.move", "album.createSmart", "removePhotos"] {
+    for word in [
+        "album.delete",
+        "album.rename",
+        "album.move",
+        "album.createSmart",
+        "removePhotos",
+    ] {
         assert!(!commands.iter().any(|(c, _)| c.contains(word)), "{word}");
     }
 }

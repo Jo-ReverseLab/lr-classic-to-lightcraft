@@ -18,10 +18,6 @@
 //! are skipped; imports are exactly `{paths:[p], mode:"add"}`; the order is
 //! deterministic (by global id).
 //!
-//! STATUS: waiting for P5-4b. The whole file is disabled by the crate-level
-//! `cfg(any())` below. The developer may ONLY remove the `#![cfg(any())]`
-//! line (and add the dependency on `model` and `serde` to `Cargo.toml`). Any
-//! other change to this file needs the test author.
 
 // `..WriteInput::default()` stays valid when the struct gains fields (P5b-3b).
 #![allow(clippy::needless_update)]

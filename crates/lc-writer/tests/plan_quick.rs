@@ -1,9 +1,6 @@
 //! Acceptance tests for planning the quick collection (task P5b-6), module
 //! `lc_writer::plan`.
 //!
-//! STATUS: waiting for P5b-6. Disabled by the crate-level `cfg(any())`; the
-//! developer may ONLY remove that line.
-//!
 //! API: `WriteInput.quick: Option<model::QuickCollection>`,
 //! `Step::QuickAdd { gids: Vec<String> }`, the mapping file key
 //! `quick = {members: [gids]}` (the state is built by loading a file with

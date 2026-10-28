@@ -1,10 +1,6 @@
 //! Acceptance tests for the pure planning rules of stacks (task P5b-5),
 //! module `lc_writer::plan`.
 //!
-//! STATUS: waiting for P5b-5. The whole file is disabled by the crate-level
-//! `cfg(any())` below. The developer may ONLY remove that line. Any other
-//! change to this file needs the test author.
-//!
 //! API under test (all pub):
 //! - `WriteInput.stacks: Vec<model::Stack>`;
 //! - `Step::GroupStack { stack_id: i64, gids: Vec<String> }`;

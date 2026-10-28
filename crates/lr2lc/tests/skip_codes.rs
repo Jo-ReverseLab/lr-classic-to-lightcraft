@@ -65,6 +65,7 @@
 //!   parent_missing        parent row missing                 "collection N: parent P is missing"
 //!   parent_skipped        parent is skipped                  "collection N: parent P is skipped"
 //!   parent_not_set        parent is an album, not a set      "collection N: parent P is not a collection set"
+//!                         (writer, smart collection)         "smart collection N: its parent collection P is not a converted collection set; not converted"
 //!   parent_cycle          parent chain is a cycle            "collection N: parent chain forms a cycle"
 //! Reader: collection_members
 //!   collection_id_invalid collection id not valid            "photo N: collection id is not valid"
@@ -250,7 +251,8 @@ const NOT_FIXTURE_REACHABLE: [&str; 24] = [
 fn expected_code(reason: &str) -> Option<&'static str> {
     let has = |s: &str| reason.contains(s);
     // Writer texts first; they may embed reader-like words.
-    let table: [(&str, &str); 14] = [
+    let table: [(&str, &str); 15] = [
+        ("is not a converted collection set", "parent_not_set"),
         ("LightCraft rejected", "rejected"),
         ("applied but not saved", "applied_not_saved"),
         ("returned no id", "no_id_returned"),

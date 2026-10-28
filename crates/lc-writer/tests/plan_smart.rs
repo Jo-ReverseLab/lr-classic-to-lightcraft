@@ -1,10 +1,6 @@
 //! Acceptance tests for the pure planning rules of smart collections (task
 //! P5b-4b), module `lc_writer::plan`.
 //!
-//! STATUS: waiting for P5b-4b. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
-//!
 //! API under test (all pub; the translation itself is tested in
 //! `smart_translate.rs`):
 //! - `model::SmartCollection { lightroom_id: i64, name: String, parent:

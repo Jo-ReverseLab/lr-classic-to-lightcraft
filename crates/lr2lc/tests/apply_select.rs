@@ -17,9 +17,6 @@
 //!   (a `lr:<global id>` placeholder for a photo imported by the plan, the
 //!   LightCraft id for a known photo).
 //!
-//! STATUS: waiting for P5-4e. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
 
 use lrcat_fixtures::write_keyword_edge_catalog_with_files;
 use serde_json::{Value, json};

@@ -98,10 +98,7 @@ fn rules(combine: SmartCombine, rules: Vec<SmartRule>) -> SmartRules {
 fn expected(id: i64) -> SmartRules {
     use SmartCombine::{Intersect, Other, Union};
     match id {
-        101 => rules(
-            Intersect,
-            vec![rule("rating", ">=", num(3.0), num(0.0), None)],
-        ),
+        101 => rules(Intersect, vec![rule("rating", ">=", num(3.0), None, None)]),
         102 => rules(Union, vec![rule("pick", "==", num(-1.0), None, None)]),
         103 => rules(
             Intersect,

@@ -2,10 +2,6 @@
 //! lost (task P5b-3c, principle 5), module `lc_writer::apply`, against the
 //! stateful fake LightCraft with pre-existing albums (`Config::albums`).
 //!
-//! STATUS: waiting for P5b-3c. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
-//!
 //! Rules under test:
 //! - when the plan has at least one `album.create`, apply sends `albums.list {}`
 //!   exactly once, before the first `album.create` (and not otherwise);

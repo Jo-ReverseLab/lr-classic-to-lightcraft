@@ -4,10 +4,6 @@
 //! mandatory in the fake, a parent must be an existing folder, names are
 //! trimmed, smart albums refuse `album.addPhotos`).
 //!
-//! STATUS: waiting for P5b-4b. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
-//!
 //! API under test (see `plan_smart.rs` and `smart_translate.rs`):
 //! - `WriteInput.smart: Vec<model::SmartCollection>`;
 //! - `ApplySummary { smart_created, smart_known, smart_rules_changed: usize,

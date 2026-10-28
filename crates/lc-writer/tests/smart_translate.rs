@@ -1,10 +1,6 @@
 //! Acceptance tests for the translation of smart collection rules (task
 //! P5b-4b), module `lc_writer::smart`.
 //!
-//! STATUS: waiting for P5b-4b. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
-//!
 //! API under test:
 //! `pub fn translate(rules: &model::SmartRules) -> Result<serde_json::Value, String>`
 //! - a pure function: no I/O, same input, same output;
@@ -16,8 +12,8 @@
 //! Whitelist (F-017 point 9, strict; F-021 open): only criterion `rating`
 //! with operation `==` (op `is`) or `>=` (op `gte`), value a number that is
 //! a whole number 0..=5 (a text, a fraction, a negative number, 6 or more,
-//! or no value is not translated). `value2` is ignored (Lightroom writes 0
-//! there). `combine` `intersect` -> `all`, `union` -> `any`; the rules keep
+//! or no value is not translated; a set `value2` or units is not translated
+//! either, see `smart_strict.rs`). `combine` `intersect` -> `all`, `union` -> `any`; the rules keep
 //! their order. Everything else skips the whole collection.
 //!
 //! Reasons: name the first untranslatable criterion as `criterion "<name>"`
@@ -94,13 +90,6 @@ fn every_star_count_from_zero_to_five_works_and_value_is_an_integer() {
             assert!(sent["value"].is_u64(), "{v}");
         }
     }
-}
-
-#[test]
-fn value2_is_ignored() {
-    let mut r = rating(">=", 3.0);
-    r.value2 = Some(SmartValue::Number(0.0));
-    assert!(translate(&all(vec![r])).is_ok());
 }
 
 #[test]

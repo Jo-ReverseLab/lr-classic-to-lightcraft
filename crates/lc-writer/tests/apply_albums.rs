@@ -4,10 +4,6 @@
 //! and `album.removePhotos`, trims names, allows equal names and refuses
 //! `addSelected` and a parent that is not an existing folder).
 //!
-//! STATUS: waiting for P5b-3b. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
-//!
 //! API under test (see also `plan_albums.rs`):
 //! - `WriteInput.collections`;
 //! - `ApplySummary { folders_created, albums_created, collections_known,

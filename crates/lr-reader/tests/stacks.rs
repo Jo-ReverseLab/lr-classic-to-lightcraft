@@ -1,9 +1,6 @@
 //! Acceptance tests for reading folder stacks into the model (task P5b-5),
 //! on the stack fixture (`lrcat_fixtures::stack_edge`).
 //!
-//! Expected API (the first line below, `#![cfg(any())]`, switches these
-//! tests off until the developer removes it):
-//!
 //! ```ignore
 //! // model
 //! pub struct Stack { pub lightroom_id: i64, pub members: Vec<i64>, pub collapsed: bool }

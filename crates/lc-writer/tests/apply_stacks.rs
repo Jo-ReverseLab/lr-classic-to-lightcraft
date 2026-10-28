@@ -4,10 +4,6 @@
 //! merging of touched stacks, `collapsed` defaulting to true, equal
 //! arguments giving the same state).
 //!
-//! STATUS: waiting for P5b-5. The whole file is disabled by the crate-level
-//! `cfg(any())` below. The developer may ONLY remove that line. Any other
-//! change to this file needs the test author.
-//!
 //! API under test (see also `plan_stacks.rs`):
 //! - `WriteInput.stacks`;
 //! - `ApplySummary { stacks_grouped, stacks_known, stack_members_removed:

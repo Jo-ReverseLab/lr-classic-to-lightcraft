@@ -17,9 +17,6 @@
 //! - a photo imported (or found as a duplicate) in this run counts only as
 //!   imported (existing), also when later updates succeed or fail.
 //!
-//! STATUS: waiting for P5-4d. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
 
 // `..WriteInput::default()` stays valid when the struct gains fields (P5b-3b).
 #![allow(clippy::needless_update)]

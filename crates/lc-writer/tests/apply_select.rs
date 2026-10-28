@@ -17,9 +17,6 @@
 //! - a rejected select puts the photo in `photos_incomplete`, its updates are
 //!   not sent, the run goes on, the balance holds; a lost connection aborts.
 //!
-//! STATUS: waiting for P5-4e. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
 
 use lc_writer::apply::{ApplySummary, apply};
 use lc_writer::control::{ControlClient, WriteError};

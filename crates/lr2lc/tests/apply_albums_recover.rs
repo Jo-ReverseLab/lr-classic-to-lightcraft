@@ -2,10 +2,6 @@
 //! (task P5b-3c, principle 5), with the generator fixture `collection_edge`,
 //! against the stateful fake LightCraft.
 //!
-//! STATUS: waiting for P5b-3c. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
-//!
 //! After a first complete run and deleting the mapping file, a second run
 //! with `--apply`:
 //! - sends no `album.create`; the albums and their members in LightCraft are

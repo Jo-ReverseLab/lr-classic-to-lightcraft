@@ -1,10 +1,6 @@
 //! Acceptance tests for the pure planning rules of collections (task
 //! P5b-3b), module `lc_writer::plan`.
 //!
-//! STATUS: waiting for P5b-3b. The whole file is disabled by the crate-level
-//! `cfg(any())` on the first line. The developer may ONLY remove that line.
-//! Any other change to this file needs the test author.
-//!
 //! API under test (all pub):
 //! - `WriteInput.collections: Vec<model::Collection>`;
 //! - `Step::CreateAlbum { collection_id: i64, params: Value }`,
