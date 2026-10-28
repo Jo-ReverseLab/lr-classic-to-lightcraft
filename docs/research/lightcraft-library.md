@@ -1,5 +1,7 @@
 # LightCraft library: storage of folders, photos, keywords and ratings
 
+> **Status:** Research notes on LightCraft 0.14.0. They describe the storage format; lr2lc does not write it directly but goes through the control port.
+
 All references are relative to the LightCraft source root (workspace version 0.14.0, `Cargo.toml:6`). Everything below was read in the sources; statements marked *(assumption)* were not verified in code.
 
 ## Storage format

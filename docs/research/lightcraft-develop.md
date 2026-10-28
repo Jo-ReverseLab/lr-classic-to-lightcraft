@@ -1,5 +1,7 @@
 # LightCraft develop settings: overview for phase 6
 
+> **Status:** Research notes for a later phase. Development settings are not converted yet.
+
 References are relative to the LightCraft source root (0.14.0). Statements marked *(assumption)* are not verified in code.
 
 ## Controls (sliders)

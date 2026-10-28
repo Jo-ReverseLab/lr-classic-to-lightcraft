@@ -1,4 +1,6 @@
-# Three-way reconciliation with LightCraft (groundwork for P5-9 and P5b-8)
+# Three-way reconciliation with LightCraft (groundwork)
+
+> **Status:** The read-only snapshot of the LightCraft state (step a below) is done. The three-way decision for photo fields and keywords (step b) and the handling of albums, removed and renamed items (step c) are open; sections 3 and 4 describe the planned behaviour, not the current one. Decision: only values that still have their default (0 stars, no flag, no label, empty text) may be overwritten in a photo that LightCraft already had before the first run; any other difference is reported as a conflict and nothing is written.
 
 Paths are relative to the lr2lc repo (`crates/…`, `docs/…`) or, where marked `LC:`, to the LightCraft source checkout (read only). Statements without file:line are marked *(assumption)*.
 
@@ -74,7 +76,7 @@ Notes:
 - The report must name only field, photo identifier (Lightroom id) and rule; not the values themselves *(design suggestion; keeps user data such as titles out of report files that might be shared)*. Values may appear in a `--verbose` console mode only *(open)*.
 - Idempotence: running again without changes on either side yields `C == L` for every field, so no output.
 
-## 4. Remaining scope of P5b-8 (removed and renamed)
+## 4. Remaining scope (removed and renamed)
 
 Already counted today (`crates/lc-writer/src/apply.rs:130-138`, `plan.rs:166-173`, `:475-478`, `:747-764`): `collections_renamed`, `collections_moved`, `collections_removed`, `smart_no_longer_translatable`; also `quick_removed` (`plan.rs:287`) and `stack_members_removed` (`plan.rs:312`), `smart_rules_changed` (`plan.rs:229`). These compare Lightroom with base only and apply nothing for removal.
 
@@ -91,17 +93,17 @@ Missing:
 | Album/folder name or parent changed in LightCraft | not read | covered by §3 |
 | Deleted in LightCraft (album deleted, photo in Recently Deleted) | not detected; a re-run would not recreate the album (state says known) and `album.addPhotos` fails *(assumption)* | read `albums.list` ids and `deleted`; report "removed in LightCraft", never recreate silently |
 
-## 5. Proposed split of P5-9
+## 5. Proposed split
 
-**P5-9a – Read LightCraft state (no behaviour change).**
+**Step a – Read LightCraft state (no behaviour change).**
 Add a read-only snapshot in `lc-writer`: `LiveState {photos: id → {rating, flag, label, title, keywords, caption?, copyright?, creator?}, albums: id → {name, parent, members}, keywords}` from paged `catalog.query {filter:{}}`, `photo.inspect` (only where needed), `albums.list`, `catalog.query {filter:{album}}`, `keyword.list`. Plan/apply unchanged.
 Acceptance: unit tests against a fake control-port server for parsing (empty values, paging over 200, deleted photos, folders without members); `--dry-run` prints how many photos/albums were read; a read of N photos takes only the expected number of requests (counter in test); no write command is ever sent (test asserts).
 
-**P5-9b – Three-way decision for photo fields and keywords.**
+**Step b – Three-way decision for photo fields and keywords.**
 Pure function `decide(base, lightroom, live) -> Keep | Write | Converged | Conflict` per field and the set variant for keywords; `plan_photos` uses it; conflicts and "changed in LightCraft only" go into the report with codes (e.g. `conflict`, `changed_in_lightcraft`), numbers add up (principle 4).
 Acceptance: table test of all rows of §3 for each of the 8 fields; keyword set cases (added, removed, extra in LightCraft); integration test with generated catalog and fake server: only-Lightroom change writes, only-LightCraft change writes nothing and is reported, both-changed writes nothing and reports a conflict; second run reports the same and sends no command; no overwrite occurs in any test (assert on command log).
 
-**P5-9c – Albums, collections and the rest of P5b-8.**
+**Step c – Albums, collections and the rest of the removed and renamed items.**
 Apply §3 to album name/parent/members, add removed-photo, removed-keyword and renamed-keyword detection (§4), store the photo path in the mapping file (version stays 1 with `#[serde(default)]` as done for later fields, `state.rs:206-218`), report only; no deletion.
 Acceptance: each item of §4 has a test and a report code; renamed keyword by global id calls `keyword.rename` once and only if LightCraft still has the old path; album deleted in LightCraft is reported, not recreated; old mapping files without the new field still load; `read = converted + skipped` still holds.
 
@@ -117,4 +119,4 @@ Acceptance: each item of §4 has a test and a report code; renamed keyword by gl
 
 ## Recommendation
 
-Build P5-9 in the order a → b → c. Treat the mapping file's `PhotoFields` as the base, read LightCraft live (summary for most fields, `photo.inspect` only for caption/copyright/creator), and apply the five-row rule of §3: write only when LightCraft still equals the base, otherwise keep and report. Removals and renames stay report-only, with the single exception of keyword and album renames by stable id when LightCraft still holds the old name. Decide questions 1–3 before P5-9b starts.
+Build it in the order a → b → c. Treat the mapping file's `PhotoFields` as the base, read LightCraft live (summary for most fields, `photo.inspect` only for caption/copyright/creator), and apply the five-row rule of §3: write only when LightCraft still equals the base, otherwise keep and report. Removals and renames stay report-only, with the single exception of keyword and album renames by stable id when LightCraft still holds the old name. Decide questions 1–3 before Step b starts.

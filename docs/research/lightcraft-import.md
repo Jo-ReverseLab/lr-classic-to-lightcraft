@@ -1,5 +1,7 @@
 # How photos get into a LightCraft library
 
+> **Status:** Research notes on LightCraft 0.14.0. The writer imports each photo on its own as a reference (`mode: add`); the findings below were used for that. Items marked as assumptions were not verified.
+
 Scope: import paths, keywords/ratings, duplicate detection, provenance, effects on originals.
 All references are relative to the LightCraft source root (version 0.14.0, `Cargo.toml:6`, license `Cargo.toml:8`) and were read there.
 

@@ -1,6 +1,8 @@
 # LightCraft albums, stacks, Quick Collection and reconciliation (for phase 5b)
 
-Research for P5b-3 (collections → albums / album folders), P5b-4 (smart collections → smart albums), P5b-5 (stacks), P5b-6 (Quick Collection), P5b-8 (reconciliation of removed and renamed items), P5-9, and the open points of the writer (`crates/lc-writer/src/{control,plan,apply}.rs`).
+> **Status:** These are research notes written before the code. Writing collections as albums and album folders, folder stacks, the Quick Collection and smart albums (strict rating rules only) is implemented in `crates/lc-writer`; `library.select` before photo commands and the array form of `keyword.list` are in place. Reading the live LightCraft state is implemented too. Comparing it with Lightroom and the mapping file (conflict handling) is still open, see `reconciliation.md`. Statements marked as assumptions were not re-verified.
+
+Research for collections → albums and album folders, smart collections → smart albums, stacks, the Quick Collection, reconciliation of removed and renamed items, and the open points of the writer (`crates/lc-writer/src/{control,plan,apply}.rs`).
 
 Conventions, as in `lightcraft-control-port.md`:
 
@@ -37,7 +39,7 @@ Conventions, as in `lightcraft-control-port.md`:
 
 **Create an album folder (for Lightroom collection sets).** `album.create` with `folder: true` (`library.rs:1138`, `:1144`). Nested folders: create the outer folder first, pass its id as `parent` of the inner folder. A folder holds albums, not photos (`crates/catalog/src/model.rs:522-524`; `Op::SetAlbumPhotos` refuses photos for folders and smart albums, `crates/catalog/src/lib.rs:846-854`). `parent` accepts only folders; an album cannot contain albums.
 
-**Duplicates.** There is **no check for equal names**: neither `Op::AddAlbum` (`crates/catalog/src/lib.rs:781-798`) nor `Op::RenameAlbum` (`lib.rs:810-813`) compares names, and `album.create` allocates a new id each call (`library.rs:1141`). So two albums with the same name in the same folder are allowed, and **`album.create` is not idempotent**: calling it twice creates two albums. Consequence for the writer: (a) F-019 point 8 (suffix " (2)") is not needed to satisfy LightCraft; it is a lr2lc design choice to keep names distinguishable for the idempotence index (Open question 2); (b) the writer must remember `Lightroom collection id → LightCraft album id` itself (like the photo index) or re-find albums by (parent, name) via `albums.list` before creating. With duplicate names allowed, re-finding by name is ambiguous, so the id mapping file is the reliable key (LightCraft's own importer does the same with `Interop/lightroom-index.json`, `lightroom_catalog.rs:1030-1037`, `lightcraft-library.md:91`).
+**Duplicates.** There is **no check for equal names**: neither `Op::AddAlbum` (`crates/catalog/src/lib.rs:781-798`) nor `Op::RenameAlbum` (`lib.rs:810-813`) compares names, and `album.create` allocates a new id each call (`library.rs:1141`). So two albums with the same name in the same folder are allowed, and **`album.create` is not idempotent**: calling it twice creates two albums. Consequence for the writer: (a) an earlier decision is not needed to satisfy LightCraft; it is a lr2lc design choice to keep names distinguishable for the idempotence index (Open question 2); (b) the writer must remember `Lightroom collection id → LightCraft album id` itself (like the photo index) or re-find albums by (parent, name) via `albums.list` before creating. With duplicate names allowed, re-finding by name is ambiguous, so the id mapping file is the reliable key (LightCraft's own importer does the same with `Interop/lightroom-index.json`, `lightroom_catalog.rs:1030-1037`, `lightcraft-library.md:91`).
 
 **`ids` and the selection.** `album.addPhotos` takes `ids`; without `ids` it uses the UI selection (`library.rs:1380`). It is **not** `explicit_targets`, so the selection must be non-empty and contain a non-Local photo (section 0, point 1). The engine's own import path works around this by selecting the first imported photo before calling it (`library.rs:126-129`, comment "album.addPhotos wants a selection"), which confirms the gate.
 
@@ -83,15 +85,15 @@ Conventions, as in `lightcraft-control-port.md`:
 - `is` matches the whole path equal to the value **or any one level** of a path (`rules.rs:728`), so `is italy` matches `travel|italy|rome` (descendant of the named level) but also any other keyword that has a level called `italy` elsewhere in the tree, and it matches a **parent** level, `is travel` matches `travel|italy`. It does not match a multi-level path as a prefix (`is travel|italy` matches only that exact keyword).
 - The flat `Filter.keyword` is strict: a keyword matches if it equals the value or lies below it (`is_under`, `keywords.rs:32-36`; use at `query.rs:450-452`). This is the only exact "keyword including descendants" test, for one keyword at a time and AND-combined with everything else.
 
-So, for the strict reading of F-019 point 7: Lightroom "keywords contain X (including sub-keywords)" maps exactly only to the flat `keyword: "<full path>"` field; any/none or several keywords have no exact counterpart (`is` and `contains` have false positives, see above) and should go into the report.
+So, for the strict reading (exact equivalents only): Lightroom "keywords contain X (including sub-keywords)" maps exactly only to the flat `keyword: "<full path>"` field; any/none or several keywords have no exact counterpart (`is` and `contains` have false positives, see above) and should go into the report.
 
-**All fields** (`rules.rs:60-126`; the list of 46 matches F-015). Field, kind, and whether it could correspond to a Lightroom smart-collection criterion *(Lightroom column is from general knowledge of Lightroom's criteria and unverified, see Open questions)*:
+**All fields** (`rules.rs:60-126`; the list of 46 matches the list). Field, kind, and whether it could correspond to a Lightroom smart-collection criterion *(Lightroom column is from general knowledge of Lightroom's criteria and unverified, see Open questions)*:
 
 | Group | Field (kind) | Possible Lightroom counterpart |
 |---|---|---|
 | top | `rating` (number) | Rating (`is/≥/≤/>/<`) – direct |
 | top | `flag` (choice pick/reject/none) | Pick flag – direct (`flagged`/`unflagged`/`rejected`) |
-| top | `label` (choice red/yellow/green/blue/purple/none) | Color label – only the five colours (see F-016) |
+| top | `label` (choice red/yellow/green/blue/purple/none) | Color label – only the five colours (see the colour label sets in the README) |
 | top | `text` (text) | Searchable text – only loosely (different field set) |
 | Source | `album` (album id) | "Collection" criterion – only via id mapping, and the target album must exist first |
 | Source | `virtualCopy` (bool) | Copy status (virtual copy) |
@@ -142,7 +144,7 @@ So, for the strict reading of F-019 point 7: Lightroom "keywords contain X (incl
 
 **Read state.** `photo.inspect {id}` adds `stack: {id, photos:[ids in order], position, collapsed}` when the photo is stacked (`query.rs:166-172`). There is no "list all stacks" query command in the files read *(assumption; `stack.*` queries other than `photo.inspect` were not found in `organize.rs`)*; `catalog.stats` does not list them (`query.rs:98-111`).
 
-**Collapsed / expanded.** Settable at group time (`collapsed`), later with `stack.toggle {ids, collapsed}` (explicit targets, no selection needed, `organize.rs:193-211`). F-019 point 9 (do not map the state) is thus a choice, not a limit: it could be mapped with a single parameter. Default `true` would collapse every imported stack, so if lr2lc does not map the state, pass the value explicitly.
+**Collapsed / expanded.** Settable at group time (`collapsed`), later with `stack.toggle {ids, collapsed}` (explicit targets, no selection needed, `organize.rs:193-211`). Not mapping the state is thus a choice, not a limit: it could be mapped with a single parameter. Default `true` would collapse every imported stack, so if lr2lc does not map the state, pass the value explicitly.
 
 **Virtual copies.** `photo.virtualCopy` already stacks the copy with its original (`organize.rs:110`, `:93-97`). A Lightroom stack that contains a master and its virtual copy therefore may already exist in LightCraft after the copy is created; `stack.group` merges into it rather than failing. `stacked` is also a smart rule field (`rules.rs:73`).
 
@@ -151,13 +153,13 @@ So, for the strict reading of F-019 point 7: Lightroom "keywords contain X (incl
 ### A4. Quick Collection
 
 - Model: a regular album with `quick: true`, "one per library" (`model.rs:533-535`; lookup `catalog/src/lib.rs:431-433`). Nothing creates it except `album.toggleTarget`: it adds an album named `Quick Collection` with `quick: true` when none exists and no target album is set (`library.rs:1412-1418`). **There is no command to create or find it explicitly.**
-- `album.toggleTarget {ids?}` (`library.rs:1402-1440`): target = the target album if one is set (`album.setTarget`), else the Quick Collection. If **all** given photos are already in it, they are **removed**; otherwise the missing ones are appended. Returns `{album, name, added, count, skipped}` (`library.rs:1436`). **Not idempotent** (second identical call removes), as F-015 said. Gate `has_library_selection` (selection rule, section 0).
+- `album.toggleTarget {ids?}` (`library.rs:1402-1440`): target = the target album if one is set (`album.setTarget`), else the Quick Collection. If **all** given photos are already in it, they are **removed**; otherwise the missing ones are appended. Returns `{album, name, added, count, skipped}` (`library.rs:1436`). **Not idempotent** (second identical call removes). Gate `has_library_selection` (selection rule, section 0).
 - `album.setTarget {id | null}`: `null` means the Quick Collection (`library.rs:1441-1454`); it only sets session state (`s.target_album`), not persisted *(assumption: field is a session field, not part of the catalog; the command has no `Op`)*. A set target album changes what `toggleTarget` does, so the writer must call `album.setTarget {id:null}` first, otherwise photos would go into a user-chosen target album.
 - Reading members: `albums.list` shows it as album `Quick Collection` with `count` but without a `quick` flag (see A1); members via `catalog.query {filter:{album:<id>}}`. To find its id without the flag: it is the album named `Quick Collection` *(assumption; breaks if the user has another album of that name; `photo.inspect.albums` has the same limit)*. Alternative: after `album.toggleTarget` the result gives `album` (its id) directly (`library.rs:1436`), but that call changes state.
-- Safe add procedure (the writer's, per F-019 point 10): (1) `album.setTarget {id:null}`; (2) read members of the existing Quick Collection if found; (3) compute photos missing; (4) `library.select` them and `album.toggleTarget {ids: missing}`; because none of them is in it, they are all added. Never send photos that are already members (they would be removed when all are in it). For a mixed batch (some in, some out) the call adds the missing ones and keeps the others (`library.rs:1424-1428`: `all_in` false → append those not held), so even a mixed batch is safe; only a batch entirely inside removes. Sending only the missing ones avoids the case.
+- Safe add procedure (the writer's): (1) `album.setTarget {id:null}`; (2) read members of the existing Quick Collection if found; (3) compute photos missing; (4) `library.select` them and `album.toggleTarget {ids: missing}`; because none of them is in it, they are all added. Never send photos that are already members (they would be removed when all are in it). For a mixed batch (some in, some out) the call adds the missing ones and keeps the others (`library.rs:1424-1428`: `all_in` false → append those not held), so even a mixed batch is safe; only a batch entirely inside removes. Sending only the missing ones avoids the case.
 - `album.clearQuick` empties it (`library.rs:1455-1462`): do not use.
 
-### A5. Reading commands for reconciliation (P5-9, P5b-8) and the writer's open questions
+### A5. Reading commands for reconciliation and the writer's open questions
 
 **`catalog.query`** (`query.rs:82-95`): `{filter?: Filter, sort?: Sort, offset?, limit?}` → `{total, photos:[summary]}`. Without `filter`/`sort` it lists the **current view** (what the UI shows, `:85-89`); to list all photos send `filter: {}`. Default `limit` 200. Summary fields: see A1; **no path**, no Lightroom id. Whether `filter: {}` includes Local-only and deleted photos is not read *(assumption: Local photos are excluded by the default query, see `Photo::in_library`; not checked in `query.rs:…`; test)*. `deleted` summary field exists, so deleted ones may appear with `filter.deleted`.
 
@@ -174,7 +176,7 @@ So, for the strict reading of F-019 point 7: Lightroom "keywords contain X (incl
 ### A6. Open questions 1, 2, 7 of `lightcraft-control-port.md`
 
 1. **Does `library.import` run synchronously through the control port?** Yes at the engine level: the command body calls `import_with` inline, then `import_batch_done` and returns the report (`crates/engine/src/cmd/library.rs:1633-1660`; `import_with` runs `prepare` and `commit_prepared` in the same call, `crates/engine/src/import.rs:800-806`). The control port runs `engine.execute` via `app.run(...)` → `session.execute(...)` (`crates/ui-egui/src/control.rs:329-333`; `crates/ui-egui/src/lib.rs:850-875`) on the UI thread, so the reply comes after the import. It is therefore subject to the 60 s reply limit (`apps/lightcraft/src/control_server.rs:70`); a started request still gets the full 60 s (`docs/control-protocol.md:19`). Background import with progress is a separate UI path (`ui.inspect.import`); not used here. Residual risk: the UI thread is blocked during the import, no frames are drawn *(assumption)*; a one-file import is short. **Live check recommended** only to confirm timing on slow volumes.
-2. **Shape of `imported`.** A flat array of **photo ids (unsigned integers)**: `ImportReport.imported: Vec<u64>` (`import.rs:195-197`); the command reads it back as such (`library.rs:1639-1641`, `as_u64`). It is not `{path,id}`. Pushed in processing order (`import.rs:1425`, `:1500`). Elements are not paired with paths, so for a batch the pairing is not given; **import one file per call** (as the writer already plans, F-019 point 5) or read the id back by `duplicates`/`photo.inspect`. Full result: `{imported:[id], duplicates:[{path, existing, reason, existingDeleted?}], restored?, moved?, kept?, failed:[[path, error]], scanned, sidecars, warnings?, album?}` (`import.rs:182-217`; `album` set by `import_batch_done`, `library.rs:134-137`). `failed` entries are two-element arrays `[path, error]` (tuple serialisation, `import.rs:209`).
+2. **Shape of `imported`.** A flat array of **photo ids (unsigned integers)**: `ImportReport.imported: Vec<u64>` (`import.rs:195-197`); the command reads it back as such (`library.rs:1639-1641`, `as_u64`). It is not `{path,id}`. Pushed in processing order (`import.rs:1425`, `:1500`). Elements are not paired with paths, so for a batch the pairing is not given; **import one file per call** (as the writer already plans, an earlier decision) or read the id back by `duplicates`/`photo.inspect`. Full result: `{imported:[id], duplicates:[{path, existing, reason, existingDeleted?}], restored?, moved?, kept?, failed:[[path, error]], scanned, sidecars, warnings?, album?}` (`import.rs:182-217`; `album` set by `import_batch_done`, `library.rs:134-137`). `failed` entries are two-element arrays `[path, error]` (tuple serialisation, `import.rs:209`).
 3. **Is `id` echoed?** Yes: the server stores `obj.get("id")` of the request (`apps/lightcraft/src/control_server.rs:167`) and puts it into the reply (`:216`); the test asserts `{"id": id, "ok": true, "result": …}` (`:329`). A request without `id` gets `null` (`:167`). The writer may rely on matching ids.
 
 **Additional finding for the writer:** import also sets the selection to the first imported photo (`library.rs:1655-1657`); with `restored` ids when nothing new was imported (`:1648-1654`). Not relied upon: see section 0.
@@ -221,7 +223,7 @@ Neutral-model implications: a stack needs the ordered list of member image ids; 
 
 ## C. Recommendations per task
 
-### C1. P5b-3 collections → albums / album folders
+### C1. Collections → albums / album folders
 
 Mapping:
 
@@ -236,39 +238,39 @@ Mapping:
 Rules:
 
 - Skip with reason: `systemOnly` rows, web/print/book/slideshow, unknown `creationId`; members whose image is not converted (counted per collection); collections whose set is skipped.
-- Idempotence: keep `Lightroom collection id_local (or id_global) → LightCraft album id` in the mapping file (same file as photos). On a rerun: id known and still present in `albums.list` → only `album.addPhotos` (idempotent) for missing members; id known but album gone (deleted by the user in LightCraft) → report, do not recreate (P5b-8); id unknown → create. Never find by name.
-- Duplicate names: LightCraft allows them (A1), so lr2lc may keep names as they are. The suffix " (2)" of F-019 point 8 is therefore only a readability choice; recommend **not** renaming (less loss of information) and listing duplicates in the report as a notice. Ask the user (QUESTIONS, point 2).
+- Idempotence: keep `Lightroom collection id_local (or id_global) → LightCraft album id` in the mapping file (same file as photos). On a rerun: id known and still present in `albums.list` → only `album.addPhotos` (idempotent) for missing members; id known but album gone (deleted by the user in LightCraft) → report, do not recreate (reconciliation); id unknown → create. Never find by name.
+- Duplicate names: LightCraft allows them (A1), so lr2lc may keep names as they are. Adding a suffix such as " (2)" is therefore only a readability choice; recommend **not** renaming (less loss of information) and listing duplicates in the report as a notice. Ask the user (QUESTIONS, point 2).
 - Photo commands need `library.select` first (section 0). Group `album.addPhotos` calls in chunks (the whole id list at once is linear, `library.rs:1386-1393`), but keep each call within the 60 s limit; chunk size 500 *(assumption)*.
 - Empty collections: create them (empty albums are allowed).
-- Neutral model draft (Lead): `model::Collection { id: CollectionId(i64), name, parent: Option<CollectionId>, kind: CollectionKind::{Set, Regular, Smart, Quick}, members: Vec<PhotoRef> /* in position order */ }`, plus `Report` entries for skipped ones. Keep `Smart` and `Quick` as kinds so one reader pass serves P5b-3/4/6.
+- Neutral model draft: `model::Collection { id: CollectionId(i64), name, parent: Option<CollectionId>, kind: CollectionKind::{Set, Regular, Smart, Quick}, members: Vec<PhotoRef> /* in position order */ }`, plus `Report` entries for skipped ones. Keep `Smart` and `Quick` as kinds so one reader pass serves P5b-3/4/6.
 
-### C2. P5b-4 smart collections → smart albums
+### C2. Smart collections → smart albums
 
 - Reader: parse `AgLibraryCollectionContent` rows with `owningModule = "ag.library.smart_collection"` into a neutral `SmartRule { criterion, operation, value, value2 }` list with a `combine` mode; keep unknown criteria as raw names so the report can name them (names only, not values, to keep user data out of the report text *(design suggestion)*). The `lron` text needs a small parser written fresh (no code from lrcat-extractor, MPL-2.0): Lua-table-like grammar from `lrcat-extractor:src/lron.rs:8-53`.
 - Writer: `album.createSmart {name, parent?, rules:{…}}` with `rules` limited to the exactly equivalent set of A2 (rating, flag, label, numeric camera data, kind, virtual copy, edited, keyword **only** as flat `keyword` with full path). Everything else: skip the whole collection with the reason `criterion "<name>" has no exact LightCraft equivalent`. Create after all regular albums (rule `album` needs ids). After creation compare the live count `count` from `album.createSmart` with Lightroom's current membership count when the latter is readable, and warn on mismatch.
 - Idempotence: same mapping file; a re-run must not call `album.createSmart` again for a known id; for rule changes use `album.setRules {id, rules, replace:true}` (`library.rs:1197-1245`) *(optional; first version: report only)*.
-- Fallback that matches LightCraft's own importer: if no rule is translatable, optionally create a **regular** album with the current membership (read from `AgLibraryCollectionImage`), clearly marked in the report (user choice, see QUESTIONS). Recommendation: do not do this silently.
+- Fallback that matches LightCraft's own importer: if no rule is translatable, optionally create a **regular** album with the current membership (read from `AgLibraryCollectionImage`), clearly marked in the report (user choice). Recommendation: do not do this silently.
 - Model: `Collection.kind = Smart` plus `smart: Option<SmartRules>`; `SmartRules { combine: All|Any|None, rules: Vec<SmartRule> }`.
 
-### C3. P5b-5 stacks
+### C3. Stacks
 
-- Reader (needs the structural confirmation of B3): `model::Stack { id, members: Vec<PhotoRef> /* top first */, collapsed: bool }` (collapsed read and counted, per F-019 point 9; mapping it is one parameter, A3).
+- Reader (needs the structural confirmation of B3): `model::Stack { id, members: Vec<PhotoRef> /* top first */, collapsed: bool }` (collapsed read and counted; mapping it is one parameter, A3).
 - Writer: per stack: map members to LightCraft ids; drop unconverted members (report); fewer than two left → skip with reason; check `photo.inspect.stack` of the top photo: equal member list in equal order → nothing to do; else `library.select {ids}` then `stack.group {ids, top, collapsed}`. Pass `collapsed` explicitly. If a member is already in another stack (e.g. by a virtual copy auto-stack, or the user), `stack.group` merges stacks; report this as a notice instead of failing.
 - Order of operations: after photos **and virtual copies** exist.
 - Idempotence: A3 (same arguments leave the state unchanged).
 
-### C4. P5b-6 Quick Collection
+### C4. Quick Collection
 
 - Reader: members of the `systemOnly` quick collection (once identified, B4).
 - Writer: procedure in A4, in short: `album.setTarget {id:null}`, find existing `Quick Collection` album via `albums.list` (by name, no flag), read members via `catalog.query {filter:{album}}`, send only missing ids to `album.toggleTarget {ids}`; if the album does not exist yet it is created by that very call. Report: count added, count already in, count skipped.
-- Caveats: (1) `albums.list` has no `quick` flag; a user album named `Quick Collection` would be mistaken for it; the Lead may ask to treat a name clash as "report and skip". (2) Never use `album.clearQuick`. (3) Order: last, after photos.
+- Caveats: (1) `albums.list` has no `quick` flag; a user album named `Quick Collection` would be mistaken for it; the project may choose to treat a name clash as "report and skip". (2) Never use `album.clearQuick`. (3) Order: last, after photos.
 
-### C5. P5b-8 reconciliation of removed and renamed
+### C5. Reconciliation of removed and renamed items
 
 What LightCraft offers: `albums.list` (names, tree, counts), `catalog.query` + filter `album` (members), `photo.inspect` (path, albums, stack, `deleted`, `rating`, `meta.keywords`), `keyword.list`/`keyword.info`, `library.import` duplicates (existing id by path). Matching key: lr2lc's own mapping file (Lightroom id → LightCraft id), because LightCraft has no external-id field (`lightcraft-import.md:44`).
 
 - **Removed in Lightroom** (collection gone, member removed from a collection, photo gone from the catalog, keyword removed): with the mapping file the diff can be computed (mapped ids no longer in the new read). Recommended default: **report only**, do not delete anything in LightCraft automatically (principles: "Nothing is lost silently", user data). Optional `--prune` later: `album.removePhotos`, `album.delete` (descendants too, `library.rs:1253-1290`; careful), `photo.delete` (moves to Recently Deleted, recoverable, `library.rs:990`).
-- **Renamed in Lightroom** (collection or keyword renamed, photo file renamed/moved): identity by mapped id, so a collection rename → `album.rename {id, name}` (idempotent, `library.rs:1246-1251`); a keyword rename has no id in LightCraft (keywords are path strings in photos' metadata, `lightcraft-library.md`) → `keyword.rename {from, to}` exists (`keywords.rs:516-530`), but only if the old path is still the one lr2lc wrote; otherwise report. A moved/renamed file: the photo's `source.path` differs from the new path; LightCraft cannot re-point a photo through any command read here *(assumption; `library.relocate`-like commands were not searched)*: report, so P5b-8 should be limited to reporting renamed files.
+- **Renamed in Lightroom** (collection or keyword renamed, photo file renamed/moved): identity by mapped id, so a collection rename → `album.rename {id, name}` (idempotent, `library.rs:1246-1251`); a keyword rename has no id in LightCraft (keywords are path strings in photos' metadata, `lightcraft-library.md`) → `keyword.rename {from, to}` exists (`keywords.rs:516-530`), but only if the old path is still the one lr2lc wrote; otherwise report. A moved/renamed file: the photo's `source.path` differs from the new path; LightCraft cannot re-point a photo through any command read here *(assumption; `library.relocate`-like commands were not searched)*: report, so reconciliation should be limited to reporting renamed files.
 - **Edited in LightCraft** after the first run (user changed name or members): with only the mapping file lr2lc cannot tell who changed it. Recommended rule: the first run's state is stored (a hash of what lr2lc wrote) in the mapping file; on conflict, do not overwrite, report. This needs a design decision (QUESTIONS).
 - The needed reads (`albums.list`, `catalog.query` per album, one `photo.inspect` per photo) are linear in library size; for large catalogs budget with paging and the 60 s limit per request.
 
@@ -302,20 +304,20 @@ Needing the real Lightroom catalog (structure-only, role katalog-tester; no valu
 12. `positionInCollection` value type (text or number, empty values).
 13. Whether `AgLibraryCollectionCoverImage` exists.
 
-Needing a decision (also in `QUESTIONS.md`, German):
+Decisions taken or still open:
 
-14. Duplicate album names: keep, or add " (2)" (F-019 point 8)? LightCraft allows duplicates (A1).
-15. Collapsed state of stacks: map it (one parameter) or not (F-019 point 9)?
-16. Smart collections without an exact rule translation: skip (recommended) or import as a regular album with current membership (what LightCraft's own importer does)?
-17. Removed/renamed (P5b-8): report only (recommended) or prune?
+14. Duplicate album names: keep, or add a suffix such as " (2)"? Decided: keep. LightCraft allows duplicates (A1).
+15. Collapsed state of stacks: map it (one parameter) or not? Decided: not mapped, written expanded.
+16. Smart collections without an exact rule translation: skip (recommended, implemented) or import as a regular album with current membership (what LightCraft's own importer does)?
+17. Removed/renamed items: report only (recommended) or prune? Currently report only.
 18. Handling of web, print, book, slideshow collections: skip with reason (recommended).
 
 ## Recommendation
 
 1. **Before any further writer work, add `library.select`** before every photo command and accept only the array form of `keyword.list`. These are the two places where the code as written can fail on a real app (A5, section 0). The control-port document's advice "always pass `ids`" is right but not sufficient.
-2. **Build P5b-3 first** (regular collections and sets). It needs no new commands beyond `album.create` and `album.addPhotos`, both idempotent per member, and a persisted `collection id → album id` map. Do not rename duplicates; report them.
-3. **P5b-5 (stacks) second**, once the table names are confirmed structurally (B3): `stack.group` is idempotent for equal arguments; pass `collapsed` explicitly.
-4. **P5b-6 (Quick Collection)** with the "set target null, read, send only missing" procedure; low risk, small value.
-5. **P5b-4 (smart collections)** last, with strict translation (A2) and a structural inventory of criteria first (open question 11). Skip whole collections that cannot be translated exactly, and report them.
-6. **P5b-8** as a report-only diff based on the mapping file; deletions and renames in LightCraft only behind an explicit option, and only for items whose id is in the map.
+2. **Build collections first** (regular collections and sets). It needs no new commands beyond `album.create` and `album.addPhotos`, both idempotent per member, and a persisted `collection id → album id` map. Do not rename duplicates; report them.
+3. **Stacks second**, once the table names are confirmed structurally (B3): `stack.group` is idempotent for equal arguments; pass `collapsed` explicitly.
+4. **Quick Collection** with the "set target null, read, send only missing" procedure; low risk, small value.
+5. **Smart collections** last, with strict translation (A2) and a structural inventory of criteria first (open question 11). Skip whole collections that cannot be translated exactly, and report them.
+6. **Reconciliation of removed and renamed items** as a report-only diff based on the mapping file; deletions and renames in LightCraft only behind an explicit option, and only for items whose id is in the map.
 7. Model extensions, as drafted in C1 to C4: `Collection { id, name, parent, kind, members, smart }`, `Stack { id, members (top first), collapsed }`; the `Report` should count per collection and per stack: read, converted, skipped with reason.

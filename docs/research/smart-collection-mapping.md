@@ -1,6 +1,8 @@
-# Smart collection criteria → LightCraft rule fields (prep for P5b-4)
+# Smart collection criteria → LightCraft rule fields (preparation)
 
-Scope: research only. Paths are relative to the source roots: `lightcraft:` = the LightCraft sources, `lrcat-extractor:` = the extractor sources (read for understanding only, MPL-2.0, nothing copied), `albums:` = `docs/research/lightcraft-albums.md` in this repo (sections A2, B2, C2). The Lightroom side has **no value vocabulary in the available sources** beyond one synthetic sample; everything about Lightroom's criterion values is marked *(assumption)* and must be confirmed by a live test or a structure-only inventory of the real catalog. Strict reading (F-017 point 9, F-019 point 7): a rule is translated only if "same effect" is proven; "no" and "unsure" both mean **not translated**, and the whole smart collection is skipped with a reason (albums:A2 "Strict reading").
+> **Status:** Implemented: the rule parser and model, and a translation that currently accepts only `rating` with `==` or `>=` (whole number 0 to 5), combined with all or any. Every other smart collection is skipped and reported with a code. The criteria listed as possible later additions are not translated; the live-test questions below are still unanswered.
+
+Scope: research only. Paths are relative to the source roots: `lightcraft:` = the LightCraft sources, `lrcat-extractor:` = the extractor sources (read for understanding only, MPL-2.0, nothing copied), `albums:` = `docs/research/lightcraft-albums.md` in this repo (sections A2, B2, C2). The Lightroom side has **no value vocabulary in the available sources** beyond one synthetic sample; everything about Lightroom's criterion values is marked *(assumption)* and must be confirmed by a live test or a structure-only inventory of the real catalog. Strict reading: a rule is translated only if "same effect" is proven; "no" and "unsure" both mean **not translated**, and the whole smart collection is skipped with a reason (albums:A2 "Strict reading").
 
 ## 1. Lightroom format
 
@@ -18,7 +20,7 @@ LightCraft operators per kind: `rules.rs:602-637` (albums:A2). Number ops `is/is
 |---|---|---|---|---|
 | `rating` | `==`, `>=`, `>`, `<`, `<=` (last three *(assumption)*) → integer 0–5 | `rating` `is` / `gte` / `gt` / `lt` / `lte` (`rules.rs:958`, `:755-760`) | Stars 1:1 (LightCraft ratings are 0–5: `lightcraft:crates/engine/src/cmd/library.rs:808` accepts only values `<= 5` and `:198` clamps to `0..=5`; `u8` field at `lightcraft:crates/catalog/src/model.rs:243`). | **yes** for `==` and `>=` (inventoried). Residual risk: LR "unrated" vs 0 stars (both 0 in the model, *assumption*); verify live once. |
 | `pick` | `==` → 1 / -1 / 0 *(values per task brief, not in sources)* | `flag` `is` pick / reject / none (`rules.rs:959-962`; choices `rules.rs` field list "Pick Flag") | 1 → `pick`, -1 → `reject`, 0 → `none`. LightCraft also accepts "picked"/"rejected" (`rules.rs:411`). | **unsure** until the value vocabulary is confirmed in an inventory; expected yes. Translate only 1/-1/0 with `==`; anything else skip. |
-| `labelColor` | `==` → colour *(assumption: colour name, or custom label text)* | `label` `is` red/yellow/green/blue/purple/none (`rules.rs:963-967`) | Name 1:1 for the five colours. | **unsure**: LightCraft also matches *custom label names* (`rules.rs:413`, `:964-966`) and Lightroom's value may be the label-set text, which differs per label set (F-016). Translate only if the value is one of the five colour names; else skip. Needs live test. |
+| `labelColor` | `==` → colour *(assumption: colour name, or custom label text)* | `label` `is` red/yellow/green/blue/purple/none (`rules.rs:963-967`) | Name 1:1 for the five colours. | **unsure**: LightCraft also matches *custom label names* (`rules.rs:413`, `:964-966`) and Lightroom's value may be the label-set text, which differs per label set . Translate only if the value is one of the five colour names; else skip. Needs live test. |
 | `keywords` | `any` / `all` / `none` / `words`… → text *(assumption on names, only `any` and `empty` inventoried)* | `keywords` `contains` / `is` / `isEmpty` or flat `keyword` | see §3 | **no** for text operators (see §3); **unsure** for `empty` (below). |
 | `keywords` | `empty` (no value) | `keywords` `isEmpty` (`rules.rs:725`) | Direct. | **unsure**: depends on whether LightCraft's photo keyword list holds the same set as Lightroom (e.g. no implied parents, no hidden/private keywords). Live test. |
 | `captureTime` | `inLast` + `value_units` (days/weeks/months/years *(assumption)*) | `captureDate` `inLast` `{n, unit}` (`rules.rs:385-392`, `:859-864`) | Unit names accepted: hour(s), day(s), week(s), month(s), year(s) (`rules.rs:803-807`). | **no / unsure**: LightCraft month = 30.4375 days, year = 365.25 days (`rules.rs:806-807`); Lightroom's calendar arithmetic is unknown; the capture timestamp has no time zone in either *(assumption)*. Boundary photos may differ. Not translated until a live test shows the sets agree. |
@@ -58,14 +60,14 @@ Comparison with Lightroom *(assumption, names from general knowledge: `any`, `al
 
 Only exception worth a live test: a **single** keyword with `any`/`==` mapped to flat `keyword: "<full path>"` (strict descendant semantics); it is exact only if Lightroom also includes descendants and uses synonyms the same way. Synonyms are a further unknown: Lightroom's search may match synonyms, LightCraft's `keywords` field holds names only (`rules.rs:980`, *assumption*).
 
-## 4. Recommendation for splitting P5b-4
+## 4. Recommendation for splitting the work
 
-**P5b-4a: parser + model (no LightCraft calls).**
+**Smart collections, part a: parser + model (no LightCraft calls).**
 - Fresh lron/Lua-table parser (grammar from `lrcat-extractor:src/lron.rs:8-53`, written anew) turning `content` into `SmartRules { combine: Intersect|Union|Other(String), rules: Vec<SmartRule { criterion: String, operation: String, value: Option<Value>, value2: Option<Value>, units: Option<String> }> }`. Keep unknown names verbatim; the report shows names only, never values (privacy).
 - Reader test fixtures generated with every combination of the inventoried criteria/operations plus unknown ones; truncated or odd tables become a skip with reason, never a panic.
 - Counting rule: collections read = converted + skipped (principle 4); the skip reason is per collection, naming the first untranslatable criterion.
 
-**P5b-4b: translation + writer.**
+**Smart collections, part b: translation + writer.**
 - Pure function `translate(SmartRules) -> Result<RuleSet, Vec<Reason>>`, a table-driven whitelist from §2 (initially `rating ==/>=`; `pick`, `labelColor` colour names, `keywords empty` enabled only after the live test). Any untranslatable rule → whole collection skipped (a dropped rule changes membership both for `all` and `any`, albums:A2).
 - `album.createSmart {name, parent?, rules}` (always pass `rules`; albums:A2); runs after regular albums. Not idempotent: store the Lightroom collection global id → album id in the mapping state, and never call again for a known id; rule changes only reported (first version).
 - Compare `count` from `album.createSmart` with Lightroom's current membership where readable (`AgLibraryCollectionImage`, albums:B2, albums:C2); warn on mismatch.
@@ -86,9 +88,9 @@ Only exception worth a live test: a **single** keyword with `any`/`==` mapped to
 ## Open questions
 
 - Value vocabularies for all seven criteria (see live-test list); none is proven by the available sources.
-- Whether the user wants a fallback regular album with current membership for skipped smart collections (albums:C2 "Fallback"; see QUESTIONS).
+- Whether the user wants a fallback regular album with current membership for skipped smart collections (albums:C2 "Fallback").
 - Whether `hasAdjustments`, `folder`, `collection`, `camera`, `fileName` should ever be translated, or always reported.
 
 ## Recommendation
 
-Implement P5b-4a first (parser and model, report names only). Implement P5b-4b with a whitelist that starts with `rating` only, and enable `pick`, colour-name `labelColor`, and `keywords empty` one by one after the live tests. Skip every other collection whole, with a reason. Do not translate keyword, date or text rules until their semantics are verified against both applications.
+Implement the parser and model first (report names only). Implement the translation with a whitelist that starts with `rating` only, and enable `pick`, colour-name `labelColor`, and `keywords empty` one by one after the live tests. Skip every other collection whole, with a reason. Do not translate keyword, date or text rules until their semantics are verified against both applications.
