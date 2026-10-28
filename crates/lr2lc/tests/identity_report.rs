@@ -59,9 +59,22 @@ fn global_ids_never_appear_in_output() {
     set_keyword_global_id(&cat, 10, "zyx-gid-kw-2").unwrap(); // duplicate
     set_keyword_global_id(&cat, 9, " ").unwrap();
     let (text, v, raw) = run_report(&cat);
+    // The machine-readable skip codes legitimately contain "global_id";
+    // remove exactly those codes before searching for leaks.
+    let codes = ["missing_global_id", "duplicate_global_id", "no_global_id"];
+    let strip = |s: &str| {
+        codes
+            .iter()
+            .fold(s.to_string(), |acc, c| acc.replace(c, ""))
+    };
+    assert!(
+        raw.contains("\"missing_global_id\"") && raw.contains("\"duplicate_global_id\""),
+        "expected skip codes missing from report.json"
+    );
+    let (text_s, raw_s) = (strip(&text), strip(&raw));
     for secret in ["zyx-gid", "image-0000", "kw-0000", "global_id", "id_global"] {
-        assert!(!text.contains(secret), "stdout leaks {secret:?}");
-        assert!(!raw.contains(secret), "report.json leaks {secret:?}");
+        assert!(!text_s.contains(secret), "stdout leaks {secret:?}");
+        assert!(!raw_s.contains(secret), "report.json leaks {secret:?}");
     }
     let photos = reasons(&v, "photos");
     assert!(
