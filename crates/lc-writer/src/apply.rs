@@ -9,7 +9,14 @@
 //!    update of a photo, `library.select {ids: [id], active: id}` selects
 //!    exactly that photo, because LightCraft runs `photo.*` commands only
 //!    on a selection (the selection is left on the last updated photo);
-//! 4. then the collections: before the first `album.create`, `albums.list {}`
+//! 4. then the stacks, ascending by Lightroom id: each new or changed one
+//!    is grouped with `library.select {ids, active: top}` directly before
+//!    `stack.group {ids, top, collapsed: false}`; members without a
+//!    LightCraft id are left out, and fewer than two left skips the stack;
+//!    members that left a stack in Lightroom are only counted, lr2lc never
+//!    ungroups, splits or removes; a rejected select or group makes the
+//!    stack incomplete and the next run sends it again;
+//! 5. then the collections: before the first `album.create`, `albums.list {}`
 //!    is read once (only if the plan creates a collection; an answer in an
 //!    unknown shape stops the run); album folders and albums missing from
 //!    the mapping file are adopted when the library has exactly one
@@ -45,7 +52,10 @@
 
 use crate::albums::{Decision, Existing, parse_album_list};
 use crate::control::{ControlClient, Outcome, WriteError};
-use crate::plan::{Step, WriteInput, import_params, members_select_params, plan, select_params};
+use crate::plan::{
+    Step, WriteInput, group_params, import_params, members_select_params, plan, same_members,
+    select_params,
+};
 use crate::state::{CollectionEntry, PhotoFields, State, keyword_text, snapshot};
 use model::{Collection, CollectionKind, Keyword, Photo, Skipped};
 use serde_json::{Value, json};
@@ -110,6 +120,21 @@ pub struct ApplySummary {
     pub collections_incomplete: Vec<Skipped>,
     /// Album members not written, each with a reason.
     pub members_skipped: Vec<Skipped>,
+    /// Stacks grouped by this run (new or changed).
+    pub stacks_grouped: usize,
+    /// Input stacks already recorded with the same members in the same
+    /// order. Together with the grouped, skipped and incomplete ones every
+    /// input stack counts once.
+    pub stacks_known: usize,
+    /// Recorded members of input stacks that left the stack in Lightroom;
+    /// they stay in the LightCraft stack.
+    pub stack_members_removed: usize,
+    /// Stacks not grouped (fewer than two usable photos), each with a
+    /// reason.
+    pub stacks_skipped: Vec<Skipped>,
+    /// Stacks whose select or group was rejected; a later run sends them
+    /// again.
+    pub stacks_incomplete: Vec<Skipped>,
 }
 
 /// A run that stopped: the error and what was done up to it.
@@ -164,6 +189,9 @@ pub fn apply_partial(
             collections_moved: plan.collections_moved(),
             collections_removed: plan.collections_removed(),
             members_skipped: plan.member_skips().to_vec(),
+            stacks_known: plan.stacks_known(),
+            stack_members_removed: plan.stack_members_removed(),
+            stacks_skipped: plan.stack_skips().to_vec(),
             ..ApplySummary::default()
         },
         keywords: wanted_keywords(input),
@@ -316,6 +344,10 @@ impl Run<'_> {
             } => {
                 self.finish_photo()?;
                 self.create_album(*collection_id, params)
+            }
+            Step::GroupStack { stack_id, gids } => {
+                self.finish_photo()?;
+                self.group_stack(*stack_id, gids)
             }
             Step::AddMembers {
                 collection_id,
@@ -543,6 +575,69 @@ impl Run<'_> {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// Groups one stack: selects exactly its photos with the top active,
+    /// then `stack.group`. Members without a LightCraft id are not sent. On
+    /// success the stack is recorded with the sent members followed by
+    /// recorded members that left it in Lightroom (they stay in the
+    /// LightCraft stack, since grouping merges touched stacks).
+    fn group_stack(&mut self, stack_id: i64, gids: &[String]) -> Result<(), WriteError> {
+        let mut sent: Vec<String> = Vec::new();
+        let mut ids: Vec<Value> = Vec::new();
+        for gid in gids {
+            if let Some(entry) = self.state.photo(gid) {
+                sent.push(gid.clone());
+                ids.push(entry.lightcraft_id.clone());
+            }
+        }
+        if ids.len() < 2 {
+            self.summary.stacks_skipped.push(Skipped {
+                reason: format!(
+                    "stack {stack_id}: fewer than two photos with a LightCraft id; not grouped"
+                ),
+            });
+            return Ok(());
+        }
+        let recorded: Vec<String> = self
+            .state
+            .stack(stack_id)
+            .map(|e| e.members.clone())
+            .unwrap_or_default();
+        if self.state.stack(stack_id).is_some() && same_members(&recorded, &sent) {
+            // Only photos without a LightCraft id differ; nothing to send.
+            self.summary.stacks_known += 1;
+            return Ok(());
+        }
+        for command in ["library.select", "stack.group"] {
+            let params = match command {
+                "library.select" => members_select_params(&ids),
+                _ => group_params(&ids),
+            };
+            match self.client.execute(command, params) {
+                Ok(outcome) => {
+                    if command == "stack.group" {
+                        self.count_not_saved(&outcome);
+                    }
+                }
+                Err(WriteError::Command { command, .. }) => {
+                    self.summary.stacks_incomplete.push(Skipped {
+                        reason: format!(
+                            "stack {stack_id}: LightCraft rejected `{command}`; \
+                             the stack is grouped again by the next run"
+                        ),
+                    });
+                    return Ok(());
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        self.summary.stacks_grouped += 1;
+        let mut members = sent.clone();
+        members.extend(recorded.into_iter().filter(|g| !sent.contains(g)));
+        self.state.record_stack(stack_id, members);
+        self.state.save(self.state_file)?;
+        Ok(())
     }
 
     /// Reports an album as incomplete, once per run.

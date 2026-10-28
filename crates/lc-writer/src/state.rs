@@ -169,16 +169,25 @@ pub struct CollectionEntry {
     pub members: Vec<String>,
 }
 
+/// One stack grouped in the library.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StackEntry {
+    /// Global ids of the photos lr2lc grouped, the top first. Members that
+    /// left the stack in Lightroom stay here (and in the LightCraft stack).
+    pub members: Vec<String>,
+}
+
 /// The content of the mapping file.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct State {
     photos: BTreeMap<String, PhotoEntry>,
     keywords: BTreeMap<String, KeywordEntry>,
     collections: BTreeMap<i64, CollectionEntry>,
+    stacks: BTreeMap<i64, StackEntry>,
 }
 
 /// The file layout; `version` is checked before this is parsed.
-/// `collections` came later and may be missing in older files.
+/// `collections` and `stacks` came later and may be missing in older files.
 #[derive(Serialize, Deserialize)]
 struct StateFile {
     version: u64,
@@ -186,6 +195,8 @@ struct StateFile {
     keywords: BTreeMap<String, KeywordEntry>,
     #[serde(default)]
     collections: BTreeMap<i64, CollectionEntry>,
+    #[serde(default)]
+    stacks: BTreeMap<i64, StackEntry>,
 }
 
 impl State {
@@ -222,6 +233,7 @@ impl State {
             photos: file.photos,
             keywords: file.keywords,
             collections: file.collections,
+            stacks: file.stacks,
         })
     }
 
@@ -233,6 +245,7 @@ impl State {
             photos: self.photos.clone(),
             keywords: self.keywords.clone(),
             collections: self.collections.clone(),
+            stacks: self.stacks.clone(),
         };
         let mut text = serde_json::to_string_pretty(&file).map_err(|source| StateError::Parse {
             path: path.to_path_buf(),
@@ -295,6 +308,17 @@ impl State {
     /// All recorded collections, ordered by Lightroom id.
     pub fn collections(&self) -> impl Iterator<Item = (i64, &CollectionEntry)> {
         self.collections.iter().map(|(k, v)| (*k, v))
+    }
+
+    /// Records a stack as grouped with `members` (global ids, top first),
+    /// replacing an earlier entry for the same Lightroom id.
+    pub fn record_stack(&mut self, lightroom_id: i64, members: Vec<String>) {
+        self.stacks.insert(lightroom_id, StackEntry { members });
+    }
+
+    /// The entry of a stack, by Lightroom id.
+    pub fn stack(&self, lightroom_id: i64) -> Option<&StackEntry> {
+        self.stacks.get(&lightroom_id)
     }
 
     /// The entry of a photo, by Lightroom global id.
@@ -400,6 +424,7 @@ fn write_and_sync(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use model::Rating;
+    use serde_json::json;
 
     fn kw(parts: &[&str]) -> Keyword {
         Keyword::new(parts.iter().map(|s| s.to_string()).collect()).unwrap()
@@ -489,6 +514,20 @@ mod tests {
                 "parent": 1, "members": ["a", "b"]})
         );
         assert_eq!(State::load(&path).unwrap(), s);
+    }
+
+    #[test]
+    fn stacks_round_trip_in_order_and_missing_ones_load_as_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.json");
+        let mut s = State::default();
+        s.record_stack(7, vec!["b".into(), "a".into()]);
+        s.save(&path).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["stacks"]["7"], json!({"members": ["b", "a"]}));
+        assert_eq!(State::load(&path).unwrap(), s);
+        std::fs::write(&path, r#"{"version":1,"photos":{},"keywords":{}}"#).unwrap();
+        assert!(State::load(&path).unwrap().stack(7).is_none());
     }
 
     #[test]

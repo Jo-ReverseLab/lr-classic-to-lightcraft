@@ -35,8 +35,6 @@
 //!   `active` = the first; then `stack.group` with `ids`, `top` = the
 //!   first, `collapsed: false`.
 
-#![cfg(any())]
-
 use lc_writer::plan::{Plan, Step, WriteInput, plan};
 use lc_writer::state::{PhotoFields, State};
 use model::{Collection, CollectionKind, Photo, Rating, Stack};

@@ -35,8 +35,6 @@
 //!   rejected commands this is the sum of the task description);
 //! - reasons name the stack's Lightroom id, never a path.
 
-#![cfg(any())]
-
 use lc_writer::apply::{ApplySummary, apply, apply_partial};
 use lc_writer::control::{ControlClient, WriteError};
 use lc_writer::plan::WriteInput;

@@ -12,7 +12,11 @@
 //! - keywords whose attributes changed after creation are not updated, only
 //!   reported;
 //! - photos are processed in the order of their global ids;
-//! - collections come after all photo steps: new album folders first, then
+//! - stacks come after all photo steps, ascending by Lightroom id: a stack
+//!   is grouped (`stack.group`, always expanded) if it is new or its members
+//!   or their order changed; members that left a stack in Lightroom are only
+//!   counted, never removed from the LightCraft stack;
+//! - collections come after the stack steps: new album folders first, then
 //!   new albums, a parent always before its children; then the members to
 //!   add and to remove, album by album;
 //! - `album.create` gets only `name`, `folder` and `parent` (never
@@ -24,7 +28,7 @@
 //!   counted.
 
 use crate::state::{PhotoFields, State, keyword_text, snapshot};
-use model::{Collection, CollectionKind, Keyword, Photo, Skipped};
+use model::{Collection, CollectionKind, Keyword, Photo, Skipped, Stack};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -41,6 +45,8 @@ pub struct WriteInput {
     pub photo_keywords: BTreeMap<i64, Vec<Keyword>>,
     /// The collections to write as albums and album folders.
     pub collections: Vec<Collection>,
+    /// The stacks to group, members top first.
+    pub stacks: Vec<Stack>,
 }
 
 /// One command of the plan.
@@ -69,6 +75,14 @@ pub enum Step {
         command: String,
         /// The command parameters without `ids`.
         params: Value,
+    },
+    /// Group photos into a stack (`library.select`, then `stack.group`
+    /// with `collapsed: false`); the first photo is the top.
+    GroupStack {
+        /// Lightroom id of the stack.
+        stack_id: i64,
+        /// Lightroom global ids of the members, top first.
+        gids: Vec<String>,
     },
     /// Create an album or album folder (`album.create`).
     CreateAlbum {
@@ -119,6 +133,12 @@ pub struct Plan {
     collections_removed: usize,
     /// Album members that cannot be written.
     member_skips: Vec<Skipped>,
+    /// Input stacks recorded with the same members in the same order.
+    stacks_known: usize,
+    /// Input stacks with fewer than two members that have a global id.
+    stack_skips: Vec<Skipped>,
+    /// Recorded members of input stacks that are no longer members.
+    stack_members_removed: usize,
 }
 
 impl Plan {
@@ -174,6 +194,25 @@ impl Plan {
         &self.member_skips
     }
 
+    /// The input stacks recorded in the mapping file with the same members
+    /// in the same order (members that left the stack in Lightroom are not
+    /// compared); they get no command.
+    pub fn stacks_known(&self) -> usize {
+        self.stacks_known
+    }
+
+    /// The input stacks with fewer than two members that have a global id;
+    /// the reason names the stack's Lightroom id.
+    pub fn stack_skips(&self) -> &[Skipped] {
+        &self.stack_skips
+    }
+
+    /// The recorded members of input stacks that are no longer members in
+    /// Lightroom. They stay in the LightCraft stack and are only counted.
+    pub fn stack_members_removed(&self) -> usize {
+        self.stack_members_removed
+    }
+
     /// The plan as a script: one JSON line per step, each an
     /// `engine.execute` request, plus one `library.select` line before the
     /// updates of each photo (LightCraft runs photo commands only on a
@@ -206,6 +245,12 @@ impl Plan {
                 Step::CreateAlbum { params, .. } => {
                     selected = None;
                     push("album.create", params.clone());
+                }
+                Step::GroupStack { gids, .. } => {
+                    selected = None;
+                    let ids: Vec<Value> = gids.iter().map(|g| photo_ref(state, g)).collect();
+                    push("library.select", members_select_params(&ids));
+                    push("stack.group", group_params(&ids));
                 }
                 Step::AddMembers {
                     collection_id,
@@ -281,6 +326,13 @@ pub fn members_select_params(ids: &[Value]) -> Value {
     json!({"ids": ids, "active": ids.first()})
 }
 
+/// The parameters of `stack.group` for photos `ids` (at least two), the
+/// first one on top. `collapsed` is always sent as `false`: LightCraft
+/// would collapse a new stack, and the Lightroom state is not taken over.
+pub fn group_params(ids: &[Value]) -> Value {
+    json!({"ids": ids, "top": ids.first(), "collapsed": false})
+}
+
 /// The parameters that select exactly one photo and make it the active
 /// one; LightCraft runs `photo.*` commands only on a selection.
 pub fn select_params(id: &Value) -> Value {
@@ -297,6 +349,7 @@ pub fn plan(input: &WriteInput, state: &State, library_keywords: &BTreeSet<Strin
     plan_keywords(input, state, library_keywords, &mut out);
     out.keyword_skips = out.skipped.len();
     plan_photos(input, state, &mut out);
+    plan_stacks(input, state, &mut out);
     plan_collections(input, state, &mut out);
     out
 }
@@ -439,6 +492,63 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
     }
 }
 
+/// The first global id of each Lightroom photo id in the input.
+fn global_ids(input: &WriteInput) -> BTreeMap<i64, &str> {
+    let mut out: BTreeMap<i64, &str> = BTreeMap::new();
+    for p in &input.photos {
+        if let Some(gid) = p.global_id.as_deref() {
+            out.entry(p.lightroom_id).or_insert(gid);
+        }
+    }
+    out
+}
+
+fn plan_stacks(input: &WriteInput, state: &State, out: &mut Plan) {
+    let global_ids = global_ids(input);
+    let by_id: BTreeMap<i64, &Stack> = input.stacks.iter().map(|s| (s.lightroom_id, s)).collect();
+    for s in by_id.values() {
+        let mut gids: Vec<String> = Vec::new();
+        for member in &s.members {
+            if let Some(gid) = global_ids.get(member)
+                && !gids.iter().any(|g| g == gid)
+            {
+                gids.push((*gid).to_string());
+            }
+        }
+        if gids.len() < 2 {
+            out.stack_skips.push(Skipped {
+                reason: format!(
+                    "stack {}: fewer than two photos with a global id; not grouped",
+                    s.lightroom_id
+                ),
+            });
+            continue;
+        }
+        let recorded: &[String] = state
+            .stack(s.lightroom_id)
+            .map(|e| e.members.as_slice())
+            .unwrap_or_default();
+        out.stack_members_removed += recorded.iter().filter(|g| !gids.contains(g)).count();
+        if state.stack(s.lightroom_id).is_some() && same_members(recorded, &gids) {
+            out.stacks_known += 1;
+        } else {
+            out.steps.push(Step::GroupStack {
+                stack_id: s.lightroom_id,
+                gids,
+            });
+        }
+    }
+}
+
+/// True if `recorded`, without the members that are not in `wanted`
+/// (removed in Lightroom), equals `wanted` in the same order.
+pub(crate) fn same_members(recorded: &[String], wanted: &[String]) -> bool {
+    recorded
+        .iter()
+        .filter(|g| wanted.contains(g))
+        .eq(wanted.iter())
+}
+
 fn plan_collections(input: &WriteInput, state: &State, out: &mut Plan) {
     let by_id: BTreeMap<i64, &Collection> = input
         .collections
@@ -482,12 +592,7 @@ fn plan_collections(input: &WriteInput, state: &State, out: &mut Plan) {
         });
     }
 
-    let mut global_ids: BTreeMap<i64, &str> = BTreeMap::new();
-    for p in &input.photos {
-        if let Some(gid) = p.global_id.as_deref() {
-            global_ids.entry(p.lightroom_id).or_insert(gid);
-        }
-    }
+    let global_ids = global_ids(input);
     for c in by_id.values() {
         if c.kind != CollectionKind::Album {
             continue;
@@ -606,6 +711,16 @@ mod tests {
 
     fn kw(parts: &[&str]) -> Keyword {
         Keyword::new(parts.iter().map(|s| s.to_string()).collect()).unwrap()
+    }
+
+    #[test]
+    fn same_members_ignores_removed_but_not_order_or_new_ones() {
+        let v = |x: &[&str]| x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(same_members(&v(&["a", "b"]), &v(&["a", "b"])));
+        assert!(same_members(&v(&["a", "x", "b"]), &v(&["a", "b"])));
+        assert!(!same_members(&v(&["b", "a"]), &v(&["a", "b"])));
+        assert!(!same_members(&v(&["a", "b"]), &v(&["a", "b", "c"])));
+        assert!(!same_members(&v(&[]), &v(&["a", "b"])));
     }
 
     #[test]
