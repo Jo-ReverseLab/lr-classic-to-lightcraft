@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! CLI acceptance tests for writing smart collections as smart albums (task
 //! P5b-4b), with the generator fixture
 //! `write_smart_translate_catalog_with_files`, against the stateful fake

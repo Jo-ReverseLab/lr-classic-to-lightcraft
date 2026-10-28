@@ -142,6 +142,8 @@ pub struct CollectionsJson<'a> {
     pub duplicate_names: usize,
     /// 1 if a Quick Collection was read and converted, else 0.
     pub quick: usize,
+    /// Smart collections converted as smart albums.
+    pub smart: usize,
 }
 
 /// Counts of stacks, plus counts over the converted ones.
@@ -248,6 +250,7 @@ fn collections_json<'a>(report: &'a Report, counts: &CollectionCounts) -> Collec
         folders: counts.folders,
         duplicate_names: counts.duplicate_names,
         quick: counts.quick,
+        smart: counts.smart,
     }
 }
 
@@ -476,6 +479,7 @@ mod tests {
                 folders: 0,
                 duplicate_names: 0,
                 quick: 0,
+                smart: 0,
             },
             collection_members,
             stacks: Report::new(),
@@ -773,6 +777,7 @@ mod tests {
         assert_eq!(v["collections"]["folders"], 0);
         assert_eq!(v["collections"]["duplicate_names"], 0);
         assert_eq!(v["collections"]["quick"], 0);
+        assert_eq!(v["collections"]["smart"], 0);
         assert_eq!(v["collection_members"]["read"], 3);
         assert_eq!(v["collection_members"]["converted"], 1);
         assert_eq!(

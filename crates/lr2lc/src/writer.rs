@@ -25,6 +25,7 @@ pub enum WriterJson {
         members_skipped: Vec<ReasonJson>,
         stacks_skipped: Vec<ReasonJson>,
         quick_skipped: Vec<ReasonJson>,
+        smart_skipped: Vec<ReasonJson>,
     },
     /// `--apply`: what was sent.
     Applied {
@@ -60,6 +61,10 @@ pub enum WriterJson {
         quick_removed: usize,
         quick_skipped: Vec<ReasonJson>,
         quick_incomplete: Vec<ReasonJson>,
+        smart_created: usize,
+        smart_known: usize,
+        smart_rules_changed: usize,
+        smart_skipped: Vec<ReasonJson>,
         /// Why the run stopped early; absent after a complete run.
         #[serde(skip_serializing_if = "Option::is_none")]
         aborted: Option<String>,
@@ -70,7 +75,9 @@ pub enum WriterJson {
 /// without updates. Every converted photo counts once in `photos`,
 /// `photos_updated`, `photos_unchanged` or the writer's skipped photos;
 /// every converted collection once in `folders`, `albums` or
-/// `collections_known`; every converted stack once in `stacks`,
+/// `collections_known`; every converted smart collection once in
+/// `smart_albums`, `smart_known` or the writer's skipped smart collections;
+/// every converted stack once in `stacks`,
 /// `stacks_known` or the writer's skipped stacks. `members_added` and
 /// `members_removed` count photos.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -99,6 +106,13 @@ pub struct PlannedJson {
     /// Recorded Quick Collection members that left it in Lightroom; only
     /// counted.
     pub quick_removed: usize,
+    /// Smart albums to create.
+    pub smart_albums: usize,
+    /// Smart collections already in the mapping file.
+    pub smart_known: usize,
+    /// Known smart collections whose rules changed in Lightroom; only
+    /// counted.
+    pub smart_rules_changed: usize,
 }
 
 /// The writer input from the converted elements of the catalog.
@@ -110,6 +124,7 @@ pub fn input(converted: &Converted) -> WriteInput {
         collections: converted.collections.clone(),
         stacks: converted.stacks.clone(),
         quick: converted.quick.clone(),
+        smart: converted.smart.clone(),
     }
 }
 
@@ -132,6 +147,8 @@ pub fn planned(plan: &Plan) -> PlannedJson {
         stack_members_removed: plan.stack_members_removed(),
         quick_already: plan.quick_already(),
         quick_removed: plan.quick_removed(),
+        smart_known: plan.smart_known(),
+        smart_rules_changed: plan.smart_rules_changed(),
         ..PlannedJson::default()
     };
     for step in &plan.steps {
@@ -150,6 +167,7 @@ pub fn planned(plan: &Plan) -> PlannedJson {
             Step::RemoveMembers { gids, .. } => out.members_removed += gids.len(),
             Step::GroupStack { .. } => out.stacks += 1,
             Step::QuickAdd { gids } => out.quick_add += gids.len(),
+            Step::CreateSmart { .. } => out.smart_albums += 1,
         }
     }
     out
@@ -164,6 +182,7 @@ pub fn planned_json(plan: &Plan) -> WriterJson {
         members_skipped: reasons(plan.member_skips()),
         stacks_skipped: reasons(plan.stack_skips()),
         quick_skipped: reasons(plan.quick_skips()),
+        smart_skipped: reasons(plan.smart_skips()),
     }
 }
 
@@ -203,6 +222,10 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         quick_removed: s.quick_removed,
         quick_skipped: reasons(&s.quick_skipped),
         quick_incomplete: reasons(&s.quick_incomplete),
+        smart_created: s.smart_created,
+        smart_known: s.smart_known,
+        smart_rules_changed: s.smart_rules_changed,
+        smart_skipped: reasons(&s.smart_skipped),
         aborted: aborted.map(WriteError::short_reason),
     }
 }
@@ -247,6 +270,17 @@ pub fn planned_summary(plan: &Plan) -> String {
         &mut out,
         "writer would skip quick collection members",
         plan.quick_skips(),
+    );
+    let _ = writeln!(
+        out,
+        "writer smart albums: smart albums to create {}, already in the library {}, \
+         rules changed in Lightroom {}",
+        p.smart_albums, p.smart_known, p.smart_rules_changed
+    );
+    skipped_lines(
+        &mut out,
+        "writer would skip smart collections",
+        plan.smart_skips(),
     );
     out
 }
@@ -306,6 +340,15 @@ pub fn applied_summary(s: &ApplySummary) -> String {
         s.quick_incomplete.len(),
         s.quick_removed
     );
+    let _ = writeln!(
+        out,
+        "written smart albums: created {}, already in the library {}, skipped {}, \
+         rules changed in Lightroom (left as is) {}",
+        s.smart_created,
+        s.smart_known,
+        s.smart_skipped.len(),
+        s.smart_rules_changed
+    );
     if s.collections_renamed + s.collections_moved + s.collections_removed > 0 {
         let _ = writeln!(
             out,
@@ -328,6 +371,7 @@ pub fn applied_summary(s: &ApplySummary) -> String {
     skipped_lines(&mut out, "incomplete stacks", &s.stacks_incomplete);
     skipped_lines(&mut out, "skipped quick collection", &s.quick_skipped);
     skipped_lines(&mut out, "incomplete quick collection", &s.quick_incomplete);
+    skipped_lines(&mut out, "skipped smart collections", &s.smart_skipped);
     out
 }
 
@@ -427,12 +471,14 @@ mod tests {
                         "folders": 0, "albums": 0, "members_added": 0,
                         "members_removed": 0, "collections_known": 0,
                         "stacks": 0, "stacks_known": 0, "stack_members_removed": 0,
-                        "quick_add": 0, "quick_already": 0, "quick_removed": 0},
+                        "quick_add": 0, "quick_already": 0, "quick_removed": 0,
+                        "smart_albums": 0, "smart_known": 0, "smart_rules_changed": 0},
                 "photos_skipped": [],
                 "keywords_skipped": [],
                 "members_skipped": [],
                 "stacks_skipped": [],
                 "quick_skipped": [],
+                "smart_skipped": [],
             })
         );
         let s = ApplySummary {
@@ -463,6 +509,9 @@ mod tests {
             "quick_added",
             "quick_already",
             "quick_removed",
+            "smart_created",
+            "smart_known",
+            "smart_rules_changed",
         ] {
             assert_eq!(v[key], 0, "{key}");
         }
@@ -474,6 +523,7 @@ mod tests {
             "stacks_incomplete",
             "quick_skipped",
             "quick_incomplete",
+            "smart_skipped",
         ] {
             assert!(v[key].is_array(), "{key}");
         }

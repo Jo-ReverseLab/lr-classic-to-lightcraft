@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use lr_reader::{Catalog, KeywordData, VIDEO_SKIP_REASON, checksum, drop_missing_originals};
 use model::{
     Collection, CollectionKind, Flag, Folder, Keyword, PathMappings, Photo, QuickCollection,
-    Rating, Report, Stack,
+    Rating, Report, SmartCollection, Stack,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -75,6 +75,9 @@ pub struct Converted {
     pub stacks: Vec<Stack>,
     /// The converted Quick Collection.
     pub quick: Option<QuickCollection>,
+    /// Smart collections that can be written as smart albums, ascending by
+    /// Lightroom id.
+    pub smart: Vec<SmartCollection>,
 }
 
 /// Counts over the converted stacks.
@@ -97,6 +100,8 @@ pub struct CollectionCounts {
     pub duplicate_names: usize,
     /// 1 if a Quick Collection was converted, else 0.
     pub quick: usize,
+    /// Smart collections converted as smart albums.
+    pub smart: usize,
 }
 
 impl CollectionCounts {
@@ -180,6 +185,32 @@ impl KeywordAttributes {
     }
 }
 
+/// Decides which smart collections can be written (see
+/// [`lc_writer::smart::convertible`]) and books them in the collections
+/// report: a convertible one counts as converted instead of skipped, the
+/// reason of any other one names why it is not converted (the first
+/// criterion without an exact equivalent, or its parent). Every collection
+/// reason starts with `collection <id>:`. Smart collections without
+/// readable rules keep the reader's reason.
+fn convert_smart(data: &mut lr_reader::CollectionData) -> Vec<SmartCollection> {
+    let mut out = Vec::new();
+    for s in &data.smart_collections {
+        let prefix = format!("collection {}:", s.lightroom_id);
+        match lc_writer::smart::convertible(s, &data.collections) {
+            Ok(_) => {
+                if data.report.convert_skipped(&prefix) > 0 {
+                    out.push(s.clone());
+                }
+            }
+            Err(why) => {
+                let reason = format!("{prefix} smart collection is not converted ({why})");
+                data.report.replace_skipped(&prefix, &reason);
+            }
+        }
+    }
+    out
+}
+
 /// Runs the dry run on the catalog at `path`.
 ///
 /// Fails if the catalog cannot be opened or read. A changed checksum is not
@@ -240,7 +271,8 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         let data = catalog.keywords(&kept_photos, &mut keywords, &mut keyword_assignments)?;
         let keyword_attributes = KeywordAttributes::count(&data);
         // Members naming skipped photos are skipped as well.
-        let collection_data = catalog.collection_data(&kept_photos)?;
+        let mut collection_data = catalog.collection_data(&kept_photos)?;
+        let smart = convert_smart(&mut collection_data);
         let stack_data = catalog.stack_data(&kept_photos)?;
         let mut keyword_synonyms = data.synonym_report;
         for keyword in &data.keywords {
@@ -259,6 +291,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
             collection_data.report,
             CollectionCounts {
                 quick: usize::from(collection_data.quick.is_some()),
+                smart: smart.len(),
                 ..CollectionCounts::count(&collection_data.collections)
             },
             collection_data.members,
@@ -292,6 +325,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
                 collections: collection_data.collections,
                 stacks: stack_data.stacks,
                 quick: collection_data.quick,
+                smart,
             },
         )
     };
@@ -376,6 +410,54 @@ fn rating_counts(photos: &[Photo]) -> [usize; 6] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn convertible_smart_collections_move_to_converted() {
+        use model::{SmartCombine, SmartRule, SmartRules, SmartValue};
+        let rules = |criterion: &str| SmartRules {
+            combine: SmartCombine::Intersect,
+            rules: vec![SmartRule {
+                criterion: criterion.into(),
+                operation: ">=".into(),
+                value: Some(SmartValue::Number(3.0)),
+                value2: None,
+                units: None,
+            }],
+        };
+        let smart = |id, criterion| SmartCollection {
+            lightroom_id: id,
+            name: "n".into(),
+            parent: None,
+            rules: rules(criterion),
+        };
+        let mut data = lr_reader::CollectionData {
+            smart_collections: vec![smart(1, "rating"), smart(10, "pick")],
+            ..Default::default()
+        };
+        for id in [1, 10, 100] {
+            data.report.read();
+            data.report
+                .skipped(format!("collection {id}: smart collection x"));
+        }
+        let out = convert_smart(&mut data);
+        assert_eq!(out, vec![smart(1, "rating")]);
+        assert_eq!(data.report.converted_count(), 1);
+        assert!(data.report.is_balanced());
+        let reasons: Vec<&str> = data
+            .report
+            .skipped_items()
+            .iter()
+            .map(|s| s.reason.as_str())
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                "collection 10: smart collection is not converted (criterion \"pick\" has no \
+                 exact LightCraft equivalent)",
+                "collection 100: smart collection x",
+            ]
+        );
+    }
 
     fn photo(id: i64, stars: u8) -> Photo {
         Photo::new(format!("p{id}.jpg"), id, Rating::new(stars).unwrap())
@@ -465,6 +547,7 @@ mod tests {
                 folders: 1,
                 duplicate_names: 3,
                 quick: 0,
+                smart: 0,
             }
         );
         assert_eq!(CollectionCounts::count(&[]), CollectionCounts::default());
