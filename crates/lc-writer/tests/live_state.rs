@@ -64,7 +64,7 @@ fn gid(id: i64) -> String {
 fn state_with(ids: &[i64]) -> State {
     let mut state = State::default();
     for id in ids {
-        state.record(&gid(*id), *id, json!(id), PhotoFields::imported_default());
+        state.record(gid(*id), *id, json!(id), PhotoFields::imported_default());
     }
     state
 }
