@@ -308,7 +308,7 @@ LightCraft N` follows.
 `report.json` then has a `writer` section with `planned` (`keywords`,
 `photos`, `updates`, `photos_updated`, `photos_unchanged`, `folders`,
 `albums`, `members_added`, `members_removed`, `collections_known`,
-`stacks`, `stacks_known`, `stack_members_removed`), `photos_skipped`,
+`collections_removed`, `stacks`, `stacks_known`, `stack_members_removed`), `photos_skipped`,
 `keywords_skipped`, `members_skipped` and `stacks_skipped` (each a list of
 `{"reason": ...}`; `members_skipped` holds album members whose photo is
 not converted or has no global id).

@@ -121,6 +121,10 @@ pub struct PlannedJson {
     pub members_added: usize,
     pub members_removed: usize,
     pub collections_known: usize,
+    /// Recorded collections that no longer exist in Lightroom; only
+    /// counted. Recorded smart collections that still exist are never
+    /// counted here.
+    pub collections_removed: usize,
     /// Stacks to group (new or changed).
     pub stacks: usize,
     pub stacks_known: usize,
@@ -176,6 +180,7 @@ pub fn planned(plan: &Plan) -> PlannedJson {
         photos_updated: plan.photos_updated(),
         photos_unchanged: plan.photos_unchanged(),
         collections_known: plan.collections_known(),
+        collections_removed: plan.collections_removed(),
         stacks_known: plan.stacks_known(),
         stack_members_removed: plan.stack_members_removed(),
         quick_already: plan.quick_already(),
@@ -546,6 +551,7 @@ mod tests {
                         "photos_updated": 0, "photos_unchanged": 0,
                         "folders": 0, "albums": 0, "members_added": 0,
                         "members_removed": 0, "collections_known": 0,
+                        "collections_removed": 0,
                         "stacks": 0, "stacks_known": 0, "stack_members_removed": 0,
                         "quick_add": 0, "quick_already": 0, "quick_removed": 0,
                         "smart_albums": 0, "smart_known": 0, "smart_rules_changed": 0,

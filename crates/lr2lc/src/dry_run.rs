@@ -197,28 +197,30 @@ impl KeywordAttributes {
 /// reason starts with `collection <id>:`. Smart collections without
 /// readable rules keep the reader's reason.
 ///
-/// Returns the smart collections to write and the Lightroom ids of the
-/// other smart collections with readable rules.
+/// Returns the smart collections to write and the Lightroom ids of all
+/// other smart collections (`data.smart_ids`), readable rules or not.
 fn convert_smart(data: &mut lr_reader::CollectionData) -> (Vec<SmartCollection>, Vec<i64>) {
-    let mut out = Vec::new();
-    let mut untranslatable = Vec::new();
+    let mut out: Vec<SmartCollection> = Vec::new();
     for s in &data.smart_collections {
         let prefix = format!("collection {}:", s.lightroom_id);
         match lc_writer::smart::convertible(s, &data.collections) {
             Ok(_) => {
                 if data.report.convert_skipped(&prefix) > 0 {
                     out.push(s.clone());
-                } else {
-                    untranslatable.push(s.lightroom_id);
                 }
             }
             Err((code, why)) => {
                 let reason = format!("{prefix} smart collection is not converted ({why})");
                 data.report.replace_skipped(&prefix, code, &reason);
-                untranslatable.push(s.lightroom_id);
             }
         }
     }
+    let untranslatable = data
+        .smart_ids
+        .iter()
+        .copied()
+        .filter(|id| !out.iter().any(|s| s.lightroom_id == *id))
+        .collect();
     (out, untranslatable)
 }
 
@@ -435,6 +437,7 @@ mod tests {
         };
         let mut data = lr_reader::CollectionData {
             smart_collections: vec![smart(1, "rating"), smart(10, "pick")],
+            smart_ids: [1, 10, 100].into(),
             ..Default::default()
         };
         for id in [1, 10, 100] {
@@ -444,7 +447,8 @@ mod tests {
         }
         let (out, untranslatable) = convert_smart(&mut data);
         assert_eq!(out, vec![smart(1, "rating")]);
-        assert_eq!(untranslatable, vec![10]);
+        // 100 has unreadable rules: still not written, still listed.
+        assert_eq!(untranslatable, vec![10, 100]);
         assert_eq!(data.report.converted_count(), 1);
         assert!(data.report.is_balanced());
         let reasons: Vec<&str> = data

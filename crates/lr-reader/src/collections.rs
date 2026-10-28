@@ -19,7 +19,7 @@ use model::{
     SmartRules,
 };
 use rusqlite::types::ValueRef;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 const PLAIN: &str = "com.adobe.ag.library.collection";
 const SET: &str = "com.adobe.ag.library.group";
@@ -49,6 +49,11 @@ pub struct CollectionData {
     /// `report` all the same; whether one can be converted is decided by
     /// the writer side.
     pub smart_collections: Vec<SmartCollection>,
+    /// Ids of every smart collection row (`creationId` smart_collection,
+    /// system flag not set), whether its rules are readable or not and
+    /// whether its name is valid. Never a plain album or set. Independent
+    /// of `smart` and `smart_collections`, so `smart.keys()` is a subset.
+    pub smart_ids: BTreeSet<i64>,
 }
 
 /// Where a row points with its `parent` column.
@@ -94,7 +99,9 @@ impl Catalog {
     pub fn collection_data(&self, photos: &[Photo]) -> Result<CollectionData, ReadError> {
         let contents = self.smart_contents()?;
         let mut smart: BTreeMap<i64, SmartRules> = BTreeMap::new();
+        let mut smart_ids: BTreeSet<i64> = BTreeSet::new();
         let rows = self.collection_rows(|id| {
+            smart_ids.insert(id);
             let rules = smart_rules(contents.get(&id).map(Vec::as_slice));
             let reason = smart_reason(id, rules.as_ref());
             if let Some(rules) = rules {
@@ -107,6 +114,7 @@ impl Catalog {
         let mut data = CollectionData {
             smart,
             smart_collections,
+            smart_ids,
             ..CollectionData::default()
         };
         let mut index: HashMap<i64, Target> = HashMap::new();
@@ -585,6 +593,22 @@ mod tests {
             name: Some(String::new()),
             quick: false,
         }
+    }
+
+    #[test]
+    fn smart_ids_include_smart_collections_with_unreadable_rules() {
+        use lrcat_fixtures::{RuleDamage, smart_edge as e};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("smart.lrcat");
+        lrcat_fixtures::write_smart_catalog(&path).unwrap();
+        lrcat_fixtures::break_smart_rules(&path, 101, RuleDamage::NullContent).unwrap();
+        let catalog = Catalog::open(&path).unwrap();
+        let data = catalog.collection_data(&[]).unwrap();
+        assert!(!data.smart.contains_key(&101));
+        assert!(data.smart_ids.contains(&101));
+        assert!(data.smart_ids.contains(&e::OTHER_MODULE_ONLY));
+        assert!(!data.smart_ids.contains(&e::PLAIN_WITH_RULES));
+        assert!(data.smart.keys().all(|id| data.smart_ids.contains(id)));
     }
 
     #[test]
