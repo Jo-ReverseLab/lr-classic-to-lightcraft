@@ -8,7 +8,7 @@
 //! API: `WriteInput.quick: Option<model::QuickCollection>`,
 //! `Step::QuickAdd { gids: Vec<String> }`, the mapping file key
 //! `quick = {members: [gids]}` (the state is built by loading a file with
-//! `version` and `quick` only; assumption: every other key has a default).
+//! `version`, empty `photos` and `keywords` (required keys) and `quick`).
 //!
 //! Rules: one `QuickAdd` at the very end of the plan (after album steps)
 //! with the members, in Lightroom order, that are not in `state.quick`;
@@ -56,7 +56,8 @@ fn state_with(quick: &[&str]) -> State {
     let path = dir.path().join("state.json");
     std::fs::write(
         &path,
-        json!({"version": 1, "quick": {"members": quick}}).to_string(),
+        json!({"version": 1, "photos": {}, "keywords": {}, "quick": {"members": quick}})
+            .to_string(),
     )
     .unwrap();
     State::load(&path).unwrap()
