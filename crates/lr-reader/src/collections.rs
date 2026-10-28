@@ -4,20 +4,25 @@
 //! Plain collections become albums, collection sets become folders. The
 //! first system collection by id is the Quick Collection; further system
 //! collections, smart collections and every other kind are skipped with a
-//! reason. A collection whose parent is
+//! reason; the reason of a smart collection names its first criterion,
+//! read from `AgLibraryCollectionContent`. A collection whose parent is
 //! missing, skipped, not a collection set or part of a cycle is skipped as
 //! well, and so is everything below it.
 //!
-//! Reasons name ids and kinds, never collection names.
+//! Reasons name ids, kinds and criteria, never collection names or rule
+//! values.
 
 use crate::catalog::{Catalog, ReadError};
-use model::{Collection, CollectionKind, Photo, QuickCollection, Report};
+use crate::smart::parse_smart_rules;
+use model::{Collection, CollectionKind, Photo, QuickCollection, Report, SmartRules};
 use rusqlite::types::ValueRef;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 const PLAIN: &str = "com.adobe.ag.library.collection";
 const SET: &str = "com.adobe.ag.library.group";
 const SMART: &str = "com.adobe.ag.library.smart_collection";
+/// `owningModule` of the content row that holds smart collection rules.
+const SMART_MODULE: &str = "ag.library.smart_collection";
 
 /// Collections and their members as read from a catalog.
 #[derive(Debug, Clone, Default)]
@@ -31,6 +36,10 @@ pub struct CollectionData {
     /// One entry per `AgLibraryCollectionImage` row: converted (a member of
     /// a converted album or of the Quick Collection) or skipped.
     pub members: Report,
+    /// Readable rules of smart collections, by collection id. Smart
+    /// collections are skipped all the same; the rules are kept for
+    /// translation.
+    pub smart: BTreeMap<i64, SmartRules>,
 }
 
 /// Where a row points with its `parent` column.
@@ -72,9 +81,21 @@ impl Catalog {
     /// photo are skipped. Both reports are complete: every row is counted
     /// as read and then as converted or skipped.
     pub fn collection_data(&self, photos: &[Photo]) -> Result<CollectionData, ReadError> {
-        let rows = self.collection_rows()?;
+        let contents = self.smart_contents()?;
+        let mut smart: BTreeMap<i64, SmartRules> = BTreeMap::new();
+        let rows = self.collection_rows(|id| {
+            let rules = smart_rules(contents.get(&id).map(Vec::as_slice));
+            let reason = smart_reason(id, rules.as_ref());
+            if let Some(rules) = rules {
+                smart.insert(id, rules);
+            }
+            reason
+        })?;
         let status = resolve(&rows);
-        let mut data = CollectionData::default();
+        let mut data = CollectionData {
+            smart,
+            ..CollectionData::default()
+        };
         let mut index: HashMap<i64, Target> = HashMap::new();
         let first_quick = rows.iter().find(|(_, r)| r.quick).map(|(&id, _)| id);
         for (&id, row) in &rows {
@@ -146,8 +167,12 @@ impl Catalog {
         Ok(data)
     }
 
-    /// All collection rows, by id.
-    fn collection_rows(&self) -> Result<BTreeMap<i64, Row>, ReadError> {
+    /// All collection rows, by id. `smart` gives the reason for a smart
+    /// collection with the given id.
+    fn collection_rows(
+        &self,
+        mut smart: impl FnMut(i64) -> String,
+    ) -> Result<BTreeMap<i64, Row>, ReadError> {
         let mut stmt = self
             .conn
             .prepare(
@@ -161,7 +186,7 @@ impl Catalog {
                 let creation = text(row.get_ref(1)?);
                 let system_only = is_nonzero(row.get_ref(2)?);
                 let name = text(row.get_ref(3)?);
-                let own = classify(id, creation, system_only).and_then(|kind| {
+                let own = classify(id, creation, system_only, &mut smart).and_then(|kind| {
                     name.map(|name| (kind, name.to_owned()))
                         .ok_or_else(|| format!("collection {id}: name is not valid text"))
                 });
@@ -177,6 +202,46 @@ impl Catalog {
             })
             .map_err(ReadError::Query)?;
         rows.collect::<Result<_, _>>().map_err(ReadError::Query)
+    }
+
+    /// The `content` of every smart-rule row (`owningModule` is
+    /// [`SMART_MODULE`]), by collection id, in row order. `None` stands
+    /// for content that is not valid text. A catalog without the table
+    /// has no rows.
+    fn smart_contents(&self) -> Result<HashMap<i64, Vec<Option<String>>>, ReadError> {
+        let exists = self
+            .conn
+            .prepare(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' \
+                 AND name = 'AgLibraryCollectionContent'",
+            )
+            .and_then(|mut s| s.exists([]))
+            .map_err(ReadError::Query)?;
+        let mut out: HashMap<i64, Vec<Option<String>>> = HashMap::new();
+        if !exists {
+            return Ok(out);
+        }
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT collection, content FROM AgLibraryCollectionContent \
+                 WHERE owningModule = ?1 ORDER BY id_local",
+            )
+            .map_err(ReadError::Query)?;
+        let rows = stmt
+            .query_map([SMART_MODULE], |row| {
+                Ok((
+                    as_id(row.get_ref(0)?),
+                    text(row.get_ref(1)?).map(str::to_owned),
+                ))
+            })
+            .map_err(ReadError::Query)?;
+        for row in rows {
+            if let (Some(id), content) = row.map_err(ReadError::Query)? {
+                out.entry(id).or_default().push(content);
+            }
+        }
+        Ok(out)
     }
 
     /// `(collection, image)` of every member row, ordered by collection,
@@ -223,14 +288,37 @@ fn member_check(
     }
 }
 
+/// The rules of a smart collection from its content rows: exactly one row
+/// with readable text, else `None`.
+fn smart_rules(contents: Option<&[Option<String>]>) -> Option<SmartRules> {
+    match contents? {
+        [Some(text)] => parse_smart_rules(text).ok(),
+        _ => None,
+    }
+}
+
+/// The skip reason of smart collection `id`. It names the first criterion
+/// only, never a value, operation or combine text.
+fn smart_reason(id: i64, rules: Option<&SmartRules>) -> String {
+    let detail = match rules {
+        None => "unreadable rules".to_string(),
+        Some(r) => match r.rules.first() {
+            None => "no criteria".to_string(),
+            Some(first) => format!("first criterion: {}", first.criterion),
+        },
+    };
+    format!("collection {id}: smart collection is not converted ({detail})")
+}
+
 /// The kind of a collection, or why it is skipped. The system flag wins
 /// over the `creationId`; the reason for a system collection applies to
 /// all but the first one, which the caller converts as the Quick
-/// Collection.
+/// Collection. `smart` gives the reason for a smart collection.
 fn classify(
     id: i64,
     creation_id: Option<&str>,
     system_only: bool,
+    smart: impl FnOnce(i64) -> String,
 ) -> Result<CollectionKind, String> {
     if system_only {
         return Err(format!(
@@ -240,9 +328,7 @@ fn classify(
     match creation_id {
         Some(PLAIN) => Ok(CollectionKind::Album),
         Some(SET) => Ok(CollectionKind::Folder),
-        Some(SMART) => Err(format!(
-            "collection {id}: smart collection is not converted"
-        )),
+        Some(SMART) => Err(smart(id)),
         Some(other) => Err(format!(
             "collection {id}: collection type {other:?} is not converted"
         )),
@@ -389,23 +475,82 @@ mod tests {
         }
     }
 
+    fn smart(id: i64) -> String {
+        format!("smart {id}")
+    }
+
+    fn rules(criteria: &[&str]) -> SmartRules {
+        SmartRules {
+            combine: model::SmartCombine::Union,
+            rules: criteria
+                .iter()
+                .map(|c| model::SmartRule {
+                    criterion: c.to_string(),
+                    operation: "zyxOp".into(),
+                    value: Some(model::SmartValue::Text("zyxValue".into())),
+                    value2: None,
+                    units: Some("zyxUnit".into()),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn smart_reasons_name_the_first_criterion_only() {
+        assert_eq!(
+            smart_reason(7, Some(&rules(&["rating", "pick"]))),
+            "collection 7: smart collection is not converted (first criterion: rating)"
+        );
+        assert_eq!(
+            smart_reason(7, Some(&rules(&[]))),
+            "collection 7: smart collection is not converted (no criteria)"
+        );
+        assert_eq!(
+            smart_reason(7, None),
+            "collection 7: smart collection is not converted (unreadable rules)"
+        );
+    }
+
+    #[test]
+    fn smart_rules_need_exactly_one_readable_row() {
+        let good =
+            "s = { { criteria = \"rating\", operation = \"==\", value = 1 }, combine = \"union\" }";
+        let one = [Some(good.to_string())];
+        assert_eq!(
+            smart_rules(Some(&one)).unwrap().rules[0].criterion,
+            "rating"
+        );
+        assert_eq!(smart_rules(None), None);
+        assert_eq!(smart_rules(Some(&[])), None);
+        assert_eq!(smart_rules(Some(&[None])), None);
+        assert_eq!(smart_rules(Some(&[Some("s = {".into())])), None);
+        let two = [Some(good.to_string()), Some(good.to_string())];
+        assert_eq!(smart_rules(Some(&two)), None);
+    }
+
     const F: Option<CollectionKind> = Some(CollectionKind::Folder);
     const A: Option<CollectionKind> = Some(CollectionKind::Album);
 
     #[test]
     fn kinds_and_reasons() {
-        assert_eq!(classify(2, Some(PLAIN), false), Ok(CollectionKind::Album));
-        assert_eq!(classify(1, Some(SET), false), Ok(CollectionKind::Folder));
         assert_eq!(
-            classify(5, Some(SMART), false),
-            Err("collection 5: smart collection is not converted".into())
+            classify(2, Some(PLAIN), false, smart),
+            Ok(CollectionKind::Album)
         );
         assert_eq!(
-            classify(9, Some("com.example.x"), false),
+            classify(1, Some(SET), false, smart),
+            Ok(CollectionKind::Folder)
+        );
+        assert_eq!(
+            classify(5, Some(SMART), false, smart),
+            Err("smart 5".into())
+        );
+        assert_eq!(
+            classify(9, Some("com.example.x"), false, smart),
             Err("collection 9: collection type \"com.example.x\" is not converted".into())
         );
         assert_eq!(
-            classify(10, None, false),
+            classify(10, None, false, smart),
             Err("collection 10: collection type is missing".into())
         );
     }
@@ -414,7 +559,7 @@ mod tests {
     fn system_wins_over_creation_id() {
         for creation in [Some(PLAIN), Some(SET), Some(SMART), None] {
             assert_eq!(
-                classify(8, creation, true),
+                classify(8, creation, true, smart),
                 Err("collection 8: more than one quick collection; not converted".into())
             );
         }
