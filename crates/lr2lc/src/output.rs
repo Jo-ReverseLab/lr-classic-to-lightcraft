@@ -1,6 +1,6 @@
 //! Readable summary and `report.json`.
 
-use crate::dry_run::{CollectionCounts, FlagCounts, KeywordAttributes, Outcome};
+use crate::dry_run::{CollectionCounts, FlagCounts, KeywordAttributes, Outcome, StackCounts};
 use crate::labels::LabelCounts;
 use crate::writer::WriterJson;
 use model::{Report, Skipped};
@@ -19,6 +19,8 @@ pub struct ReportJson<'a> {
     pub photos: PhotosJson<'a>,
     pub collections: CollectionsJson<'a>,
     pub collection_members: AreaJson<'a>,
+    pub stacks: StacksJson<'a>,
+    pub stack_members: AreaJson<'a>,
     pub keywords: KeywordsJson<'a>,
     pub keyword_assignments: AreaJson<'a>,
     pub keyword_synonyms: AreaJson<'a>,
@@ -140,6 +142,17 @@ pub struct CollectionsJson<'a> {
     pub duplicate_names: usize,
 }
 
+/// Counts of stacks, plus counts over the converted ones.
+#[derive(Debug, Serialize)]
+pub struct StacksJson<'a> {
+    #[serde(flatten)]
+    pub area: AreaJson<'a>,
+    /// Stacks collapsed in Lightroom; they are written expanded.
+    pub collapsed: usize,
+    /// Stacks without a member at position 1.
+    pub no_top: usize,
+}
+
 /// Counts of keywords, plus attribute counts over the converted keywords.
 #[derive(Debug, Serialize)]
 pub struct KeywordsJson<'a> {
@@ -200,6 +213,8 @@ pub fn report_json_with(outcome: &Outcome, dry_run: bool, writer: Option<&Writer
         },
         collections: collections_json(&outcome.collections, &outcome.collection_counts),
         collection_members: AreaJson::new(&outcome.collection_members),
+        stacks: stacks_json(&outcome.stacks, &outcome.stack_counts),
+        stack_members: AreaJson::new(&outcome.stack_members),
         keywords: KeywordsJson {
             area: AreaJson::new(&outcome.keywords),
             persons: outcome.keyword_attributes.persons,
@@ -233,6 +248,14 @@ fn collections_json<'a>(report: &'a Report, counts: &CollectionCounts) -> Collec
     }
 }
 
+fn stacks_json<'a>(report: &'a Report, counts: &StackCounts) -> StacksJson<'a> {
+    StacksJson {
+        area: AreaJson::new(report),
+        collapsed: counts.collapsed,
+        no_top: counts.no_top,
+    }
+}
+
 /// Builds the readable summary of a dry run.
 #[cfg(test)]
 pub fn summary(outcome: &Outcome) -> String {
@@ -262,6 +285,7 @@ pub fn summary_with(outcome: &Outcome, dry_run: bool) -> String {
         );
     }
     let _ = writeln!(out, "videos: skipped {}", outcome.videos);
+    let _ = writeln!(out, "{}", stack_counts_line(&outcome.stack_counts));
     let _ = writeln!(out, "{}", attributes_line(&outcome.keyword_attributes));
     for (area, report) in areas(outcome) {
         let groups = group_reasons(report.skipped_items());
@@ -296,16 +320,26 @@ pub fn summary_with(outcome: &Outcome, dry_run: bool) -> String {
 }
 
 /// The report areas in output order.
-fn areas(outcome: &Outcome) -> [(&'static str, &Report); 7] {
+fn areas(outcome: &Outcome) -> [(&'static str, &Report); 9] {
     [
         ("folders", &outcome.folders),
         ("photos", &outcome.photos),
         ("collections", &outcome.collections),
         ("collection members", &outcome.collection_members),
+        ("stacks", &outcome.stacks),
+        ("stack members", &outcome.stack_members),
         ("keywords", &outcome.keywords),
         ("keyword assignments", &outcome.keyword_assignments),
         ("keyword synonyms", &outcome.keyword_synonyms),
     ]
+}
+
+/// Formats the counts over the converted stacks as one line.
+fn stack_counts_line(c: &StackCounts) -> String {
+    format!(
+        "stack details: collapsed {} (written expanded), no top photo {}",
+        c.collapsed, c.no_top
+    )
 }
 
 /// Formats the keyword attribute counts as one line.
@@ -440,6 +474,9 @@ mod tests {
                 duplicate_names: 0,
             },
             collection_members,
+            stacks: Report::new(),
+            stack_counts: StackCounts::default(),
+            stack_members: Report::new(),
             keywords,
             keyword_attributes: KeywordAttributes {
                 persons: 1,
@@ -650,6 +687,41 @@ mod tests {
     }
 
     #[test]
+    fn stacks_are_reported_with_their_counts() {
+        let mut o = outcome();
+        o.stacks.read();
+        o.stacks.read();
+        o.stacks.converted();
+        o.stacks.skipped("stack 3: fewer than two converted photos");
+        o.stack_counts = StackCounts {
+            collapsed: 1,
+            no_top: 0,
+        };
+        let text = summary(&o);
+        assert!(
+            text.lines()
+                .any(|l| l == "stacks: read 2, would convert 1, skipped 1")
+        );
+        assert!(
+            text.lines()
+                .any(|l| l == "stack members: read 0, would convert 0, skipped 0")
+        );
+        assert!(
+            text.lines()
+                .any(|l| l == "stack details: collapsed 1 (written expanded), no top photo 0")
+        );
+        let v: serde_json::Value = serde_json::from_str(&report_json(&o)).unwrap();
+        assert_eq!(v["stacks"]["read"], 2);
+        assert_eq!(v["stacks"]["collapsed"], 1);
+        assert_eq!(v["stacks"]["no_top"], 0);
+        assert_eq!(
+            v["stacks"]["skipped"][0]["reason"],
+            "stack 3: fewer than two converted photos"
+        );
+        assert_eq!(v["stack_members"]["read"], 0);
+    }
+
+    #[test]
     fn ratings_line_lists_all_six_stars() {
         assert_eq!(
             ratings_line(&[6, 3, 2, 3, 2, 1]),
@@ -677,6 +749,8 @@ mod tests {
                 "keywords",
                 "photos",
                 "ratings",
+                "stack_members",
+                "stacks",
                 "tool_version"
             ]
         );

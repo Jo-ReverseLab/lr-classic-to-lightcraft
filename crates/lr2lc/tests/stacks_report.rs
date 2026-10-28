@@ -16,8 +16,6 @@
 //! Always: dry run, catalog byte-identical, second run identical, nothing
 //! written, `--apply` without `--library` exits 2 and writes nothing.
 
-#![cfg(any())]
-
 use lrcat_fixtures::stack_edge as e;
 use lrcat_fixtures::{write_small_catalog_with_files, write_stack_catalog_with_files};
 use serde_json::Value;

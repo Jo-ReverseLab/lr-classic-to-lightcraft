@@ -6,7 +6,7 @@ use crate::labels::{self, LabelCounts, LabelMode};
 use anyhow::{Context, Result, bail};
 use lr_reader::{Catalog, KeywordData, VIDEO_SKIP_REASON, checksum, drop_missing_originals};
 use model::{
-    Collection, CollectionKind, Flag, Folder, Keyword, PathMappings, Photo, Rating, Report,
+    Collection, CollectionKind, Flag, Folder, Keyword, PathMappings, Photo, Rating, Report, Stack,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -28,6 +28,11 @@ pub struct Outcome {
     pub collection_counts: CollectionCounts,
     /// Members of collections: converted with an album, or skipped.
     pub collection_members: Report,
+    pub stacks: Report,
+    /// Counts over the converted stacks.
+    pub stack_counts: StackCounts,
+    /// Members of stacks: converted with a stack, or skipped.
+    pub stack_members: Report,
     pub keywords: Report,
     /// Attribute counts over the converted keywords.
     pub keyword_attributes: KeywordAttributes,
@@ -65,6 +70,18 @@ pub struct Converted {
     pub photo_keywords: BTreeMap<i64, Vec<Keyword>>,
     /// Converted albums and folders, ascending by Lightroom id.
     pub collections: Vec<Collection>,
+    /// Converted stacks, ascending by Lightroom id.
+    pub stacks: Vec<Stack>,
+}
+
+/// Counts over the converted stacks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StackCounts {
+    /// Stacks collapsed in Lightroom; they are written expanded.
+    pub collapsed: usize,
+    /// Stacks without a member at position 1; the first by position is
+    /// the top.
+    pub no_top: usize,
 }
 
 /// Counts over the converted collections.
@@ -171,6 +188,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         collections,
         collection_counts,
         collection_members,
+        (stacks, stack_counts, stack_members),
         keywords,
         keyword_attributes,
         keyword_assignments,
@@ -218,6 +236,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         let keyword_attributes = KeywordAttributes::count(&data);
         // Members naming skipped photos are skipped as well.
         let collection_data = catalog.collection_data(&kept_photos)?;
+        let stack_data = catalog.stack_data(&kept_photos)?;
         let mut keyword_synonyms = data.synonym_report;
         for keyword in &data.keywords {
             keywords.converted();
@@ -235,6 +254,14 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
             collection_data.report,
             CollectionCounts::count(&collection_data.collections),
             collection_data.members,
+            (
+                stack_data.report,
+                StackCounts {
+                    collapsed: stack_data.collapsed,
+                    no_top: stack_data.no_top,
+                },
+                stack_data.members,
+            ),
             keywords,
             keyword_attributes,
             keyword_assignments,
@@ -255,6 +282,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
                 keywords: data.keywords,
                 photo_keywords: data.assignments,
                 collections: collection_data.collections,
+                stacks: stack_data.stacks,
             },
         )
     };
@@ -264,6 +292,8 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         ("photos", &photos),
         ("collections", &collections),
         ("collection members", &collection_members),
+        ("stacks", &stacks),
+        ("stack members", &stack_members),
         ("keywords", &keywords),
         ("keyword assignments", &keyword_assignments),
         ("keyword synonyms", &keyword_synonyms),
@@ -282,6 +312,9 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         collections,
         collection_counts,
         collection_members,
+        stacks,
+        stack_counts,
+        stack_members,
         keywords,
         keyword_attributes,
         keyword_assignments,
