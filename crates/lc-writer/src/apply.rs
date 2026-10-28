@@ -34,8 +34,11 @@
 //!    (a toggle of photos that are all in it would remove them). Several
 //!    such albums skip the Quick Collection as ambiguous; lr2lc never
 //!    removes members and never sends `album.clearQuick`;
-//! 7. last the smart collections: `album.createSmart {name, parent?, rules}`
-//!    for each one not in the mapping file, with the LightCraft id of its
+//! 7. last the smart collections: each one not in the mapping file is
+//!    adopted when the library has exactly one smart album with the same
+//!    name, parent and rules (`albums.list {}` is read once, before the
+//!    first `album.create` or `album.createSmart`), else created with
+//!    `album.createSmart {name, parent?, rules}` and the LightCraft id of its
 //!    parent folder; nothing else is sent for a smart album (no select, no
 //!    members). A parent folder that was not created skips it.
 //!
@@ -57,7 +60,8 @@
 //!   nothing is created for it;
 //! - every input collection counts exactly once: created as folder or
 //!   album, known, adopted (existing), or skipped; every input smart
-//!   collection exactly once: created, known or skipped; a rejected
+//!   collection exactly once: created, known, adopted (existing) or
+//!   skipped; a rejected
 //!   `album.createSmart` skips it and the next run tries again;
 //! - every input photo counts exactly once: imported, existing, updated,
 //!   unchanged or skipped; a stopped run hands back the numbers up to the
@@ -167,9 +171,12 @@ pub struct ApplySummary {
     /// Smart albums created by this run.
     pub smart_created: usize,
     /// Input smart collections already in the mapping file. Together with
-    /// the created and skipped ones every input smart collection counts
-    /// once.
+    /// the created, adopted and skipped ones every input smart collection
+    /// counts once.
     pub smart_known: usize,
+    /// Smart collections missing from the mapping file whose one equal
+    /// smart album the library already had; adopted, not created.
+    pub smart_existing: usize,
     /// Known smart collections whose rules changed in Lightroom; not
     /// changed in LightCraft.
     pub smart_rules_changed: usize,
@@ -260,6 +267,7 @@ pub fn apply_partial(
         existing: None,
         album_nodes: None,
         wanting: wanting(input, &plan.steps),
+        smart_wanting: smart_wanting(input, &plan.steps),
     };
     match run.steps(&plan.steps) {
         Ok(()) => Ok(run.summary),
@@ -371,6 +379,35 @@ struct Run<'a> {
     /// The number of collections to create per trimmed name, folder flag
     /// and Lightroom parent.
     wanting: BTreeMap<CollectionKey, usize>,
+    /// The number of smart collections to create per [`SmartKey`].
+    smart_wanting: BTreeMap<SmartKey, usize>,
+}
+
+/// Trimmed name, Lightroom parent and translated rules (as JSON text) of a
+/// smart collection.
+type SmartKey = (String, Option<i64>, String);
+
+fn smart_key(s: &SmartCollection, rules: &Value) -> SmartKey {
+    (s.name.trim().to_string(), s.parent, rules.to_string())
+}
+
+/// Counts the smart collections the plan creates by [`smart_key`].
+fn smart_wanting(input: &WriteInput, steps: &[Step]) -> BTreeMap<SmartKey, usize> {
+    let mut out = BTreeMap::new();
+    for step in steps {
+        if let Step::CreateSmart {
+            collection_id,
+            params,
+        } = step
+            && let Some(s) = input
+                .smart
+                .iter()
+                .find(|s| s.lightroom_id == *collection_id)
+        {
+            *out.entry(smart_key(s, &params["rules"])).or_insert(0) += 1;
+        }
+    }
+    out
 }
 
 /// Trimmed name, folder flag and Lightroom parent of a collection.
@@ -482,7 +519,8 @@ impl Run<'_> {
         }
     }
 
-    /// Creates one smart album and records it at once. The parent's
+    /// Creates one smart album, or adopts the one equal smart album the
+    /// library already has, and records it at once. The parent's
     /// LightCraft id is taken from the mapping file; a parent folder that
     /// was not created skips the smart collection.
     fn create_smart(&mut self, collection_id: i64, params: &Value) -> Result<(), WriteError> {
@@ -490,6 +528,7 @@ impl Run<'_> {
             // Not reachable: the plan only creates input smart collections.
             return Ok(());
         };
+        self.load_existing()?;
         let mut params = params.clone();
         if let Some(parent) = s.parent {
             match self.state.collection(parent) {
@@ -507,6 +546,29 @@ impl Run<'_> {
             }
         }
         let rules = params["rules"].clone();
+        let key = smart_key(s, &rules);
+        let wanting = self.smart_wanting.get(&key).copied().unwrap_or(1);
+        let decision = self.existing.as_ref().map_or(Decision::Create, |e| {
+            e.decide_smart(&s.name, params.get("parent"), &rules, wanting)
+        });
+        match decision {
+            Decision::Create => {}
+            Decision::Adopt(id) => {
+                self.summary.smart_existing += 1;
+                return self.record_smart(collection_id, s, id, rules);
+            }
+            Decision::Ambiguous(n) => {
+                self.skip_smart(
+                    collection_id,
+                    SkipCode::Ambiguous,
+                    &format!(
+                        "ambiguous: {n} smart albums with the same name, parent and rules \
+                         in LightCraft; nothing was created or adopted"
+                    ),
+                );
+                return Ok(());
+            }
+        }
         match self.client.execute("album.createSmart", params) {
             Ok(Outcome::Applied(result)) => {
                 let Some(id) = result.get("id").and_then(valid_id) else {
@@ -518,17 +580,7 @@ impl Run<'_> {
                     return Ok(());
                 };
                 self.summary.smart_created += 1;
-                let entry = CollectionEntry {
-                    lightcraft_id: id,
-                    kind: EntryKind::Smart,
-                    name: s.name.clone(),
-                    parent: s.parent,
-                    members: Vec::new(),
-                    rules: Some(rules),
-                };
-                self.state.record_collection(collection_id, entry);
-                self.state.save(self.state_file)?;
-                Ok(())
+                self.record_smart(collection_id, s, id, rules)
             }
             Ok(Outcome::AppliedNotSaved(_)) => {
                 self.summary.not_saved += 1;
@@ -550,6 +602,27 @@ impl Run<'_> {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// Records a created or adopted smart album.
+    fn record_smart(
+        &mut self,
+        collection_id: i64,
+        s: &SmartCollection,
+        id: Value,
+        rules: Value,
+    ) -> Result<(), WriteError> {
+        let entry = CollectionEntry {
+            lightcraft_id: id,
+            kind: EntryKind::Smart,
+            name: s.name.clone(),
+            parent: s.parent,
+            members: Vec::new(),
+            rules: Some(rules),
+        };
+        self.state.record_collection(collection_id, entry);
+        self.state.save(self.state_file)?;
+        Ok(())
     }
 
     fn skip_smart(&mut self, collection_id: i64, code: SkipCode, why: &str) {
@@ -716,7 +789,8 @@ impl Run<'_> {
         }
     }
 
-    /// Reads `albums.list` once, before the first `album.create`; the
+    /// Reads `albums.list` once, before the first `album.create` or
+    /// `album.createSmart`; the
     /// nodes already in the mapping file are left out.
     fn load_existing(&mut self) -> Result<(), WriteError> {
         if self.existing.is_some() {
@@ -1445,6 +1519,7 @@ mod tests {
             name: name.into(),
             folder,
             smart,
+            rules: None,
             parent,
         };
         let nodes = vec![
@@ -1464,6 +1539,7 @@ mod tests {
             name: QUICK_NAME.into(),
             folder: false,
             smart: false,
+            rules: None,
             parent: None,
         };
         let nodes = || vec![node(1), node(2)];

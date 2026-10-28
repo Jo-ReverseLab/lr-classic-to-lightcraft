@@ -6,7 +6,10 @@
 //! - `albums.list {}` answers with a bare array of nodes `{id, name, folder,
 //!   children}` (more fields are ignored); the parent of a node is the node
 //!   that encloses it; any other shape is a protocol error;
-//! - smart albums (`smart: true`) never match: lr2lc does not create them;
+//! - smart albums (`smart: true`) and other nodes never match each other:
+//!   a smart collection is only adopted as a smart album, with the same
+//!   name, the same parent and `rules` equal (JSON equality) to its
+//!   translation;
 //! - nodes already recorded in the mapping file for another collection
 //!   never match, so a node is adopted at most once;
 //! - a collection matches a node with the same name (the Lightroom name
@@ -27,6 +30,8 @@ pub(crate) struct Node {
     pub name: String,
     pub folder: bool,
     pub smart: bool,
+    /// The `rules` of a smart album as listed; `None` for other nodes.
+    pub rules: Option<Value>,
     /// The id of the enclosing folder; `None` on top level.
     pub parent: Option<Value>,
 }
@@ -46,18 +51,44 @@ pub(crate) enum Decision {
 /// The album nodes that may still be adopted.
 #[derive(Debug, Default)]
 pub(crate) struct Existing {
+    /// Album folders and albums.
     nodes: Vec<Node>,
+    /// Smart albums.
+    smart: Vec<Node>,
 }
 
 impl Existing {
-    /// The nodes of `list` that are not smart and whose id is not in
-    /// `claimed` (the ids already in the mapping file).
+    /// The nodes of `list` whose id is not in `claimed` (the ids already in
+    /// the mapping file), smart albums apart from the others.
     pub fn new(list: Vec<Node>, claimed: &[Value]) -> Self {
-        let nodes = list
+        let (smart, nodes) = list
             .into_iter()
-            .filter(|n| !n.smart && !claimed.contains(&n.id))
+            .filter(|n| !claimed.contains(&n.id))
+            .partition(|n| n.smart);
+        Existing { nodes, smart }
+    }
+
+    /// Decides for a smart collection named `name` (as in Lightroom) below
+    /// `parent` (a LightCraft id, `None` on top level) whose translated
+    /// rules are `rules`. `wanting` is the number of smart collections to
+    /// place with the same trimmed name, parent and rules, this one
+    /// included.
+    pub fn decide_smart(
+        &self,
+        name: &str,
+        parent: Option<&Value>,
+        rules: &Value,
+        wanting: usize,
+    ) -> Decision {
+        let name = name.trim();
+        let hits: Vec<&Node> = self
+            .smart
+            .iter()
+            .filter(|n| {
+                n.name == name && n.parent.as_ref() == parent && n.rules.as_ref() == Some(rules)
+            })
             .collect();
-        Existing { nodes }
+        pick(&hits, wanting)
     }
 
     /// Decides for a collection named `name` (as in Lightroom) with the
@@ -77,11 +108,16 @@ impl Existing {
             .iter()
             .filter(|n| n.name == name && n.folder == folder && n.parent.as_ref() == parent)
             .collect();
-        match hits.as_slice() {
-            [] => Decision::Create,
-            [one] if wanting <= 1 => Decision::Adopt(one.id.clone()),
-            _ => Decision::Ambiguous(hits.len()),
-        }
+        pick(&hits, wanting)
+    }
+}
+
+/// Adopts the one hit if only one collection wants it.
+fn pick(hits: &[&Node], wanting: usize) -> Decision {
+    match hits {
+        [] => Decision::Create,
+        [one] if wanting <= 1 => Decision::Adopt(one.id.clone()),
+        _ => Decision::Ambiguous(hits.len()),
     }
 }
 
@@ -119,11 +155,18 @@ fn collect(items: &[Value], parent: Option<&Value>, out: &mut Vec<Node>) -> Resu
             Some(Value::Bool(b)) => *b,
             Some(_) => return Err(list_error()),
         };
+        // Rules of an unknown shape simply never match.
+        let rules = if smart {
+            map.get("rules").cloned()
+        } else {
+            None
+        };
         out.push(Node {
             id: id.clone(),
             name: name.to_string(),
             folder,
             smart,
+            rules,
             parent: parent.cloned(),
         });
         match map.get("children") {
@@ -150,8 +193,86 @@ mod tests {
             name: name.to_string(),
             folder,
             smart: false,
+            rules: None,
             parent: parent.map(|p| json!(p)),
         }
+    }
+
+    fn smart(id: u64, name: &str, parent: Option<u64>, rules: Value) -> Node {
+        Node {
+            smart: true,
+            rules: Some(rules),
+            ..node(id, name, false, parent)
+        }
+    }
+
+    #[test]
+    fn one_equal_smart_album_is_adopted() {
+        let r = json!({"ruleSet": {"match": "all", "rules": []}});
+        let e = Existing::new(vec![smart(5, "S", None, r.clone())], &[]);
+        assert_eq!(
+            e.decide_smart(" S ", None, &r, 1),
+            Decision::Adopt(json!(5))
+        );
+    }
+
+    #[test]
+    fn smart_name_parent_and_rules_must_match() {
+        let r = json!({"ruleSet": {"match": "all"}});
+        let other = json!({"ruleSet": {"match": "any"}});
+        let e = Existing::new(vec![smart(5, "S", Some(1), r.clone())], &[]);
+        assert_eq!(
+            e.decide_smart("s", Some(&json!(1)), &r, 1),
+            Decision::Create
+        );
+        assert_eq!(e.decide_smart("S", None, &r, 1), Decision::Create);
+        assert_eq!(
+            e.decide_smart("S", Some(&json!(1)), &other, 1),
+            Decision::Create
+        );
+        assert_eq!(
+            e.decide_smart("S", Some(&json!(1)), &r, 1),
+            Decision::Adopt(json!(5))
+        );
+    }
+
+    #[test]
+    fn smart_and_plain_nodes_never_match_each_other() {
+        let r = json!({});
+        let e = Existing::new(
+            vec![node(5, "A", false, None), smart(6, "B", None, r.clone())],
+            &[],
+        );
+        assert_eq!(e.decide_smart("A", None, &r, 1), Decision::Create);
+        assert_eq!(e.decide("B", false, None, 1), Decision::Create);
+    }
+
+    #[test]
+    fn several_smart_hits_or_claims_are_ambiguous_and_claimed_ones_never_match() {
+        let r = json!({});
+        let e = Existing::new(
+            vec![
+                smart(5, "S", None, r.clone()),
+                smart(6, "S", None, r.clone()),
+                smart(7, "T", None, r.clone()),
+            ],
+            &[json!(7)],
+        );
+        assert_eq!(e.decide_smart("S", None, &r, 1), Decision::Ambiguous(2));
+        assert_eq!(e.decide_smart("T", None, &r, 1), Decision::Create);
+        let one = Existing::new(vec![smart(5, "S", None, r.clone())], &[]);
+        assert_eq!(one.decide_smart("S", None, &r, 2), Decision::Ambiguous(1));
+    }
+
+    #[test]
+    fn smart_rules_are_parsed_only_for_smart_nodes() {
+        let v = json!([
+            {"id": 1, "name": "A", "rules": {"x": 1}},
+            {"id": 2, "name": "S", "smart": true, "rules": {"x": 1}},
+        ]);
+        let nodes = parse_album_list(&v).unwrap();
+        assert_eq!(nodes[0].rules, None);
+        assert_eq!(nodes[1].rules, Some(json!({"x": 1})));
     }
 
     #[test]

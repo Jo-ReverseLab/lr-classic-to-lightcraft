@@ -90,6 +90,7 @@ pub struct AppliedJson {
     quick_incomplete_by_code: ByCode,
     smart_created: usize,
     smart_known: usize,
+    smart_existing: usize,
     smart_rules_changed: usize,
     smart_skipped: Vec<SkipJson>,
     smart_skipped_by_code: ByCode,
@@ -267,6 +268,7 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         quick_incomplete_by_code: count_by_code(&s.quick_incomplete),
         smart_created: s.smart_created,
         smart_known: s.smart_known,
+        smart_existing: s.smart_existing,
         smart_rules_changed: s.smart_rules_changed,
         smart_skipped: reasons(&s.smart_skipped),
         smart_skipped_by_code: count_by_code(&s.smart_skipped),
@@ -397,10 +399,12 @@ pub fn applied_summary(s: &ApplySummary) -> String {
     );
     let _ = writeln!(
         out,
-        "written smart albums: created {}, already in the library {}, skipped {}, \
+        "written smart albums: created {}, already in the library {}, \
+         found in the library and adopted {}, skipped {}, \
          rules changed in Lightroom (left as is) {}",
         s.smart_created,
         s.smart_known,
+        s.smart_existing,
         s.smart_skipped.len(),
         s.smart_rules_changed
     );
@@ -579,6 +583,7 @@ mod tests {
             "quick_removed",
             "smart_created",
             "smart_known",
+            "smart_existing",
             "smart_rules_changed",
         ] {
             assert_eq!(v[key], 0, "{key}");
