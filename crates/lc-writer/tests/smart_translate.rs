@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! Acceptance tests for the translation of smart collection rules (task
 //! P5b-4b), module `lc_writer::smart`.
 //!
