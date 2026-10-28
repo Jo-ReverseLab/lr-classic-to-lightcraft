@@ -60,6 +60,19 @@ pub struct SmartRules {
     pub rules: Vec<SmartRule>,
 }
 
+/// A smart collection with readable rules.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SmartCollection {
+    /// The collection's id in the catalog.
+    pub lightroom_id: i64,
+    /// The collection's name. User data: never written to a report.
+    pub name: String,
+    /// The id of the parent collection set; `None` on top level.
+    pub parent: Option<i64>,
+    /// The rules, verbatim.
+    pub rules: SmartRules,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
