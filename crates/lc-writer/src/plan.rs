@@ -36,7 +36,7 @@
 //!   change of its rules is only counted.
 
 use crate::smart::{convertible, translate};
-use crate::state::{PhotoFields, State, keyword_text, snapshot};
+use crate::state::{EntryKind, PhotoFields, State, keyword_text, snapshot};
 use model::{
     Collection, CollectionKind, Keyword, Photo, QuickCollection, SkipCode, Skipped,
     SmartCollection, Stack,
@@ -63,6 +63,11 @@ pub struct WriteInput {
     pub quick: Option<QuickCollection>,
     /// The smart collections to write as smart albums.
     pub smart: Vec<SmartCollection>,
+    /// The Lightroom ids of the smart collections that were read but are
+    /// not in `smart` (untranslatable, or their parent is not a collection
+    /// set). Recorded smart albums with such an id are counted as
+    /// [`Plan::smart_no_longer_translatable`], not as removed.
+    pub smart_untranslatable_ids: Vec<i64>,
 }
 
 /// One command of the plan.
@@ -163,6 +168,9 @@ pub struct Plan {
     collections_moved: usize,
     /// Recorded collections missing from the input.
     collections_removed: usize,
+    /// Recorded smart albums whose collection still exists in Lightroom
+    /// but can no longer be translated.
+    smart_no_longer_translatable: usize,
     /// Album members that cannot be written.
     member_skips: Vec<Skipped>,
     /// Input stacks recorded with the same members in the same order.
@@ -252,6 +260,15 @@ impl Plan {
     /// the input; they are not deleted in LightCraft.
     pub fn collections_removed(&self) -> usize {
         self.collections_removed
+    }
+
+    /// The recorded smart albums whose Lightroom smart collection still
+    /// exists but is not written any more (its rules no longer translate,
+    /// or its parent is no longer a collection set). They are kept in
+    /// LightCraft and in the mapping file and only counted; they are not
+    /// part of [`Plan::collections_removed`].
+    pub fn smart_no_longer_translatable(&self) -> usize {
+        self.smart_no_longer_translatable
     }
 
     /// The album members whose photo is not in the input or has no global
@@ -738,10 +755,17 @@ fn plan_collections(input: &WriteInput, state: &State, out: &mut Plan) {
         }
     }
     let smart: BTreeSet<i64> = input.smart.iter().map(|s| s.lightroom_id).collect();
-    out.collections_removed = state
-        .collections()
-        .filter(|(id, _)| !by_id.contains_key(id) && !smart.contains(id))
-        .count();
+    let untranslatable: BTreeSet<i64> = input.smart_untranslatable_ids.iter().copied().collect();
+    for (id, entry) in state.collections() {
+        if by_id.contains_key(&id) || smart.contains(&id) {
+            continue;
+        }
+        if entry.kind == EntryKind::Smart && untranslatable.contains(&id) {
+            out.smart_no_longer_translatable += 1;
+        } else {
+            out.collections_removed += 1;
+        }
+    }
 
     // Folders first, then albums; within each, shallower before deeper, so
     // a parent always comes before its children.
@@ -924,6 +948,38 @@ mod tests {
             smart_skip_reason(4, "why"),
             "smart collection 4: why; not converted"
         );
+    }
+
+    #[test]
+    fn untranslatable_smart_entries_are_counted_apart_from_removed() {
+        use crate::state::CollectionEntry;
+        let entry = |kind| CollectionEntry {
+            lightcraft_id: json!(1),
+            kind,
+            name: "x".into(),
+            parent: None,
+            members: Vec::new(),
+            rules: None,
+        };
+        let mut state = State::default();
+        // 1: smart, still read but untranslatable; 2: smart, gone;
+        // 3: regular album whose id is (wrongly) in the list; 4: regular, gone.
+        state.record_collection(1, entry(EntryKind::Smart));
+        state.record_collection(2, entry(EntryKind::Smart));
+        state.record_collection(3, entry(EntryKind::Album));
+        state.record_collection(4, entry(EntryKind::Album));
+        let input = WriteInput {
+            smart_untranslatable_ids: vec![1, 3],
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &state, &BTreeSet::new());
+        assert!(p.steps.is_empty());
+        assert_eq!(p.smart_no_longer_translatable(), 1);
+        assert_eq!(p.collections_removed(), 3);
+
+        let none = plan(&WriteInput::default(), &state, &BTreeSet::new());
+        assert_eq!(none.smart_no_longer_translatable(), 0);
+        assert_eq!(none.collections_removed(), 4);
     }
 
     #[test]

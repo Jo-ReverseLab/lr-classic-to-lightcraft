@@ -92,6 +92,7 @@ pub struct AppliedJson {
     smart_known: usize,
     smart_existing: usize,
     smart_rules_changed: usize,
+    smart_no_longer_translatable: usize,
     smart_skipped: Vec<SkipJson>,
     smart_skipped_by_code: ByCode,
     /// Why the run stopped early; absent after a complete run.
@@ -141,6 +142,9 @@ pub struct PlannedJson {
     /// Known smart collections whose rules changed in Lightroom; only
     /// counted.
     pub smart_rules_changed: usize,
+    /// Recorded smart albums whose smart collection still exists in
+    /// Lightroom but no longer translates; only counted.
+    pub smart_no_longer_translatable: usize,
 }
 
 /// The writer input from the converted elements of the catalog.
@@ -153,6 +157,7 @@ pub fn input(converted: &Converted) -> WriteInput {
         stacks: converted.stacks.clone(),
         quick: converted.quick.clone(),
         smart: converted.smart.clone(),
+        smart_untranslatable_ids: converted.smart_untranslatable_ids.clone(),
     }
 }
 
@@ -177,6 +182,7 @@ pub fn planned(plan: &Plan) -> PlannedJson {
         quick_removed: plan.quick_removed(),
         smart_known: plan.smart_known(),
         smart_rules_changed: plan.smart_rules_changed(),
+        smart_no_longer_translatable: plan.smart_no_longer_translatable(),
         ..PlannedJson::default()
     };
     for step in &plan.steps {
@@ -270,6 +276,7 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         smart_known: s.smart_known,
         smart_existing: s.smart_existing,
         smart_rules_changed: s.smart_rules_changed,
+        smart_no_longer_translatable: s.smart_no_longer_translatable,
         smart_skipped: reasons(&s.smart_skipped),
         smart_skipped_by_code: count_by_code(&s.smart_skipped),
         aborted: aborted.map(WriteError::short_reason),
@@ -333,6 +340,11 @@ pub fn planned_summary(plan: &Plan) -> String {
         "writer smart albums: smart albums to create {}, already in the library {}, \
          rules changed in Lightroom {}",
         p.smart_albums, p.smart_known, p.smart_rules_changed
+    );
+    let _ = writeln!(
+        out,
+        "writer smart albums no longer translatable (left as is in LightCraft): {}",
+        p.smart_no_longer_translatable
     );
     skipped_lines(
         &mut out,
@@ -407,6 +419,11 @@ pub fn applied_summary(s: &ApplySummary) -> String {
         s.smart_existing,
         s.smart_skipped.len(),
         s.smart_rules_changed
+    );
+    let _ = writeln!(
+        out,
+        "smart albums no longer translatable (left as is in LightCraft): {}",
+        s.smart_no_longer_translatable
     );
     if s.collections_renamed + s.collections_moved + s.collections_removed > 0 {
         let _ = writeln!(
@@ -531,7 +548,8 @@ mod tests {
                         "members_removed": 0, "collections_known": 0,
                         "stacks": 0, "stacks_known": 0, "stack_members_removed": 0,
                         "quick_add": 0, "quick_already": 0, "quick_removed": 0,
-                        "smart_albums": 0, "smart_known": 0, "smart_rules_changed": 0},
+                        "smart_albums": 0, "smart_known": 0, "smart_rules_changed": 0,
+                        "smart_no_longer_translatable": 0},
                 "photos_skipped": [],
                 "photos_skipped_by_code": {},
                 "keywords_skipped": [],
@@ -585,6 +603,7 @@ mod tests {
             "smart_known",
             "smart_existing",
             "smart_rules_changed",
+            "smart_no_longer_translatable",
         ] {
             assert_eq!(v[key], 0, "{key}");
         }

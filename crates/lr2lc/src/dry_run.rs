@@ -78,6 +78,10 @@ pub struct Converted {
     /// Smart collections that can be written as smart albums, ascending by
     /// Lightroom id.
     pub smart: Vec<SmartCollection>,
+    /// Lightroom ids of the smart collections read with their rules but not
+    /// in `smart` (untranslatable, or their parent is not a collection
+    /// set), ascending.
+    pub smart_untranslatable_ids: Vec<i64>,
 }
 
 /// Counts over the converted stacks.
@@ -192,23 +196,30 @@ impl KeywordAttributes {
 /// criterion without an exact equivalent, or its parent). Every collection
 /// reason starts with `collection <id>:`. Smart collections without
 /// readable rules keep the reader's reason.
-fn convert_smart(data: &mut lr_reader::CollectionData) -> Vec<SmartCollection> {
+///
+/// Returns the smart collections to write and the Lightroom ids of the
+/// other smart collections with readable rules.
+fn convert_smart(data: &mut lr_reader::CollectionData) -> (Vec<SmartCollection>, Vec<i64>) {
     let mut out = Vec::new();
+    let mut untranslatable = Vec::new();
     for s in &data.smart_collections {
         let prefix = format!("collection {}:", s.lightroom_id);
         match lc_writer::smart::convertible(s, &data.collections) {
             Ok(_) => {
                 if data.report.convert_skipped(&prefix) > 0 {
                     out.push(s.clone());
+                } else {
+                    untranslatable.push(s.lightroom_id);
                 }
             }
             Err((code, why)) => {
                 let reason = format!("{prefix} smart collection is not converted ({why})");
                 data.report.replace_skipped(&prefix, code, &reason);
+                untranslatable.push(s.lightroom_id);
             }
         }
     }
-    out
+    (out, untranslatable)
 }
 
 /// Runs the dry run on the catalog at `path`.
@@ -272,7 +283,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         let keyword_attributes = KeywordAttributes::count(&data);
         // Members naming skipped photos are skipped as well.
         let mut collection_data = catalog.collection_data(&kept_photos)?;
-        let smart = convert_smart(&mut collection_data);
+        let (smart, smart_untranslatable_ids) = convert_smart(&mut collection_data);
         let stack_data = catalog.stack_data(&kept_photos)?;
         let mut keyword_synonyms = data.synonym_report;
         for keyword in &data.keywords {
@@ -326,6 +337,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
                 stacks: stack_data.stacks,
                 quick: collection_data.quick,
                 smart,
+                smart_untranslatable_ids,
             },
         )
     };
@@ -430,8 +442,9 @@ mod tests {
             data.report
                 .skipped(format!("collection {id}: smart collection x"));
         }
-        let out = convert_smart(&mut data);
+        let (out, untranslatable) = convert_smart(&mut data);
         assert_eq!(out, vec![smart(1, "rating")]);
+        assert_eq!(untranslatable, vec![10]);
         assert_eq!(data.report.converted_count(), 1);
         assert!(data.report.is_balanced());
         let reasons: Vec<&str> = data

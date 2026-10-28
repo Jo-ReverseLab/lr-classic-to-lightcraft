@@ -133,6 +133,9 @@ pub struct ApplySummary {
     /// Recorded collections no longer in Lightroom; not deleted in
     /// LightCraft.
     pub collections_removed: usize,
+    /// Recorded smart albums whose Lightroom smart collection still exists
+    /// but no longer translates; kept in LightCraft and only counted.
+    pub smart_no_longer_translatable: usize,
     /// Collections not created, each with a reason.
     pub collections_skipped: Vec<Skipped>,
     /// Albums whose members could not all be changed; a later run sends
@@ -236,6 +239,7 @@ pub fn apply_partial(
             collections_renamed: plan.collections_renamed(),
             collections_moved: plan.collections_moved(),
             collections_removed: plan.collections_removed(),
+            smart_no_longer_translatable: plan.smart_no_longer_translatable(),
             members_skipped: plan.member_skips().to_vec(),
             stacks_known: plan.stacks_known(),
             stack_members_removed: plan.stack_members_removed(),
