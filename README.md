@@ -14,10 +14,11 @@ applies path mappings and checks that the original files exist. It also
 reads keywords with their hierarchy and synonyms, their assignments to
 photos, the star ratings, the pick/reject flags and the colour labels.
 It reads collections as albums and collection sets as album folders, with
-their members.
+their members, and folder stacks.
 With `--apply`, lr2lc writes keywords, photos (as references), ratings,
 flags, labels, titles, captions, copyright and creator, and the
-collections as albums and album folders with their members, into a
+collections as albums and album folders with their members, and the
+stacks (always expanded), into a
 LightCraft library through the control port of the running LightCraft app.
 
 Once the repository is on GitHub, CI runs formatting, lint and tests on
@@ -38,7 +39,8 @@ checksum before and after the run proves it was not changed.
 ### Dry run (default)
 
 Without `--apply`, lr2lc only reads the catalog and prints a summary: how
-many folders, photos, collections, collection members, keywords, keyword
+many folders, photos, collections, collection members, stacks, stack
+members, keywords, keyword
 assignments and keyword synonyms it read,
 how many it would convert and how many it skips, with the reasons grouped.
 A line `videos: skipped N` follows, then a line with keyword attribute
@@ -66,7 +68,18 @@ order; a member is skipped if its photo is not converted (for example a
 missing original or a virtual copy), if it repeats a photo already in the
 collection, if its collection is skipped, or if it belongs to a collection
 set, which holds no photos. Collection names never appear in the output or
-in the report. Albums are not written to LightCraft yet.
+in the report.
+
+Folder stacks are read with their members, the top photo first. Members
+are ordered by Lightroom's position (the top photo has position 1), then by
+row id. A member is skipped if its photo is not converted (a virtual copy, a
+video, a missing original or an unknown id) or if the photo is already in a
+stack with a smaller id; a stack left with fewer than two photos is skipped
+with the reason `fewer than two converted photos`, together with its
+members. A line `stack details: collapsed N (written expanded), no top
+photo N` counts the converted stacks that are collapsed in Lightroom and
+those whose first photo is not at position 1. Catalogs without the stack
+tables have no stacks. Reasons name ids only.
 
 LightCraft cannot read videos, so they are skipped with the reason
 `video files are not supported by LightCraft`. A photo counts as a video if
@@ -196,6 +209,18 @@ Writes a machine-readable report to `FILE` after the run:
     "converted": 1,
     "skipped": [{ "reason": "photo 7: skipped or unknown photo, not added to collection 2" }]
   },
+  "stacks": {
+    "read": 3,
+    "converted": 2,
+    "skipped": [{ "reason": "stack 3: fewer than two converted photos" }],
+    "collapsed": 1,
+    "no_top": 0
+  },
+  "stack_members": {
+    "read": 7,
+    "converted": 5,
+    "skipped": [{ "reason": "photo 20: stack 3 is skipped" }, { "reason": "photo 21: skipped or unknown photo, not added to stack 3" }]
+  },
   "keywords": {
     "read": 3,
     "converted": 2,
@@ -235,7 +260,8 @@ counts in `keywords` cover converted keywords only, like the summary line.
 `collections.albums` and `collections.folders` count the converted
 collections by kind; `collections.duplicate_names` counts converted
 collections that repeat the exact name of an earlier sibling below the same
-parent (two equal names count as 1).
+parent (two equal names count as 1). `stacks.collapsed` and
+`stacks.no_top` count converted stacks only.
 
 To protect the catalog and your files, `FILE` is checked before anything is
 read, and lr2lc stops with exit code 2 if:
@@ -256,12 +282,15 @@ The dry run also prints what the writer would send, as one line:
 writer: keywords to create 11, photos to import 17, updates 23, albums to create 4, album members to add 30
 ```
 
-`albums to create` counts albums only, not album folders.
+`albums to create` counts albums only, not album folders. A second line
+`writer stacks: to group N, already in the library N, members left in
+LightCraft N` follows.
 
 `report.json` then has a `writer` section with `planned` (`keywords`,
 `photos`, `updates`, `photos_updated`, `photos_unchanged`, `folders`,
-`albums`, `members_added`, `members_removed`, `collections_known`),
-`photos_skipped`, `keywords_skipped` and `members_skipped` (each a list of
+`albums`, `members_added`, `members_removed`, `collections_known`,
+`stacks`, `stacks_known`, `stack_members_removed`), `photos_skipped`,
+`keywords_skipped`, `members_skipped` and `stacks_skipped` (each a list of
 `{"reason": ...}`; `members_skipped` holds album members whose photo is
 not converted or has no global id).
 `planned.photos` counts the imports, `photos_updated` the photos from the
@@ -271,6 +300,9 @@ need no command. Every converted photo counts once:
 plus `planned.photos_unchanged` plus the photos skipped by the writer.
 Every converted collection counts once: `collections.converted` equals
 `planned.folders` plus `planned.albums` plus `planned.collections_known`.
+Every converted stack counts once: `stacks.converted` equals
+`planned.stacks` plus `planned.stacks_known` plus the entries of
+`stacks_skipped`.
 With `--library DIR` the dry run reads the mapping file of that library
 (see below), so it only plans what is still missing; it never connects to
 LightCraft and writes nothing next to the library.
@@ -283,6 +315,9 @@ count the selects. Album commands follow the photo commands; an album or
 folder created by the same script is named `lr-collection:<Lightroom id>`
 (as `parent` of `album.create` and as `id` of `album.addPhotos`), and each
 member change has a `library.select` line of exactly its photos before it.
+Stack commands come between the photo and the album commands: for each
+stack a `library.select` of its photos with the top one active, then
+`stack.group` with `ids`, `top` and `collapsed: false`.
 The same protection as for `--report` applies:
 the catalog and its companion files are refused, and an existing `FILE` is
 only overwritten if it is empty or an earlier lr2lc script (every non-empty
@@ -327,6 +362,19 @@ not add, and never renames, moves or deletes an album: a collection
 renamed, moved or deleted in Lightroom is only counted in the report.
 Albums with equal names are allowed and kept as they are.
 
+Between the photos and the albums, lr2lc groups the stacks, ascending by
+their Lightroom id: for each new stack, or one whose members or order
+changed in Lightroom, it selects exactly its photos with the top photo
+active and sends `stack.group` with the photos, the top photo and
+`collapsed: false`. Stacks are always written expanded: LightCraft would
+collapse a new stack, and the collapsed state of Lightroom is not taken
+over. Members without a LightCraft id (for example a failed import) are
+left out; a stack with fewer than two photos left is skipped. A photo that
+left a stack in Lightroom stays in the LightCraft stack and is only
+counted: lr2lc never ungroups, splits or removes anything from a stack.
+A rejected select or group leaves the stack incomplete, and the next run
+sends it again; an unchanged stack gets no command.
+
 A command LightCraft rejects skips only that photo, keyword or collection,
 with a reason in the report. A rejected `album.create` also skips every
 collection below it; a rejected select or member change leaves the album
@@ -359,7 +407,13 @@ the `writer` section:
 - `collections_skipped` (not created), `collections_incomplete` (a select
   or member change failed) and `members_skipped` (the photo is not
   converted, has no global id or has no LightCraft id), each with reasons.
-  Reasons name Lightroom ids, never a collection name.
+  Reasons name Lightroom ids, never a collection name;
+- `stacks_grouped`, `stacks_known` (in the mapping file with the same
+  members in the same order, no command) and `stack_members_removed`
+  (members that left a stack in Lightroom and stay in LightCraft);
+- `stacks_skipped` (fewer than two photos with a LightCraft id) and
+  `stacks_incomplete` (select or group rejected), each with reasons that
+  name the Lightroom stack id.
 
 Every converted photo counts once, in every run: `photos.converted` equals
 `photos_imported` plus `photos_existing` plus `photos_updated` plus
@@ -370,6 +424,9 @@ collection counts once, too: `collections.converted` equals
 `folders_created` plus `albums_created` plus `collections_known` plus
 `collections_existing` plus the entries of `collections_skipped`. The
 incomplete collections are among the created, known or taken over ones.
+Every converted stack counts once: `stacks.converted` equals
+`stacks_grouped` plus `stacks_known` plus the entries of `stacks_skipped`
+and `stacks_incomplete`.
 
 If the run stops after it started (no connection, a failed pre-flight
 check, a lost connection, an unexpected reply, or the mapping file cannot
@@ -412,6 +469,12 @@ name and parent in LightCraft`, together with everything below them, and
 nothing is created for them. Known limitation: `albums.list` nests
 folders only up to a depth limit, so an album below that depth is not
 found and is created again.
+
+Stacks are kept under `stacks`, keyed by the Lightroom stack id:
+`{"members": [...]}`, the global ids of the grouped photos with the top
+first, followed by members that left the stack in Lightroom (they are
+still in the LightCraft stack). The entry is written as soon as the group
+succeeded. Files without `stacks` still load.
 
 ### Exit codes
 
