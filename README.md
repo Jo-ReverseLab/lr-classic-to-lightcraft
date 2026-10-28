@@ -409,7 +409,9 @@ one match for exactly one collection, lr2lc takes that album over
 collections can want the same album) lr2lc does not guess: the
 collections are skipped with the reason `ambiguous: N albums with the same
 name and parent in LightCraft`, together with everything below them, and
-nothing is created for them.
+nothing is created for them. Known limitation: `albums.list` nests
+folders only up to a depth limit, so an album below that depth is not
+found and is created again.
 
 ### Exit codes
 

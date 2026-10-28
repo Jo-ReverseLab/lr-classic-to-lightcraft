@@ -561,7 +561,7 @@ fn lost_connection_during_creates_keeps_what_was_created() {
     let env = env();
     let mut config = Config::new(&env.library);
     // 1 keyword.list, 2-5 imports, 6-7 folders, 8 the first album.
-    config.close_at = Some(8);
+    config.close_at = Some(9);
     let fake = FakeLightCraft::start(config);
     let input = input_with(tree());
     let before = fake.commands().len();
@@ -602,7 +602,7 @@ fn lost_connection_during_members_loses_nothing_and_adds_nothing_twice() {
     let env = env();
     let mut config = Config::new(&env.library);
     // 1 keyword.list, 2-5 imports, 6-10 creates, 11 select, 12 first add.
-    config.close_at = Some(12);
+    config.close_at = Some(13);
     let fake = FakeLightCraft::start(config);
     let input = input_with(tree());
     let (result, _) = run(&fake, &env, &input);
@@ -707,7 +707,9 @@ fn photo_commands_are_unchanged_by_collections() {
     let (_, cb) = ok(&fb, &b, &input_with(tree()));
     let photo_part = |c: &Commands| -> Commands {
         c.iter()
-            .filter(|(n, _)| !n.starts_with("album.") && n != "library.select")
+            .filter(|(n, _)| {
+                !n.starts_with("album.") && n != "library.select" && n != "albums.list"
+            })
             .cloned()
             .collect()
     };

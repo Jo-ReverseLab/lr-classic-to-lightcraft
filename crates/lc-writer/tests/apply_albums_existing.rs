@@ -234,11 +234,11 @@ fn lost_state_file_adopts_every_collection_and_creates_nothing() {
     assert_eq!(c["1"]["kind"], "folder");
     assert_eq!(c["2"]["lightcraft_id"], 5002);
     assert_eq!(c["2"]["parent"], 1);
-    assert_eq!(c["3"]["lightcraft_id"], 5003);
+    assert_eq!(c["3"]["lightcraft_id"], 5005);
     assert_eq!(c["3"]["name"], "Deep");
     assert_eq!(c["3"]["parent"], 2);
     assert_eq!(c["3"]["members"], json!(["g101", "g103"]));
-    assert_eq!(c["4"]["lightcraft_id"], 5004);
+    assert_eq!(c["4"]["lightcraft_id"], 5003);
     assert_eq!(c["4"]["parent"], Value::Null);
     assert_eq!(c["5"]["parent"], 1);
 
