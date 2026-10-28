@@ -117,10 +117,7 @@ fn new_stacks_are_grouped_top_first_in_lightroom_order() {
     // Ascending by stack id.
     assert_eq!(
         groups(&p),
-        [
-            (1, vec!["g102", "g101", "g105"]),
-            (2, vec!["g104", "g103"])
-        ]
+        [(1, vec!["g102", "g101", "g105"]), (2, vec!["g104", "g103"])]
     );
     assert_eq!(p.stacks_known(), 0);
     assert!(p.stack_skips().is_empty());
@@ -255,7 +252,10 @@ fn fewer_than_two_usable_members_is_a_skip_with_the_stack_id() {
 
 #[test]
 fn a_photo_listed_twice_counts_once() {
-    let p = run(&input(vec![stack(1, &[101, 102, 101])], 2), &State::default());
+    let p = run(
+        &input(vec![stack(1, &[101, 102, 101])], 2),
+        &State::default(),
+    );
     assert_eq!(groups(&p), [(1, vec!["g101", "g102"])]);
     let p = run(&input(vec![stack(1, &[101, 101])], 2), &State::default());
     assert!(groups(&p).is_empty());
@@ -339,7 +339,12 @@ fn script_has_select_then_group_with_placeholders_and_collapsed_false() {
     let names: Vec<&str> = lines.iter().map(|(c, _)| c.as_str()).collect();
     assert_eq!(
         names,
-        ["library.import", "library.import", "library.select", "stack.group"]
+        [
+            "library.import",
+            "library.import",
+            "library.select",
+            "stack.group"
+        ]
     );
     assert_eq!(
         lines[2].1,

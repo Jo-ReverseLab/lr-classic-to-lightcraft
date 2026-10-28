@@ -66,6 +66,14 @@ pub struct AlbumFailure {
     pub message: String,
 }
 
+/// One stack of the fake library: `photos[0]` is the top.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StackView {
+    pub id: u64,
+    pub photos: Vec<i64>,
+    pub collapsed: bool,
+}
+
 /// One album or album folder of the fake library.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AlbumView {
@@ -189,6 +197,9 @@ struct Library {
     selection: Vec<i64>,
     /// album id -> album
     albums: BTreeMap<u64, AlbumView>,
+    /// stack id -> stack
+    stacks: BTreeMap<u64, StackView>,
+    next_stack_id: u64,
     next_id: i64,
     next_album_id: u64,
     seen: usize,
@@ -218,6 +229,7 @@ impl FakeLightCraft {
             keywords: config.keywords.clone(),
             next_id: 1001,
             next_album_id: 5001,
+            next_stack_id: 9001,
             ..Library::default()
         };
         for seed in &config.albums {
@@ -332,6 +344,12 @@ impl FakeLightCraft {
             .collect()
     }
 
+    /// Every stack, ascending by id; `photos[0]` of each is its top.
+    pub fn stacks(&self) -> Vec<StackView> {
+        let lib = self.shared.library.lock().unwrap();
+        lib.stacks.values().cloned().collect()
+    }
+
     /// The member photo ids of one album, in the order they were added.
     pub fn album_members(&self, album_id: u64) -> Vec<i64> {
         self.shared
@@ -436,6 +454,7 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
         "album.create" | "album.addPhotos" | "album.removePhotos" | "albums.list" => {
             album_command(config, lib, command, params)
         }
+        "stack.group" => stack_group(config, lib, params),
         "keyword.list" => Ok(keyword_list(&config.keyword_list, &lib.keywords)),
         "keyword.create" => {
             let name = params["name"].as_str().ok_or("name is missing")?;
@@ -688,4 +707,80 @@ fn albums_nested(lib: &Library, parent: Option<u64>) -> Vec<Value> {
             })
         })
         .collect()
+}
+
+/// `stack.group` with the rules of the real app: gated by a selection
+/// (`no photos selected`), `ids` default to the selection, the new order is
+/// `top` first, then `ids` without repeats, at least two photos, stacks that
+/// any of them are in are merged (the first touched keeps its id, the others
+/// disappear, their other members are appended), `collapsed` defaults to
+/// true, equal arguments give the same state, the selection becomes the top
+/// photo.
+fn stack_group(config: &Config, lib: &mut Library, params: &Value) -> Result<Value, String> {
+    if config.selection_gate && lib.selection.is_empty() {
+        return Err("no photos selected".into());
+    }
+    let ids: Vec<i64> = match params.get("ids") {
+        Some(v) => {
+            let list = v.as_array().ok_or("ids must be an array")?;
+            let ids: Vec<i64> = list.iter().filter_map(Value::as_i64).collect();
+            if ids.len() != list.len() {
+                return Err("ids must be numbers".into());
+            }
+            ids
+        }
+        None => lib.selection.clone(),
+    };
+    let known = |i: &i64| lib.photos.values().any(|p| p == i);
+    let top = match params.get("top") {
+        Some(v) => Some(v.as_i64().ok_or("top must be a number")?),
+        None => None,
+    };
+    let top = top.or_else(|| ids.first().copied());
+    let mut order: Vec<i64> = Vec::new();
+    for id in top.into_iter().chain(ids.iter().copied()) {
+        if known(&id) && !order.contains(&id) {
+            order.push(id);
+        }
+    }
+    if order.len() < 2 {
+        return Err("select at least two photos".into());
+    }
+    let touched: Vec<u64> = lib
+        .stacks
+        .values()
+        .filter(|s| s.photos.iter().any(|p| order.contains(p)))
+        .map(|s| s.id)
+        .collect();
+    let mut photos = order.clone();
+    for id in &touched {
+        for p in &lib.stacks[id].photos {
+            if !photos.contains(p) {
+                photos.push(*p);
+            }
+        }
+    }
+    let id = match touched.first() {
+        Some(id) => *id,
+        None => {
+            let id = lib.next_stack_id;
+            lib.next_stack_id += 1;
+            id
+        }
+    };
+    for other in touched.iter().skip(1) {
+        lib.stacks.remove(other);
+    }
+    let count = photos.len();
+    let collapsed = params["collapsed"].as_bool().unwrap_or(true);
+    lib.stacks.insert(
+        id,
+        StackView {
+            id,
+            photos,
+            collapsed,
+        },
+    );
+    lib.selection = vec![order[0]];
+    Ok(json!({"stack": id, "count": count}))
 }
