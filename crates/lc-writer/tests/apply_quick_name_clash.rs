@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! Acceptance test for a normal Lightroom collection that is named like the
 //! quick collection (task P5b-6a), module `lc_writer::apply`, against the
 //! stateful fake LightCraft.
