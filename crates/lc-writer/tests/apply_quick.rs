@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! Acceptance tests for writing the quick collection (task P5b-6), module
 //! `lc_writer::apply`, against the stateful fake LightCraft (which has the
 //! real rules of `album.toggleTarget`: all photos already in the target ->

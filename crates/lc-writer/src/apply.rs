@@ -23,7 +23,17 @@
 //!    matching node (see [`crate::albums`]), else created (parents first);
 //!    then members are added and removed album by album, each call
 //!    directly after `library.select {ids, active: first}` of exactly its
-//!    photos, because LightCraft changes album members only on a selection.
+//!    photos, because LightCraft changes album members only on a selection;
+//! 6. last the Quick Collection, only if some member is not in the mapping
+//!    file: `album.setTarget {id: null}` (so a target album the user set is
+//!    not used), `albums.list {}` (the answer of step 5 is reused), then the
+//!    members of the one top-level album named `Quick Collection` are read
+//!    with `catalog.query {filter: {album}, offset, limit: 200}` page by
+//!    page; only the photos it does not hold are sent, with
+//!    `library.select {ids, active: first}` and `album.toggleTarget {ids}`
+//!    (a toggle of photos that are all in it would remove them). Several
+//!    such albums skip the Quick Collection as ambiguous; lr2lc never
+//!    removes members and never sends `album.clearQuick`.
 //!
 //! Rules:
 //! - every finished step is recorded in the mapping file at once, so an
@@ -50,7 +60,7 @@
 //!   messages (which may quote file paths); they name the command and, for
 //!   photos and collections, the Lightroom id; never a collection name.
 
-use crate::albums::{Decision, Existing, parse_album_list};
+use crate::albums::{Decision, Existing, Node, parse_album_list};
 use crate::control::{ControlClient, Outcome, WriteError};
 use crate::plan::{
     Step, WriteInput, group_params, import_params, members_select_params, plan, same_members,
@@ -135,6 +145,19 @@ pub struct ApplySummary {
     /// Stacks whose select or group was rejected; a later run sends them
     /// again.
     pub stacks_incomplete: Vec<Skipped>,
+    /// Photos this run added to the Quick Collection.
+    pub quick_added: usize,
+    /// Quick Collection members already recorded or already in LightCraft.
+    pub quick_already: usize,
+    /// Recorded Quick Collection members that left it in Lightroom; they
+    /// stay in LightCraft.
+    pub quick_removed: usize,
+    /// Quick Collection members (or the whole Quick Collection) not
+    /// written, each with a reason.
+    pub quick_skipped: Vec<Skipped>,
+    /// Quick Collection commands that LightCraft rejected; a later run
+    /// sends the members again.
+    pub quick_incomplete: Vec<Skipped>,
 }
 
 /// A run that stopped: the error and what was done up to it.
@@ -192,6 +215,9 @@ pub fn apply_partial(
             stacks_known: plan.stacks_known(),
             stack_members_removed: plan.stack_members_removed(),
             stacks_skipped: plan.stack_skips().to_vec(),
+            quick_already: plan.quick_already(),
+            quick_removed: plan.quick_removed(),
+            quick_skipped: plan.quick_skips().to_vec(),
             ..ApplySummary::default()
         },
         keywords: wanted_keywords(input),
@@ -210,6 +236,7 @@ pub fn apply_partial(
             .collect(),
         incomplete: BTreeSet::new(),
         existing: None,
+        album_nodes: None,
         wanting: wanting(input, &plan.steps),
     };
     match run.steps(&plan.steps) {
@@ -218,6 +245,45 @@ pub fn apply_partial(
             error,
             summary: Box::new(run.summary),
         }),
+    }
+}
+
+/// The name LightCraft gives the Quick Collection.
+const QUICK_NAME: &str = "Quick Collection";
+
+/// The page size of `catalog.query`.
+const QUERY_PAGE: usize = 200;
+
+/// One page of a `catalog.query` answer.
+#[derive(Debug, PartialEq)]
+struct QueryPage {
+    total: usize,
+    ids: Vec<Value>,
+}
+
+/// Reads `{total, photos: [{id, …}]}`; any other shape is a protocol error.
+fn parse_query_page(value: &Value) -> Result<QueryPage, WriteError> {
+    let bad = || WriteError::Protocol("catalog.query answered in an unknown shape".into());
+    let total = value["total"].as_u64().ok_or_else(bad)? as usize;
+    let ids = value["photos"]
+        .as_array()
+        .ok_or_else(bad)?
+        .iter()
+        .map(|p| valid_id(&p["id"]).ok_or_else(bad))
+        .collect::<Result<_, _>>()?;
+    Ok(QueryPage { total, ids })
+}
+
+/// True if two LightCraft ids are equal, as numbers or as text.
+fn same_id(a: &Value, b: &Value) -> bool {
+    a == b || id_text(a).is_some_and(|t| Some(t) == id_text(b))
+}
+
+fn id_text(v: &Value) -> Option<String> {
+    match v {
+        Value::Number(n) => Some(n.to_string()),
+        Value::String(s) => Some(s.clone()),
+        _ => None,
     }
 }
 
@@ -263,6 +329,8 @@ struct Run<'a> {
     /// The library's albums that may be adopted, read before the first
     /// `album.create`.
     existing: Option<Existing>,
+    /// The answer of `albums.list`, once read.
+    album_nodes: Option<Vec<Node>>,
     /// The number of collections to create per trimmed name, folder flag
     /// and Lightroom parent.
     wanting: BTreeMap<CollectionKey, usize>,
@@ -363,14 +431,18 @@ impl Run<'_> {
                 self.finish_photo()?;
                 self.change_members(*collection_id, gids, Change::Remove)
             }
+            Step::QuickAdd { gids } => {
+                self.finish_photo()?;
+                self.quick_add(gids)
+            }
         }
     }
 
-    /// Reads `albums.list` once, before the first `album.create`; the
-    /// nodes already in the mapping file are left out.
-    fn load_existing(&mut self) -> Result<(), WriteError> {
-        if self.existing.is_some() {
-            return Ok(());
+    /// The library's album tree from `albums.list`, read at most once per
+    /// run.
+    fn album_nodes(&mut self) -> Result<Vec<Node>, WriteError> {
+        if let Some(nodes) = &self.album_nodes {
+            return Ok(nodes.clone());
         }
         let nodes = match self.client.execute("albums.list", json!({}))? {
             Outcome::Applied(value) => parse_album_list(&value)?,
@@ -380,6 +452,153 @@ impl Run<'_> {
                 ));
             }
         };
+        self.album_nodes = Some(nodes.clone());
+        Ok(nodes)
+    }
+
+    /// Adds the photos `gids` (not yet recorded) to the Quick Collection,
+    /// sending only those that LightCraft does not hold in it yet.
+    fn quick_add(&mut self, gids: &[String]) -> Result<(), WriteError> {
+        let mut wanted: Vec<(String, Value)> = Vec::new();
+        for gid in gids {
+            match self.state.photo(gid) {
+                Some(entry) => wanted.push((gid.clone(), entry.lightcraft_id.clone())),
+                None => {
+                    let id = self.photos.get(gid.as_str()).map(|p| p.lightroom_id);
+                    self.summary.quick_skipped.push(Skipped {
+                        reason: match id {
+                            Some(id) => format!(
+                                "photo {id}: no LightCraft id; not added to the quick collection"
+                            ),
+                            None => "a photo without a LightCraft id was not added to the \
+                                     quick collection"
+                                .to_string(),
+                        },
+                    });
+                }
+            }
+        }
+        if wanted.is_empty() {
+            return Ok(());
+        }
+        if self
+            .quick_command("album.setTarget", json!({"id": null}))?
+            .is_none()
+        {
+            return Ok(());
+        }
+        let candidates: Vec<Value> = self
+            .album_nodes()?
+            .into_iter()
+            .filter(|n| n.parent.is_none() && !n.folder && n.name == QUICK_NAME)
+            .map(|n| n.id)
+            .collect();
+        let held: Vec<Value> = match candidates.as_slice() {
+            [] => Vec::new(),
+            [id] => match self.album_members(id)? {
+                Some(held) => held,
+                None => return Ok(()),
+            },
+            more => {
+                self.summary.quick_skipped.push(Skipped {
+                    reason: format!(
+                        "quick collection: ambiguous, the library has {} top-level albums \
+                         named {QUICK_NAME:?}; nothing added",
+                        more.len()
+                    ),
+                });
+                return Ok(());
+            }
+        };
+        let (present, missing): (Vec<_>, Vec<_>) = wanted
+            .into_iter()
+            .partition(|(_, id)| held.iter().any(|h| same_id(h, id)));
+        if !present.is_empty() {
+            self.summary.quick_already += present.len();
+            self.state.record_quick(present.into_iter().map(|(g, _)| g));
+            self.state.save(self.state_file)?;
+        }
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<Value> = missing.iter().map(|(_, id)| id.clone()).collect();
+        if self
+            .quick_command("library.select", members_select_params(&ids))?
+            .is_none()
+        {
+            return Ok(());
+        }
+        let Some(outcome) = self.quick_command("album.toggleTarget", json!({"ids": ids}))? else {
+            return Ok(());
+        };
+        self.count_not_saved(&outcome);
+        self.summary.quick_added += missing.len();
+        self.state.record_quick(missing.into_iter().map(|(g, _)| g));
+        self.state.save(self.state_file)?;
+        Ok(())
+    }
+
+    /// Runs one Quick Collection command; a rejection is reported as
+    /// incomplete and gives `None`.
+    fn quick_command(
+        &mut self,
+        command: &str,
+        params: Value,
+    ) -> Result<Option<Outcome>, WriteError> {
+        match self.client.execute(command, params) {
+            Ok(outcome) => Ok(Some(outcome)),
+            Err(WriteError::Command { command, .. }) => {
+                self.summary.quick_incomplete.push(Skipped {
+                    reason: format!(
+                        "quick collection: LightCraft rejected `{command}`; \
+                         its members are written again by the next run"
+                    ),
+                });
+                Ok(None)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The photo ids of album `album`, read page by page with
+    /// `catalog.query`; `None` if a query was rejected.
+    fn album_members(&mut self, album: &Value) -> Result<Option<Vec<Value>>, WriteError> {
+        let mut held: Vec<Value> = Vec::new();
+        loop {
+            let params = json!({
+                "filter": {"album": album},
+                "offset": held.len(),
+                "limit": QUERY_PAGE,
+            });
+            let Some(outcome) = self.quick_command("catalog.query", params)? else {
+                return Ok(None);
+            };
+            let value = match outcome {
+                Outcome::Applied(v) => v,
+                Outcome::AppliedNotSaved(_) => {
+                    return Err(WriteError::Protocol(
+                        "catalog.query answered like a writing command".into(),
+                    ));
+                }
+            };
+            let page = parse_query_page(&value)?;
+            let done = page.ids.is_empty()
+                || page.ids.len() < QUERY_PAGE
+                || held.len() + page.ids.len() >= page.total;
+            held.extend(page.ids);
+            if done {
+                return Ok(Some(held));
+            }
+        }
+    }
+
+    /// Reads `albums.list` once, before the first `album.create`; the
+    /// nodes already in the mapping file are left out.
+    fn load_existing(&mut self) -> Result<(), WriteError> {
+        if self.existing.is_some() {
+            return Ok(());
+        }
+        let nodes = self.album_nodes()?;
         let claimed: Vec<Value> = self
             .state
             .collections()
@@ -1056,6 +1275,28 @@ mod tests {
                 "{v}"
             );
         }
+    }
+
+    #[test]
+    fn query_pages_are_parsed_or_rejected() {
+        let page = parse_query_page(&json!({"total": 3, "photos": [{"id": 1}, {"id": "2"}]}));
+        assert_eq!(
+            page.unwrap(),
+            QueryPage {
+                total: 3,
+                ids: vec![json!(1), json!("2")]
+            }
+        );
+        assert!(parse_query_page(&json!({"photos": []})).is_err());
+        assert!(parse_query_page(&json!({"total": 1, "photos": [{}]})).is_err());
+        assert!(parse_query_page(&json!([])).is_err());
+    }
+
+    #[test]
+    fn ids_match_as_numbers_or_text() {
+        assert!(same_id(&json!(4), &json!(4)));
+        assert!(same_id(&json!(4), &json!("4")));
+        assert!(!same_id(&json!(4), &json!(5)));
     }
 
     #[test]

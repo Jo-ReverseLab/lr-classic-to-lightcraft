@@ -13,7 +13,7 @@
 use model::{CollectionKind, ColorLabel, Flag, Keyword, Photo};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -177,6 +177,14 @@ pub struct StackEntry {
     pub members: Vec<String>,
 }
 
+/// The Quick Collection as written by lr2lc.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuickEntry {
+    /// Global ids of the photos lr2lc added or found in it, sorted. Members
+    /// removed in Lightroom stay here (and in the LightCraft album).
+    pub members: BTreeSet<String>,
+}
+
 /// The content of the mapping file.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct State {
@@ -184,10 +192,11 @@ pub struct State {
     keywords: BTreeMap<String, KeywordEntry>,
     collections: BTreeMap<i64, CollectionEntry>,
     stacks: BTreeMap<i64, StackEntry>,
+    quick: QuickEntry,
 }
 
 /// The file layout; `version` is checked before this is parsed.
-/// `collections` and `stacks` came later and may be missing in older files.
+/// `collections`, `stacks` and `quick` came later and may be missing in older files.
 #[derive(Serialize, Deserialize)]
 struct StateFile {
     version: u64,
@@ -197,6 +206,8 @@ struct StateFile {
     collections: BTreeMap<i64, CollectionEntry>,
     #[serde(default)]
     stacks: BTreeMap<i64, StackEntry>,
+    #[serde(default)]
+    quick: QuickEntry,
 }
 
 impl State {
@@ -234,6 +245,7 @@ impl State {
             keywords: file.keywords,
             collections: file.collections,
             stacks: file.stacks,
+            quick: file.quick,
         })
     }
 
@@ -246,6 +258,7 @@ impl State {
             keywords: self.keywords.clone(),
             collections: self.collections.clone(),
             stacks: self.stacks.clone(),
+            quick: self.quick.clone(),
         };
         let mut text = serde_json::to_string_pretty(&file).map_err(|source| StateError::Parse {
             path: path.to_path_buf(),
@@ -314,6 +327,16 @@ impl State {
     /// replacing an earlier entry for the same Lightroom id.
     pub fn record_stack(&mut self, lightroom_id: i64, members: Vec<String>) {
         self.stacks.insert(lightroom_id, StackEntry { members });
+    }
+
+    /// The Quick Collection members lr2lc recorded.
+    pub fn quick(&self) -> &QuickEntry {
+        &self.quick
+    }
+
+    /// Records photos (global ids) as members of the Quick Collection.
+    pub fn record_quick(&mut self, members: impl IntoIterator<Item = String>) {
+        self.quick.members.extend(members);
     }
 
     /// The entry of a stack, by Lightroom id.

@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! Acceptance tests for planning the quick collection (task P5b-6), module
 //! `lc_writer::plan`.
 //!

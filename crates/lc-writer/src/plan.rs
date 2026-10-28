@@ -25,10 +25,13 @@
 //!   same plan;
 //! - only members that lr2lc added are ever removed; a known collection that
 //!   was renamed, moved or deleted in Lightroom gets no command, it is only
-//!   counted.
+//!   counted;
+//! - the Quick Collection comes last: one step with its members, in
+//!   Lightroom order, that are not recorded in the mapping file; recorded
+//!   members that left it in Lightroom are only counted.
 
 use crate::state::{PhotoFields, State, keyword_text, snapshot};
-use model::{Collection, CollectionKind, Keyword, Photo, Skipped, Stack};
+use model::{Collection, CollectionKind, Keyword, Photo, QuickCollection, Skipped, Stack};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -47,6 +50,8 @@ pub struct WriteInput {
     pub collections: Vec<Collection>,
     /// The stacks to group, members top first.
     pub stacks: Vec<Stack>,
+    /// The Quick Collection, if the catalog has one.
+    pub quick: Option<QuickCollection>,
 }
 
 /// One command of the plan.
@@ -99,6 +104,13 @@ pub enum Step {
         /// Lightroom global ids of the photos.
         gids: Vec<String>,
     },
+    /// Add photos to the Quick Collection (`album.setTarget {id: null}`,
+    /// then, for the photos it does not hold yet, `library.select` and
+    /// `album.toggleTarget`).
+    QuickAdd {
+        /// Lightroom global ids of the photos, in Lightroom order.
+        gids: Vec<String>,
+    },
     /// Remove photos that lr2lc added from an album (`album.removePhotos`).
     RemoveMembers {
         /// Lightroom id of the collection.
@@ -139,6 +151,12 @@ pub struct Plan {
     stack_skips: Vec<Skipped>,
     /// Recorded members of input stacks that are no longer members.
     stack_members_removed: usize,
+    /// Quick Collection members already recorded in the mapping file.
+    quick_already: usize,
+    /// Recorded Quick Collection members that left it in Lightroom.
+    quick_removed: usize,
+    /// Quick Collection members that cannot be written.
+    quick_skips: Vec<Skipped>,
 }
 
 impl Plan {
@@ -192,6 +210,23 @@ impl Plan {
     /// id. The reason names the photo's Lightroom id.
     pub fn member_skips(&self) -> &[Skipped] {
         &self.member_skips
+    }
+
+    /// The Quick Collection members already recorded in the mapping file.
+    pub fn quick_already(&self) -> usize {
+        self.quick_already
+    }
+
+    /// The recorded Quick Collection members that are no longer members in
+    /// Lightroom. They stay in LightCraft and are only counted.
+    pub fn quick_removed(&self) -> usize {
+        self.quick_removed
+    }
+
+    /// The Quick Collection members without a global id; the reason names
+    /// the photo's Lightroom id.
+    pub fn quick_skips(&self) -> &[Skipped] {
+        &self.quick_skips
     }
 
     /// The input stacks recorded in the mapping file with the same members
@@ -269,6 +304,13 @@ impl Plan {
                     };
                     let album = album_ref(state, *collection_id);
                     push(command, json!({"id": album, "ids": ids}));
+                }
+                Step::QuickAdd { gids } => {
+                    selected = None;
+                    let ids: Vec<Value> = gids.iter().map(|g| photo_ref(state, g)).collect();
+                    push("album.setTarget", json!({"id": null}));
+                    push("library.select", members_select_params(&ids));
+                    push("album.toggleTarget", json!({"ids": ids}));
                 }
                 Step::Update {
                     global_id,
@@ -351,7 +393,33 @@ pub fn plan(input: &WriteInput, state: &State, library_keywords: &BTreeSet<Strin
     plan_photos(input, state, &mut out);
     plan_stacks(input, state, &mut out);
     plan_collections(input, state, &mut out);
+    plan_quick(input, state, &mut out);
     out
+}
+
+fn plan_quick(input: &WriteInput, state: &State, out: &mut Plan) {
+    let Some(quick) = &input.quick else {
+        return;
+    };
+    let global_ids = global_ids(input);
+    let recorded = &state.quick().members;
+    let mut wanted: Vec<String> = Vec::new();
+    for member in &quick.members {
+        match global_ids.get(member) {
+            Some(gid) if !wanted.iter().any(|g| g == gid) => wanted.push((*gid).to_string()),
+            Some(_) => {}
+            None => out.quick_skips.push(Skipped {
+                reason: format!("photo {member}: no global id; not added to the quick collection"),
+            }),
+        }
+    }
+    out.quick_removed = recorded.iter().filter(|g| !wanted.contains(g)).count();
+    let (known, new): (Vec<String>, Vec<String>) =
+        wanted.into_iter().partition(|g| recorded.contains(g));
+    out.quick_already = known.len();
+    if !new.is_empty() {
+        out.steps.push(Step::QuickAdd { gids: new });
+    }
 }
 
 /// A keyword the input needs, and whether it was given explicitly (with
