@@ -103,14 +103,26 @@ pub struct SeedAlbum {
     /// Index of the enclosing folder in `Config::albums` (must be smaller
     /// than the own index); `None` on top level.
     pub parent: Option<usize>,
+    /// `Some` makes the seed a smart album with these (translated) rules.
+    pub rules: Option<Value>,
 }
 
 impl SeedAlbum {
+    pub fn smart(name: &str, parent: Option<usize>, rules: Value) -> SeedAlbum {
+        SeedAlbum {
+            name: name.to_string(),
+            folder: false,
+            parent,
+            rules: Some(rules),
+        }
+    }
+
     pub fn album(name: &str, parent: Option<usize>) -> SeedAlbum {
         SeedAlbum {
             name: name.to_string(),
             folder: false,
             parent,
+            rules: None,
         }
     }
 
@@ -119,6 +131,7 @@ impl SeedAlbum {
             name: name.to_string(),
             folder: true,
             parent,
+            rules: None,
         }
     }
 }
@@ -164,6 +177,14 @@ pub struct Config {
     pub albums: Vec<SeedAlbum>,
     /// Answer `albums.list` with an object instead of the nested array.
     pub albums_list_garbage: bool,
+    /// `album.create` and `album.createSmart` apply but answer without `id`.
+    pub albums_no_id: bool,
+    /// `library.import` applies but answers `imported: []` (no id, no
+    /// duplicate, not failed).
+    pub import_no_id: bool,
+    /// `album.create`, `album.createSmart` and `library.import` apply, then
+    /// answer `saved in memory but not written to disk` (no id).
+    pub not_saved_creates: bool,
 }
 
 impl Config {
@@ -185,6 +206,9 @@ impl Config {
             album_failures: Vec::new(),
             albums: Vec::new(),
             albums_list_garbage: false,
+            albums_no_id: false,
+            import_no_id: false,
+            not_saved_creates: false,
         }
     }
 }
@@ -256,7 +280,7 @@ impl FakeLightCraft {
                     folder: seed.folder,
                     parent,
                     photos: Vec::new(),
-                    rules: None,
+                    rules: seed.rules.clone(),
                     quick: parent.is_none() && !seed.folder && seed.name == "Quick Collection",
                 },
             );
@@ -542,6 +566,12 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             if config.selection_gate {
                 lib.selection = vec![id];
             }
+            if config.not_saved_creates {
+                return Err("saved in memory but not written to disk: disk full".into());
+            }
+            if config.import_no_id {
+                return Ok(json!({"imported": [], "duplicates": [], "failed": 0}));
+            }
             let imported = match config.import_ids {
                 ImportIdStyle::Number => json!(id),
                 ImportIdStyle::ObjectId => json!({"id": id}),
@@ -695,6 +725,12 @@ fn album_command(
                     quick: false,
                 },
             );
+            if config.not_saved_creates {
+                return Err("saved in memory but not written to disk: disk full".into());
+            }
+            if config.albums_no_id {
+                return Ok(json!({"skipped": 0}));
+            }
             Ok(json!({"id": id, "skipped": 0}))
         }
         "album.createSmart" => {
@@ -738,6 +774,12 @@ fn album_command(
                     quick: false,
                 },
             );
+            if config.not_saved_creates {
+                return Err("saved in memory but not written to disk: disk full".into());
+            }
+            if config.albums_no_id {
+                return Ok(json!({"count": 0}));
+            }
             Ok(json!({"id": id, "count": 0}))
         }
         "album.addPhotos" | "album.removePhotos" => {

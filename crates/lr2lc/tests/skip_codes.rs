@@ -219,7 +219,13 @@ const CODES: [&str; 54] = [
 
 /// Codes no generator fixture reaches: they need a damaged catalog (rows
 /// that Lightroom itself never writes) or an inconsistent LightCraft state.
-const NOT_FIXTURE_REACHABLE: [&str; 24] = [
+/// `no_id_returned` and `applied_not_saved` are reached through the fake's
+/// `albums_no_id`, `import_no_id` and `not_saved_creates` switches (runs
+/// "apply, no ids" and "apply, not saved"). `ambiguous` stays listed here:
+/// it needs seeded duplicate albums named like a fixture collection and a
+/// lost mapping file; `lc-writer/tests/apply_skip_codes.rs` covers it with
+/// the code asserted.
+const NOT_FIXTURE_REACHABLE: [&str; 22] = [
     "duplicate_global_id",
     "no_global_id",
     "no_root_folder",
@@ -240,8 +246,6 @@ const NOT_FIXTURE_REACHABLE: [&str; 24] = [
     "keyword_changed",
     "path_not_utf8",
     "ambiguous",
-    "no_id_returned",
-    "applied_not_saved",
     "stack_unknown",
     "collection_unknown",
 ];
@@ -544,6 +548,19 @@ fn build_runs() -> Vec<(String, Run)> {
                 }
                 c.import_failed_for = Some("a".to_string());
             }),
+        ));
+        // Commands that apply but answer without an id, or answer `saved in
+        // memory but not written to disk` (no_id_returned, applied_not_saved).
+        runs.push((
+            format!("{name} apply, no ids"),
+            fake_run(&cat, true, |c| {
+                c.albums_no_id = true;
+                c.import_no_id = true;
+            }),
+        ));
+        runs.push((
+            format!("{name} apply, not saved"),
+            fake_run(&cat, true, |c| c.not_saved_creates = true),
         ));
     }
     runs
