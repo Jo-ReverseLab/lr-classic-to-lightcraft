@@ -255,11 +255,14 @@ const QUICK_NAME: &str = "Quick Collection";
 const QUERY_PAGE: usize = 200;
 
 /// The ids of the nodes that may be the Quick Collection: top-level albums
-/// named [`QUICK_NAME`] that are neither folders nor smart albums.
-fn quick_candidates(nodes: Vec<Node>) -> Vec<Value> {
+/// named [`QUICK_NAME`] that are neither folders nor smart albums nor one of
+/// the `claimed` albums (created or adopted by lr2lc for a Lightroom
+/// collection, which may carry the same name).
+fn quick_candidates(nodes: Vec<Node>, claimed: &[&Value]) -> Vec<Value> {
     nodes
         .into_iter()
         .filter(|n| n.parent.is_none() && !n.folder && !n.smart && n.name == QUICK_NAME)
+        .filter(|n| !claimed.iter().any(|c| same_id(c, &n.id)))
         .map(|n| n.id)
         .collect()
 }
@@ -497,7 +500,13 @@ impl Run<'_> {
         {
             return Ok(());
         }
-        let candidates = quick_candidates(self.album_nodes()?);
+        let nodes = self.album_nodes()?;
+        let claimed: Vec<&Value> = self
+            .state
+            .collections()
+            .map(|(_, entry)| &entry.lightcraft_id)
+            .collect();
+        let candidates = quick_candidates(nodes, &claimed);
         let held: Vec<Value> = match candidates.as_slice() {
             [] => Vec::new(),
             [id] => match self.album_members(id)? {
@@ -1313,7 +1322,23 @@ mod tests {
             node(4, QUICK_NAME, false, false, Some(json!(3))),
             node(5, "quick collection", false, false, None),
         ];
-        assert_eq!(quick_candidates(nodes), vec![json!(1)]);
+        assert_eq!(quick_candidates(nodes, &[]), vec![json!(1)]);
+    }
+
+    #[test]
+    fn claimed_albums_are_never_quick_candidates() {
+        let node = |id: i64| Node {
+            id: json!(id),
+            name: QUICK_NAME.into(),
+            folder: false,
+            smart: false,
+            parent: None,
+        };
+        let nodes = || vec![node(1), node(2)];
+        assert_eq!(quick_candidates(nodes(), &[]), vec![json!(1), json!(2)]);
+        assert_eq!(quick_candidates(nodes(), &[&json!(1)]), vec![json!(2)]);
+        assert_eq!(quick_candidates(nodes(), &[&json!("2")]), vec![json!(1)]);
+        assert!(quick_candidates(nodes(), &[&json!(1), &json!(2)]).is_empty());
     }
 
     #[test]
