@@ -299,6 +299,15 @@ pub struct Collection {
     pub members: Vec<i64>,
 }
 
+/// Lightroom's Quick Collection: a single system collection of photos.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuickCollection {
+    /// Lightroom's `id_local` of the collection (provenance).
+    pub lightroom_id: i64,
+    /// `lightroom_id`s of the member photos, in source order.
+    pub members: Vec<i64>,
+}
+
 /// A folder stack: photos grouped behind a top photo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stack {

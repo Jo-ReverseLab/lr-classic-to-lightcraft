@@ -36,7 +36,6 @@ fn reasons(report: &Report) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "waiting for P5b-6: the quick collection counts as converted, not skipped"]
 fn small_fixture_collections_are_converted_or_skipped() {
     let dir = tempfile::tempdir().unwrap();
     let d = read(&small_fixture(dir.path()));
@@ -80,7 +79,6 @@ fn small_fixture_parents_and_members() {
 }
 
 #[test]
-#[ignore = "waiting for P5b-6: the quick collection counts as converted, not skipped"]
 fn small_fixture_member_balance() {
     let dir = tempfile::tempdir().unwrap();
     let d = read(&small_fixture(dir.path()));

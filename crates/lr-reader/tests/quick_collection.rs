@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! Acceptance tests for reading the quick collection (task P5b-6).
 //!
 //! STATUS: waiting for P5b-6. Disabled by the crate-level `cfg(any())`; the

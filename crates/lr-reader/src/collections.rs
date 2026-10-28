@@ -1,16 +1,17 @@
 //! Reading collections (`AgLibraryCollection`) and their members
 //! (`AgLibraryCollectionImage`).
 //!
-//! Plain collections become albums, collection sets become folders. Smart
-//! collections, the Quick Collection and other system collections, and
-//! every other kind are skipped with a reason. A collection whose parent is
+//! Plain collections become albums, collection sets become folders. The
+//! first system collection by id is the Quick Collection; further system
+//! collections, smart collections and every other kind are skipped with a
+//! reason. A collection whose parent is
 //! missing, skipped, not a collection set or part of a cycle is skipped as
 //! well, and so is everything below it.
 //!
 //! Reasons name ids and kinds, never collection names.
 
 use crate::catalog::{Catalog, ReadError};
-use model::{Collection, CollectionKind, Photo, Report};
+use model::{Collection, CollectionKind, Photo, QuickCollection, Report};
 use rusqlite::types::ValueRef;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -23,10 +24,12 @@ const SMART: &str = "com.adobe.ag.library.smart_collection";
 pub struct CollectionData {
     /// Converted collections, ascending by `lightroom_id`.
     pub collections: Vec<Collection>,
+    /// The Quick Collection, if the catalog has one.
+    pub quick: Option<QuickCollection>,
     /// One entry per `AgLibraryCollection` row: converted or skipped.
     pub report: Report,
     /// One entry per `AgLibraryCollectionImage` row: converted (a member of
-    /// a converted album) or skipped.
+    /// a converted album or of the Quick Collection) or skipped.
     pub members: Report,
 }
 
@@ -50,6 +53,16 @@ struct Row {
     /// The kind and name, or the reason why the row itself is skipped.
     own: Result<(CollectionKind, String), String>,
     parent: ParentRef,
+    /// `systemOnly` is set: a Quick Collection candidate.
+    quick: bool,
+}
+
+/// Where the members of a collection go.
+#[derive(Debug, Clone, Copy)]
+enum Target {
+    /// `data.collections[i]`.
+    Collection(usize),
+    Quick,
 }
 
 impl Catalog {
@@ -62,13 +75,23 @@ impl Catalog {
         let rows = self.collection_rows()?;
         let status = resolve(&rows);
         let mut data = CollectionData::default();
-        let mut index: HashMap<i64, usize> = HashMap::new();
+        let mut index: HashMap<i64, Target> = HashMap::new();
+        let first_quick = rows.iter().find(|(_, r)| r.quick).map(|(&id, _)| id);
         for (&id, row) in &rows {
             data.report.read();
+            if Some(id) == first_quick {
+                data.report.converted();
+                index.insert(id, Target::Quick);
+                data.quick = Some(QuickCollection {
+                    lightroom_id: id,
+                    members: Vec::new(),
+                });
+                continue;
+            }
             match (&row.own, &status[&id]) {
                 (Ok((kind, name)), Ok(())) => {
                     data.report.converted();
-                    index.insert(id, data.collections.len());
+                    index.insert(id, Target::Collection(data.collections.len()));
                     data.collections.push(Collection {
                         lightroom_id: id,
                         name: name.clone(),
@@ -100,18 +123,21 @@ impl Catalog {
                 } else {
                     format!("photo {p}: collection {c} is unknown")
                 }),
-                (Some(c), Some(p), Some(i)) => member_check(
-                    &data.collections[i],
-                    p,
-                    converted.contains(&p),
-                    seen.contains(&(c, p)),
-                )
-                .map(|()| (c, p, i)),
+                (Some(c), Some(p), Some(t)) => {
+                    let folder = matches!(t, Target::Collection(i)
+                        if data.collections[i].kind == CollectionKind::Folder);
+                    member_check(c, folder, p, converted.contains(&p), seen.contains(&(c, p)))
+                        .map(|()| (c, p, t))
+                }
             };
             match outcome {
-                Ok((c, p, i)) => {
+                Ok((c, p, t)) => {
                     seen.insert((c, p));
-                    data.collections[i].members.push(p);
+                    match (t, data.quick.as_mut()) {
+                        (Target::Collection(i), _) => data.collections[i].members.push(p),
+                        (Target::Quick, Some(q)) => q.members.push(p),
+                        (Target::Quick, None) => unreachable!("quick target without quick"),
+                    }
                     data.members.converted();
                 }
                 Err(reason) => data.members.skipped(reason),
@@ -140,7 +166,14 @@ impl Catalog {
                         .ok_or_else(|| format!("collection {id}: name is not valid text"))
                 });
                 let parent = parent_ref(row.get_ref(4)?);
-                Ok((id, Row { own, parent }))
+                Ok((
+                    id,
+                    Row {
+                        own,
+                        parent,
+                        quick: system_only,
+                    },
+                ))
             })
             .map_err(ReadError::Query)?;
         rows.collect::<Result<_, _>>().map_err(ReadError::Query)
@@ -166,15 +199,16 @@ impl Catalog {
     }
 }
 
-/// Checks one member `photo` of a converted `collection`.
+/// Checks one member `photo` of the converted collection `c`; `folder` is
+/// true if `c` is a collection set.
 fn member_check(
-    collection: &Collection,
+    c: i64,
+    folder: bool,
     photo: i64,
     photo_converted: bool,
     repeated: bool,
 ) -> Result<(), String> {
-    let c = collection.lightroom_id;
-    if collection.kind == CollectionKind::Folder {
+    if folder {
         Err(format!(
             "photo {photo}: collection {c} is a collection set and holds no photos"
         ))
@@ -190,7 +224,9 @@ fn member_check(
 }
 
 /// The kind of a collection, or why it is skipped. The system flag wins
-/// over the `creationId`.
+/// over the `creationId`; the reason for a system collection applies to
+/// all but the first one, which the caller converts as the Quick
+/// Collection.
 fn classify(
     id: i64,
     creation_id: Option<&str>,
@@ -198,7 +234,7 @@ fn classify(
 ) -> Result<CollectionKind, String> {
     if system_only {
         return Err(format!(
-            "collection {id}: quick collection (system only) is not converted"
+            "collection {id}: more than one quick collection, only the first is converted"
         ));
     }
     match creation_id {
@@ -349,6 +385,7 @@ mod tests {
                 .map(|k| (k, String::new()))
                 .ok_or_else(|| "own".to_string()),
             parent,
+            quick: false,
         }
     }
 
@@ -378,7 +415,10 @@ mod tests {
         for creation in [Some(PLAIN), Some(SET), Some(SMART), None] {
             assert_eq!(
                 classify(8, creation, true),
-                Err("collection 8: quick collection (system only) is not converted".into())
+                Err(
+                    "collection 8: more than one quick collection, only the first is converted"
+                        .into()
+                )
             );
         }
     }
@@ -476,25 +516,17 @@ mod tests {
 
     #[test]
     fn member_checks_in_order() {
-        let mut c = Collection {
-            lightroom_id: 7,
-            name: String::new(),
-            kind: CollectionKind::Album,
-            parent: None,
-            members: vec![],
-        };
-        assert_eq!(member_check(&c, 3, true, false), Ok(()));
+        assert_eq!(member_check(7, false, 3, true, false), Ok(()));
         assert_eq!(
-            member_check(&c, 3, false, true),
+            member_check(7, false, 3, false, true),
             Err("photo 3: skipped or unknown photo, not added to collection 7".into())
         );
         assert_eq!(
-            member_check(&c, 3, true, true),
+            member_check(7, false, 3, true, true),
             Err("photo 3: duplicate member of collection 7".into())
         );
-        c.kind = CollectionKind::Folder;
         assert_eq!(
-            member_check(&c, 3, true, false),
+            member_check(7, true, 3, true, false),
             Err("photo 3: collection 7 is a collection set and holds no photos".into())
         );
     }
