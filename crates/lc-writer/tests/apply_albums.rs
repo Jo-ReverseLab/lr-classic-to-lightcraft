@@ -560,7 +560,7 @@ fn rejected_select_makes_the_collection_incomplete() {
 fn lost_connection_during_creates_keeps_what_was_created() {
     let env = env();
     let mut config = Config::new(&env.library);
-    // 1 keyword.list, 2-5 imports, 6-7 folders, 8 the first album.
+    // 1 keyword.list, 2-5 imports, 6 albums.list, 7-8 folders, 9 the first album.
     config.close_at = Some(9);
     let fake = FakeLightCraft::start(config);
     let input = input_with(tree());
@@ -601,7 +601,7 @@ fn lost_connection_during_creates_keeps_what_was_created() {
 fn lost_connection_during_members_loses_nothing_and_adds_nothing_twice() {
     let env = env();
     let mut config = Config::new(&env.library);
-    // 1 keyword.list, 2-5 imports, 6-10 creates, 11 select, 12 first add.
+    // 1 keyword.list, 2-5 imports, 6 albums.list, 7-11 creates, 12 select, 13 first add.
     config.close_at = Some(13);
     let fake = FakeLightCraft::start(config);
     let input = input_with(tree());
