@@ -19,8 +19,9 @@ use std::time::Duration;
 
 /// The commands that only read or only change the selection; everything else
 /// may change the library.
-pub const READ_COMMANDS: [&str; 6] = [
+pub const READ_COMMANDS: [&str; 7] = [
     "library.select",
+    "catalog.query",
     "albums.list",
     "library.info",
     "ui.inspect",
@@ -201,6 +202,8 @@ struct Library {
     stacks: BTreeMap<u64, StackView>,
     next_stack_id: u64,
     next_id: i64,
+    /// Session state of `album.setTarget` (`None`: the Quick Collection).
+    target_album: Option<u64>,
     next_album_id: u64,
     seen: usize,
     closed_once: bool,
@@ -344,6 +347,22 @@ impl FakeLightCraft {
             .collect()
     }
 
+    /// The target album set by `album.setTarget` (`None`: Quick Collection).
+    pub fn target_album(&self) -> Option<u64> {
+        self.shared.library.lock().unwrap().target_album
+    }
+
+    /// Sets the target album like a user would, without a received command.
+    pub fn set_target_album(&self, id: Option<u64>) {
+        self.shared.library.lock().unwrap().target_album = id;
+    }
+
+    /// The Quick Collection (top-level album of this name), if any.
+    pub fn quick_collection(&self) -> Option<AlbumView> {
+        let lib = self.shared.library.lock().unwrap();
+        quick_id(&lib).and_then(|id| lib.albums.get(&id).cloned())
+    }
+
     /// Every stack, ascending by id; `photos[0]` of each is its top.
     pub fn stacks(&self) -> Vec<StackView> {
         let lib = self.shared.library.lock().unwrap();
@@ -454,6 +473,22 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
         "album.create" | "album.addPhotos" | "album.removePhotos" | "albums.list" => {
             album_command(config, lib, command, params)
         }
+        "album.setTarget" => {
+            let target = match params.get("id") {
+                None | Some(Value::Null) => None,
+                Some(v) => {
+                    let id = v.as_u64().ok_or("id must be a number or null")?;
+                    if !lib.albums.get(&id).is_some_and(|a| !a.folder) {
+                        return Err("unknown album id".into());
+                    }
+                    Some(id)
+                }
+            };
+            lib.target_album = target;
+            Ok(json!({}))
+        }
+        "album.toggleTarget" => toggle_target(config, lib, params),
+        "catalog.query" => catalog_query(lib, params),
         "stack.group" => stack_group(config, lib, params),
         "keyword.list" => Ok(keyword_list(&config.keyword_list, &lib.keywords)),
         "keyword.create" => {
@@ -783,4 +818,103 @@ fn stack_group(config: &Config, lib: &mut Library, params: &Value) -> Result<Val
     );
     lib.selection = vec![order[0]];
     Ok(json!({"stack": id, "count": count}))
+}
+
+/// The id of the Quick Collection: the first top-level album of that name.
+fn quick_id(lib: &Library) -> Option<u64> {
+    lib.albums
+        .values()
+        .find(|a| a.parent.is_none() && !a.folder && a.name == "Quick Collection")
+        .map(|a| a.id)
+}
+
+/// `album.toggleTarget {ids?}` with the real rules (research A4): gated by a
+/// selection, `ids` default to the selection, the target is the album set by
+/// `album.setTarget` or else the Quick Collection (created when missing);
+/// when all photos are in it they are removed, otherwise the missing ones are
+/// appended.
+fn toggle_target(config: &Config, lib: &mut Library, params: &Value) -> Result<Value, String> {
+    if config.selection_gate && lib.selection.is_empty() {
+        return Err("no photos selected".into());
+    }
+    let ids: Vec<i64> = match params.get("ids") {
+        Some(v) => {
+            let list = v.as_array().ok_or("ids must be an array")?;
+            let ids: Vec<i64> = list.iter().filter_map(Value::as_i64).collect();
+            if ids.len() != list.len() {
+                return Err("ids must be numbers".into());
+            }
+            ids
+        }
+        None => lib.selection.clone(),
+    };
+    if let Some(unknown) = ids.iter().find(|i| !lib.photos.values().any(|p| p == *i)) {
+        return Err(format!("unknown photo id {unknown}"));
+    }
+    let album_id = match lib.target_album {
+        Some(id) => id,
+        None => match quick_id(lib) {
+            Some(id) => id,
+            None => {
+                let id = lib.next_album_id;
+                lib.next_album_id += 1;
+                lib.albums.insert(
+                    id,
+                    AlbumView {
+                        id,
+                        name: "Quick Collection".into(),
+                        folder: false,
+                        parent: None,
+                        photos: Vec::new(),
+                    },
+                );
+                id
+            }
+        },
+    };
+    let album = lib.albums.get_mut(&album_id).ok_or("unknown album id")?;
+    let all_in = !ids.is_empty() && ids.iter().all(|i| album.photos.contains(i));
+    let mut added = 0;
+    if all_in {
+        album.photos.retain(|p| !ids.contains(p));
+    } else {
+        for id in ids {
+            if !album.photos.contains(&id) {
+                album.photos.push(id);
+                added += 1;
+            }
+        }
+    }
+    Ok(json!({
+        "album": album.id,
+        "name": album.name,
+        "added": added,
+        "count": album.photos.len(),
+        "skipped": 0,
+    }))
+}
+
+/// `catalog.query {filter?, offset?, limit?}` -> `{total, photos:[{id,
+/// fileName}]}`; `filter.album` lists the members of that album, sorted by
+/// photo id (not by insertion order, like the real app); without it all
+/// photos. The default `limit` is 200.
+fn catalog_query(lib: &Library, params: &Value) -> Result<Value, String> {
+    let mut ids: Vec<i64> = match params["filter"].get("album") {
+        Some(v) => {
+            let id = v.as_u64().ok_or("album must be a number")?;
+            let album = lib.albums.get(&id).ok_or("unknown album id")?;
+            album.photos.clone()
+        }
+        None => lib.photos.values().copied().collect(),
+    };
+    ids.sort_unstable();
+    let offset = params["offset"].as_u64().unwrap_or(0) as usize;
+    let limit = params["limit"].as_u64().unwrap_or(200) as usize;
+    let photos: Vec<Value> = ids
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .map(|id| json!({"id": id, "fileName": format!("{id}.jpg")}))
+        .collect();
+    Ok(json!({"total": ids.len(), "photos": photos}))
 }
