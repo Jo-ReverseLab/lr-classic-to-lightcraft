@@ -1,9 +1,9 @@
 //! Checking that the original files of photos exist.
 
-use model::{Photo, Report};
+use model::{Photo, Report, SkipCode};
 
 /// Removes photos whose original file does not exist and records each one
-/// with [`Report::skipped`].
+/// with [`Report::skip`].
 ///
 /// Files are only checked for existence; nothing is opened or changed.
 /// If the check itself fails (e.g. no permission), the photo counts as
@@ -15,18 +15,21 @@ pub fn drop_missing_originals(photos: Vec<Photo>, report: &mut Report) -> Vec<Ph
         .filter(|photo| match photo.path.try_exists() {
             Ok(true) => true,
             Ok(false) => {
-                report.skipped(format!(
-                    "photo {}: original file is missing",
-                    photo.lightroom_id
-                ));
+                report.skip(
+                    SkipCode::Missing,
+                    format!("photo {}: original file is missing", photo.lightroom_id),
+                );
                 false
             }
             Err(e) => {
-                report.skipped(format!(
-                    "photo {}: original file is missing (cannot check it: {})",
-                    photo.lightroom_id,
-                    e.kind()
-                ));
+                report.skip(
+                    SkipCode::Missing,
+                    format!(
+                        "photo {}: original file is missing (cannot check it: {})",
+                        photo.lightroom_id,
+                        e.kind()
+                    ),
+                );
                 false
             }
         })
@@ -51,6 +54,7 @@ mod tests {
         let kept = drop_missing_originals(photos, &mut report);
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].lightroom_id, 1);
+        assert_eq!(report.skipped_items()[0].code, SkipCode::Missing);
         let reason = &report.skipped_items()[0].reason;
         assert!(reason.contains("missing") && reason.contains('2'));
         assert!(!reason.contains("b.jpg"));

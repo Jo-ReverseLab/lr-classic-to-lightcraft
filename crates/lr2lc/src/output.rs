@@ -24,6 +24,9 @@ pub struct ReportJson<'a> {
     pub keywords: KeywordsJson<'a>,
     pub keyword_assignments: AreaJson<'a>,
     pub keyword_synonyms: AreaJson<'a>,
+    /// Skipped elements per code, summed over the nine areas above (not
+    /// over `writer`).
+    pub skipped_by_code: BTreeMap<&'static str, usize>,
     /// Converted photos per star rating, keys "0" to "5".
     pub ratings: BTreeMap<String, usize>,
     /// What the writer plans (dry run) or did (`--apply`).
@@ -37,6 +40,8 @@ pub struct AreaJson<'a> {
     pub read: usize,
     pub converted: usize,
     pub skipped: Vec<SkippedJson<'a>>,
+    /// Skipped elements per code; the counts add up to `skipped`.
+    pub by_code: BTreeMap<&'static str, usize>,
 }
 
 /// Counts of photos, plus how many of the skipped photos are videos.
@@ -44,7 +49,8 @@ pub struct AreaJson<'a> {
 pub struct PhotosJson<'a> {
     #[serde(flatten)]
     pub area: AreaJson<'a>,
-    /// Skipped videos; they are also listed in `skipped`.
+    /// Skipped videos; they are also listed in `skipped` and equal
+    /// `by_code.video`.
     pub videos: usize,
     /// Converted photos per flag.
     pub flags: FlagsJson,
@@ -170,10 +176,20 @@ pub struct KeywordsJson<'a> {
     pub unused: usize,
 }
 
-/// One skipped element.
+/// One skipped element: the free text and its machine-readable code.
 #[derive(Debug, Serialize)]
 pub struct SkippedJson<'a> {
     pub reason: &'a str,
+    pub code: &'static str,
+}
+
+impl<'a> From<&'a Skipped> for SkippedJson<'a> {
+    fn from(s: &'a Skipped) -> Self {
+        SkippedJson {
+            reason: &s.reason,
+            code: s.code.as_str(),
+        }
+    }
 }
 
 impl<'a> AreaJson<'a> {
@@ -184,8 +200,9 @@ impl<'a> AreaJson<'a> {
             skipped: report
                 .skipped_items()
                 .iter()
-                .map(|s| SkippedJson { reason: &s.reason })
+                .map(SkippedJson::from)
                 .collect(),
+            by_code: report.skipped_by_code(),
         }
     }
 }
@@ -230,6 +247,7 @@ pub fn report_json_with(outcome: &Outcome, dry_run: bool, writer: Option<&Writer
         },
         keyword_assignments: AreaJson::new(&outcome.keyword_assignments),
         keyword_synonyms: AreaJson::new(&outcome.keyword_synonyms),
+        skipped_by_code: skipped_by_code(outcome),
         ratings: outcome
             .ratings
             .iter()
@@ -241,6 +259,17 @@ pub fn report_json_with(outcome: &Outcome, dry_run: bool, writer: Option<&Writer
     let mut text = serde_json::to_string_pretty(&json).expect("report serializes");
     text.push('\n');
     text
+}
+
+/// Skipped elements per code over all catalog areas.
+fn skipped_by_code(outcome: &Outcome) -> BTreeMap<&'static str, usize> {
+    let mut out = BTreeMap::new();
+    for (_, report) in areas(outcome) {
+        for (code, n) in report.skipped_by_code() {
+            *out.entry(code).or_insert(0) += n;
+        }
+    }
+    out
 }
 
 fn collections_json<'a>(report: &'a Report, counts: &CollectionCounts) -> CollectionsJson<'a> {
@@ -301,6 +330,16 @@ pub fn summary_with(outcome: &Outcome, dry_run: bool) -> String {
         let _ = writeln!(out, "skipped {area}:");
         for (reason, count) in groups {
             let _ = writeln!(out, "  {count:>6} x {reason}");
+        }
+    }
+    for (area, report) in areas(outcome) {
+        let groups = group_codes(report.skipped_items());
+        if groups.is_empty() {
+            continue;
+        }
+        let _ = writeln!(out, "skip codes {area}:");
+        for (code, count) in groups {
+            let _ = writeln!(out, "  {count:>6} x {code}");
         }
     }
     let _ = writeln!(out, "{}", ratings_line(&outcome.ratings));
@@ -401,6 +440,15 @@ pub fn group_reasons(skipped: &[Skipped]) -> Vec<(&str, usize)> {
     groups
 }
 
+/// Counts skipped elements per code, sorted by count (descending), then
+/// by code.
+pub fn group_codes(skipped: &[Skipped]) -> Vec<(&'static str, usize)> {
+    let mut groups: Vec<(&'static str, usize)> =
+        model::skip::count_by_code(skipped).into_iter().collect();
+    groups.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    groups
+}
+
 /// Removes a leading `word <digits>: ` prefix such as `photo 12: `.
 fn strip_id_prefix(reason: &str) -> &str {
     let Some((head, rest)) = reason.split_once(": ") else {
@@ -422,6 +470,7 @@ fn strip_id_prefix(reason: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use model::SkipCode;
 
     fn outcome() -> Outcome {
         let mut folders = Report::new();
@@ -432,15 +481,19 @@ mod tests {
             photos.read();
         }
         photos.converted();
-        photos.skipped("photo 2: original file is missing");
-        photos.skipped("photo 3: original file is missing");
-        photos.skipped("photo 9: virtual copy of photo 1 is not converted");
+        photos.skip(SkipCode::Missing, "photo 2: original file is missing");
+        photos.skip(SkipCode::Missing, "photo 3: original file is missing");
+        photos.skip(
+            SkipCode::VirtualCopy,
+            "photo 9: virtual copy of photo 1 is not converted",
+        );
         let mut collections = Report::new();
         for id in [1, 2] {
             collections.read();
-            collections.skipped(format!(
-                "collection {id}: smart collection is not converted"
-            ));
+            collections.skip(
+                SkipCode::SmartUnreadable,
+                format!("collection {id}: smart collection is not converted"),
+            );
         }
         collections.read();
         collections.converted();
@@ -449,24 +502,33 @@ mod tests {
             collection_members.read();
         }
         collection_members.converted();
-        collection_members.skipped("photo 1: collection skipped (collection 2)");
-        collection_members.skipped("photo 4: collection skipped (collection 2)");
+        collection_members.skip(
+            SkipCode::CollectionSkipped,
+            "photo 1: collection skipped (collection 2)",
+        );
+        collection_members.skip(
+            SkipCode::CollectionSkipped,
+            "photo 4: collection skipped (collection 2)",
+        );
         let mut keywords = Report::new();
         for _ in 0..3 {
             keywords.read();
         }
         keywords.converted();
         keywords.converted();
-        keywords.skipped("keyword 7: name is empty");
+        keywords.skip(SkipCode::NameEmpty, "keyword 7: name is empty");
         let mut keyword_assignments = Report::new();
         keyword_assignments.read();
-        keyword_assignments.skipped("assignment 5: photo 2 is skipped or unknown");
+        keyword_assignments.skip(
+            SkipCode::AssignmentPhotoSkipped,
+            "assignment 5: photo 2 is skipped or unknown",
+        );
         let mut keyword_synonyms = Report::new();
         for _ in 0..2 {
             keyword_synonyms.read();
         }
         keyword_synonyms.converted();
-        keyword_synonyms.skipped("synonym 4: keyword 9 is unknown");
+        keyword_synonyms.skip(SkipCode::KeywordUnknown, "synonym 4: keyword 9 is unknown");
         Outcome {
             catalog_version: "1500000".into(),
             catalog_unchanged: true,
@@ -638,8 +700,10 @@ mod tests {
     fn videos_are_counted_in_summary_and_json() {
         let mut o = outcome();
         o.photos.read();
-        o.photos
-            .skipped("photo 5: video files are not supported by LightCraft");
+        o.photos.skip(
+            SkipCode::Video,
+            "photo 5: video files are not supported by LightCraft",
+        );
         o.videos = 1;
         let lines: Vec<String> = summary(&o).lines().map(|l| l.trim().to_owned()).collect();
         assert!(lines.contains(&"videos: skipped 1".to_owned()));
@@ -700,7 +764,10 @@ mod tests {
         o.stacks.read();
         o.stacks.read();
         o.stacks.converted();
-        o.stacks.skipped("stack 3: fewer than two converted photos");
+        o.stacks.skip(
+            SkipCode::TooFewPhotos,
+            "stack 3: fewer than two converted photos",
+        );
         o.stack_counts = StackCounts {
             collapsed: 1,
             no_top: 0,
@@ -727,6 +794,61 @@ mod tests {
             "stack 3: fewer than two converted photos"
         );
         assert_eq!(v["stack_members"]["read"], 0);
+    }
+
+    #[test]
+    fn json_has_codes_per_entry_area_and_run() {
+        let v: serde_json::Value = serde_json::from_str(&report_json(&outcome())).unwrap();
+        assert_eq!(v["photos"]["skipped"][0]["code"], "missing");
+        assert_eq!(v["photos"]["skipped"][2]["code"], "virtual_copy");
+        assert_eq!(
+            v["photos"]["by_code"],
+            serde_json::json!({"missing": 2, "virtual_copy": 1})
+        );
+        assert_eq!(v["folders"]["by_code"], serde_json::json!({}));
+        assert_eq!(
+            v["skipped_by_code"],
+            serde_json::json!({
+                "missing": 2,
+                "virtual_copy": 1,
+                "smart_unreadable": 2,
+                "collection_skipped": 2,
+                "name_empty": 1,
+                "assignment_photo_skipped": 1,
+                "keyword_unknown": 1,
+            })
+        );
+    }
+
+    #[test]
+    fn summary_counts_codes_after_the_reasons() {
+        let text = summary(&outcome());
+        let lines: Vec<&str> = text.lines().collect();
+        let at = |l: &str| lines.iter().position(|x| *x == l).unwrap();
+        let photos = at("skip codes photos:");
+        assert_eq!(lines[photos + 1], "       2 x missing");
+        assert_eq!(lines[photos + 2], "       1 x virtual_copy");
+        assert!(at("skipped keyword synonyms:") < photos);
+        assert!(!lines.contains(&"skip codes folders:"));
+        assert_eq!(
+            lines[at("skip codes collection members:") + 1],
+            "       2 x collection_skipped"
+        );
+    }
+
+    #[test]
+    fn codes_are_grouped_by_count_then_code() {
+        let items = [
+            Skipped::new(SkipCode::Video, "a"),
+            Skipped::new(SkipCode::Missing, "b"),
+            Skipped::new(SkipCode::VirtualCopy, "c"),
+            Skipped::new(SkipCode::VirtualCopy, "d"),
+        ];
+        assert_eq!(
+            group_codes(&items),
+            [("virtual_copy", 2), ("missing", 1), ("video", 1)]
+        );
+        assert!(group_codes(&[]).is_empty());
     }
 
     #[test]
@@ -757,6 +879,7 @@ mod tests {
                 "keywords",
                 "photos",
                 "ratings",
+                "skipped_by_code",
                 "stack_members",
                 "stacks",
                 "tool_version"

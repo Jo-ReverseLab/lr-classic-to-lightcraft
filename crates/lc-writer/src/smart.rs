@@ -10,7 +10,9 @@
 //! Reasons name a criterion, never a value, an operation or a combine
 //! text: those may hold user data.
 
-use model::{Collection, CollectionKind, SmartCollection, SmartCombine, SmartRule, SmartValue};
+use model::{
+    Collection, CollectionKind, SkipCode, SmartCollection, SmartCombine, SmartRule, SmartValue,
+};
 use serde_json::{Value, json};
 
 /// The highest star rating.
@@ -23,10 +25,15 @@ const MAX_STARS: f64 = 5.0;
 /// `Err` is the reason why the whole collection is not translated. `value2`
 /// and units are ignored.
 pub fn translate(rules: &model::SmartRules) -> Result<Value, String> {
+    translate_coded(rules).map_err(|(_, why)| why)
+}
+
+/// Like [`translate`], with the skip code next to the reason.
+pub fn translate_coded(rules: &model::SmartRules) -> Result<Value, (SkipCode, String)> {
     if rules.rules.is_empty() {
         // Lightroom's meaning of an empty rule list is unproven, and
         // LightCraft reads it as "all" or "none" depending on the match.
-        return Err("no criteria".to_string());
+        return Err((SkipCode::SmartNoCriteria, "no criteria".to_string()));
     }
     // Criteria first: a criterion name says more than the combine mode.
     let translated = rules
@@ -34,18 +41,24 @@ pub fn translate(rules: &model::SmartRules) -> Result<Value, String> {
         .iter()
         .map(|r| {
             translate_rule(r).ok_or_else(|| {
-                format!(
-                    "criterion \"{}\" has no exact LightCraft equivalent",
-                    r.criterion
+                (
+                    SkipCode::SmartUntranslatable,
+                    format!(
+                        "criterion \"{}\" has no exact LightCraft equivalent",
+                        r.criterion
+                    ),
                 )
             })
         })
-        .collect::<Result<Vec<Value>, String>>()?;
+        .collect::<Result<Vec<Value>, _>>()?;
     let mode = match &rules.combine {
         SmartCombine::Intersect => "all",
         SmartCombine::Union => "any",
         SmartCombine::Other(_) => {
-            return Err("the combine mode has no exact LightCraft equivalent".to_string());
+            return Err((
+                SkipCode::SmartUntranslatable,
+                "the combine mode has no exact LightCraft equivalent".to_string(),
+            ));
         }
     };
     Ok(json!({"ruleSet": {"match": mode, "rules": translated}}))
@@ -74,15 +87,21 @@ fn translate_rule(rule: &SmartRule) -> Option<Value> {
 /// reason why it cannot: its rules have no exact equivalent, or its parent
 /// is not one of the album folders in `collections` (LightCraft nests smart
 /// albums only in folders).
-pub fn convertible(smart: &SmartCollection, collections: &[Collection]) -> Result<Value, String> {
-    let rules = translate(&smart.rules)?;
+pub fn convertible(
+    smart: &SmartCollection,
+    collections: &[Collection],
+) -> Result<Value, (SkipCode, String)> {
+    let rules = translate_coded(&smart.rules)?;
     if let Some(parent) = smart.parent
         && !collections
             .iter()
             .any(|c| c.lightroom_id == parent && c.kind == CollectionKind::Folder)
     {
-        return Err(format!(
-            "its parent collection {parent} is not a converted collection set"
+        // The acceptance table books every reason of a smart collection
+        // that the writer cannot create under `smart_untranslatable`.
+        return Err((
+            SkipCode::SmartUntranslatable,
+            format!("its parent collection {parent} is not a converted collection set"),
         ));
     }
     Ok(rules)
@@ -184,6 +203,21 @@ mod tests {
     }
 
     #[test]
+    fn translate_coded_names_the_code() {
+        let code = |r: &SmartRules| translate_coded(r).unwrap_err().0;
+        assert_eq!(code(&all(vec![])), SkipCode::SmartNoCriteria);
+        assert_eq!(
+            code(&all(vec![rule("camera", "==", None)])),
+            SkipCode::SmartUntranslatable
+        );
+        let other = SmartRules {
+            combine: SmartCombine::Other("x".into()),
+            rules: vec![stars(">=", 3.0)],
+        };
+        assert_eq!(code(&other), SkipCode::SmartUntranslatable);
+    }
+
+    #[test]
     fn convertible_needs_a_converted_folder_as_parent() {
         let cols = [
             collection(1, CollectionKind::Folder),
@@ -198,13 +232,17 @@ mod tests {
         assert!(convertible(&smart(None), &cols).is_ok());
         assert!(convertible(&smart(Some(1)), &cols).is_ok());
         for parent in [2, 3] {
-            let why = convertible(&smart(Some(parent)), &cols).unwrap_err();
+            let (code, why) = convertible(&smart(Some(parent)), &cols).unwrap_err();
+            assert_eq!(code, SkipCode::SmartUntranslatable);
             assert!(why.contains("parent") && why.contains(&parent.to_string()));
         }
         let bad = SmartCollection {
             rules: all(vec![]),
             ..smart(Some(2))
         };
-        assert_eq!(convertible(&bad, &cols).unwrap_err(), "no criteria");
+        assert_eq!(
+            convertible(&bad, &cols).unwrap_err(),
+            (SkipCode::SmartNoCriteria, "no criteria".to_string())
+        );
     }
 }

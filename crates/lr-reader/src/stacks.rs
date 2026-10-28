@@ -12,7 +12,7 @@
 
 use crate::catalog::{Catalog, ReadError};
 use crate::collections::{as_id, is_nonzero};
-use model::{Photo, Report, Stack};
+use model::{Photo, Report, SkipCode, Skipped, Stack};
 use rusqlite::types::ValueRef;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -132,10 +132,19 @@ fn build(
             Some(s) if stacks.contains_key(&s) => by_stack.entry(s).or_default().push(*m),
             _ => {
                 data.members.read();
-                data.members.skipped(match (m.image, m.stack) {
-                    (Some(p), Some(s)) => format!("photo {p}: stack {s} is unknown"),
-                    (Some(p), None) => format!("photo {p}: stack id is not valid"),
-                    (None, _) => format!("stack member row {}: ids are not valid", m.row),
+                data.members.push_skipped(match (m.image, m.stack) {
+                    (Some(p), Some(s)) => Skipped::new(
+                        SkipCode::StackUnknown,
+                        format!("photo {p}: stack {s} is unknown"),
+                    ),
+                    (Some(p), None) => Skipped::new(
+                        SkipCode::StackIdInvalid,
+                        format!("photo {p}: stack id is not valid"),
+                    ),
+                    (None, _) => Skipped::new(
+                        SkipCode::IdsInvalid,
+                        format!("stack member row {}: ids are not valid", m.row),
+                    ),
                 });
             }
         }
@@ -146,23 +155,33 @@ fn build(
         data.report.read();
         let rows = by_stack.remove(&id).unwrap_or_default();
         let mut kept: Vec<(i64, bool)> = Vec::new();
-        let mut skipped: Vec<String> = Vec::new();
+        let mut skipped: Vec<Skipped> = Vec::new();
         // Reasons of rows that would be kept if the stack were converted.
         let mut pending: Vec<i64> = Vec::new();
         for m in &rows {
             let reason = match m.image {
-                None => Some(format!(
-                    "stack member row {}: photo id is not valid (stack {id})",
-                    m.row
+                None => Some(Skipped::new(
+                    SkipCode::PhotoInvalid,
+                    format!(
+                        "stack member row {}: photo id is not valid (stack {id})",
+                        m.row
+                    ),
                 )),
-                Some(p) if !converted.contains(&p) => Some(format!(
-                    "photo {p}: skipped or unknown photo, not added to stack {id}"
+                Some(p) if !converted.contains(&p) => Some(Skipped::new(
+                    SkipCode::PhotoNotConverted,
+                    format!("photo {p}: skipped or unknown photo, not added to stack {id}"),
                 )),
                 Some(p) => {
                     if let Some(first) = taken.get(&p) {
-                        Some(format!("photo {p}: already in stack {first}"))
+                        Some(Skipped::new(
+                            SkipCode::AlreadyInStack,
+                            format!("photo {p}: already in stack {first}"),
+                        ))
                     } else if kept.iter().any(|&(k, _)| k == p) {
-                        Some(format!("photo {p}: duplicate member of stack {id}"))
+                        Some(Skipped::new(
+                            SkipCode::DuplicateMember,
+                            format!("photo {p}: duplicate member of stack {id}"),
+                        ))
                     } else {
                         None
                     }
@@ -181,11 +200,15 @@ fn build(
             data.members.read();
         }
         if kept.len() < 2 {
-            data.report
-                .skipped(format!("stack {id}: fewer than two converted photos"));
+            data.report.skip(
+                SkipCode::TooFewPhotos,
+                format!("stack {id}: fewer than two converted photos"),
+            );
             for p in pending {
-                data.members
-                    .skipped(format!("photo {p}: stack {id} is skipped"));
+                data.members.skip(
+                    SkipCode::StackSkipped,
+                    format!("photo {p}: stack {id} is skipped"),
+                );
             }
         } else {
             for &(p, _) in &kept {
@@ -206,7 +229,7 @@ fn build(
             });
         }
         for r in skipped {
-            data.members.skipped(r);
+            data.members.push_skipped(r);
         }
     }
     data
@@ -259,6 +282,59 @@ mod tests {
             .collect();
         assert!(reasons.contains(&"photo 12: stack 9 is unknown".to_string()));
         assert!(reasons.contains(&"photo 11: duplicate member of stack 1".to_string()));
+    }
+
+    fn codes(r: &Report) -> Vec<SkipCode> {
+        r.skipped_items().iter().map(|s| s.code).collect()
+    }
+
+    #[test]
+    fn every_skip_has_its_code() {
+        let stacks = [(1, false), (2, false), (3, false)].into_iter().collect();
+        let rows = [
+            m(1, 1, 10, true),
+            m(2, 1, 11, false),
+            MemberRow {
+                row: 3,
+                stack: Some(1),
+                image: None,
+                at_one: false,
+            },
+            m(4, 1, 12, false),
+            m(5, 2, 10, true),
+            m(6, 2, 13, true),
+            m(7, 3, 13, true),
+            m(8, 9, 13, true),
+            MemberRow {
+                row: 9,
+                stack: None,
+                image: Some(13),
+                at_one: false,
+            },
+            MemberRow {
+                row: 10,
+                stack: None,
+                image: None,
+                at_one: false,
+            },
+        ];
+        let d = build(&stacks, &rows, &[10, 11, 13].into_iter().collect());
+        assert_eq!(codes(&d.report), [SkipCode::TooFewPhotos; 2]);
+        let mut got = codes(&d.members);
+        got.sort();
+        let mut want = vec![
+            SkipCode::StackUnknown,
+            SkipCode::StackIdInvalid,
+            SkipCode::IdsInvalid,
+            SkipCode::PhotoInvalid,
+            SkipCode::PhotoNotConverted,
+            SkipCode::AlreadyInStack,
+            SkipCode::StackSkipped,
+            SkipCode::StackSkipped,
+        ];
+        want.sort();
+        assert_eq!(got, want);
+        assert!(d.members.is_balanced() && d.report.is_balanced());
     }
 
     #[test]

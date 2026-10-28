@@ -73,7 +73,7 @@ use crate::plan::{
     select_params, smart_skip_reason,
 };
 use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, keyword_text, snapshot};
-use model::{Collection, CollectionKind, Keyword, Photo, Skipped, SmartCollection};
+use model::{Collection, CollectionKind, Keyword, Photo, SkipCode, Skipped, SmartCollection};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -499,6 +499,7 @@ impl Run<'_> {
                 _ => {
                     self.skip_smart(
                         collection_id,
+                        SkipCode::ParentNotCreated,
                         &format!("its parent collection {parent} was not created"),
                     );
                     return Ok(());
@@ -509,7 +510,11 @@ impl Run<'_> {
         match self.client.execute("album.createSmart", params) {
             Ok(Outcome::Applied(result)) => {
                 let Some(id) = result.get("id").and_then(valid_id) else {
-                    self.skip_smart(collection_id, "`album.createSmart` returned no id");
+                    self.skip_smart(
+                        collection_id,
+                        SkipCode::NoIdReturned,
+                        "`album.createSmart` returned no id",
+                    );
                     return Ok(());
                 };
                 self.summary.smart_created += 1;
@@ -529,23 +534,28 @@ impl Run<'_> {
                 self.summary.not_saved += 1;
                 self.skip_smart(
                     collection_id,
+                    SkipCode::AppliedNotSaved,
                     "`album.createSmart` was applied but not saved and returned no id; \
                      the next run creates it again, check LightCraft for a duplicate",
                 );
                 Ok(())
             }
             Err(WriteError::Command { command, .. }) => {
-                self.skip_smart(collection_id, &format!("LightCraft rejected `{command}`"));
+                self.skip_smart(
+                    collection_id,
+                    SkipCode::Rejected,
+                    &format!("LightCraft rejected `{command}`"),
+                );
                 Ok(())
             }
             Err(e) => Err(e),
         }
     }
 
-    fn skip_smart(&mut self, collection_id: i64, why: &str) {
-        self.summary.smart_skipped.push(Skipped {
-            reason: smart_skip_reason(collection_id, why),
-        });
+    fn skip_smart(&mut self, collection_id: i64, code: SkipCode, why: &str) {
+        self.summary
+            .smart_skipped
+            .push(Skipped::new(code, smart_skip_reason(collection_id, why)));
     }
 
     /// The library's album tree from `albums.list`, read at most once per
@@ -575,8 +585,9 @@ impl Run<'_> {
                 Some(entry) => wanted.push((gid.clone(), entry.lightcraft_id.clone())),
                 None => {
                     let id = self.photos.get(gid.as_str()).map(|p| p.lightroom_id);
-                    self.summary.quick_skipped.push(Skipped {
-                        reason: match id {
+                    self.summary.quick_skipped.push(Skipped::new(
+                        SkipCode::NoLightcraftId,
+                        match id {
                             Some(id) => format!(
                                 "photo {id}: no LightCraft id; not added to the quick collection"
                             ),
@@ -584,7 +595,7 @@ impl Run<'_> {
                                      quick collection"
                                 .to_string(),
                         },
-                    });
+                    ));
                 }
             }
         }
@@ -611,13 +622,14 @@ impl Run<'_> {
                 None => return Ok(()),
             },
             more => {
-                self.summary.quick_skipped.push(Skipped {
-                    reason: format!(
+                self.summary.quick_skipped.push(Skipped::new(
+                    SkipCode::Ambiguous,
+                    format!(
                         "quick collection: ambiguous, the library has {} top-level albums \
                          named {QUICK_NAME:?}; nothing added",
                         more.len()
                     ),
-                });
+                ));
                 return Ok(());
             }
         };
@@ -659,12 +671,13 @@ impl Run<'_> {
         match self.client.execute(command, params) {
             Ok(outcome) => Ok(Some(outcome)),
             Err(WriteError::Command { command, .. }) => {
-                self.summary.quick_incomplete.push(Skipped {
-                    reason: format!(
+                self.summary.quick_incomplete.push(Skipped::new(
+                    SkipCode::Rejected,
+                    format!(
                         "quick collection: LightCraft rejected `{command}`; \
                          its members are written again by the next run"
                     ),
-                });
+                ));
                 Ok(None)
             }
             Err(e) => Err(e),
@@ -741,6 +754,7 @@ impl Run<'_> {
                 None => {
                     self.skip_collection(
                         collection_id,
+                        SkipCode::ParentNotCreated,
                         &format!("its parent collection {parent} was not created"),
                     );
                     return Ok(());
@@ -762,6 +776,7 @@ impl Run<'_> {
             Decision::Ambiguous(n) => {
                 self.skip_collection(
                     collection_id,
+                    SkipCode::Ambiguous,
                     &format!(
                         "ambiguous: {n} albums with the same name and parent in LightCraft; \
                          nothing was created or adopted"
@@ -773,7 +788,11 @@ impl Run<'_> {
         match self.client.execute("album.create", params) {
             Ok(Outcome::Applied(result)) => {
                 let Some(id) = result.get("id").and_then(valid_id) else {
-                    self.skip_collection(collection_id, "`album.create` returned no id");
+                    self.skip_collection(
+                        collection_id,
+                        SkipCode::NoIdReturned,
+                        "`album.create` returned no id",
+                    );
                     return Ok(());
                 };
                 match c.kind {
@@ -786,13 +805,18 @@ impl Run<'_> {
                 self.summary.not_saved += 1;
                 self.skip_collection(
                     collection_id,
+                    SkipCode::AppliedNotSaved,
                     "`album.create` was applied but not saved and returned no id; \
                      the next run creates it again, check LightCraft for a duplicate",
                 );
                 Ok(())
             }
             Err(WriteError::Command { command, .. }) => {
-                self.skip_collection(collection_id, &format!("LightCraft rejected `{command}`"));
+                self.skip_collection(
+                    collection_id,
+                    SkipCode::Rejected,
+                    &format!("LightCraft rejected `{command}`"),
+                );
                 Ok(())
             }
             Err(e) => Err(e),
@@ -819,10 +843,11 @@ impl Run<'_> {
         Ok(())
     }
 
-    fn skip_collection(&mut self, collection_id: i64, why: &str) {
-        self.summary.collections_skipped.push(Skipped {
-            reason: format!("collection {collection_id}: {why}"),
-        });
+    fn skip_collection(&mut self, collection_id: i64, code: SkipCode, why: &str) {
+        self.summary.collections_skipped.push(Skipped::new(
+            code,
+            format!("collection {collection_id}: {why}"),
+        ));
     }
 
     /// Adds photos to an album or removes them, after selecting exactly
@@ -850,11 +875,10 @@ impl Run<'_> {
             } else if change == Change::Add {
                 let lightroom_id = self.photos.get(gid.as_str()).map(|p| p.lightroom_id);
                 let photo = lightroom_id.map_or_else(|| "?".to_string(), |id| id.to_string());
-                self.summary.members_skipped.push(Skipped {
-                    reason: format!(
-                        "photo {photo}: not added to an album; the photo has no LightCraft id"
-                    ),
-                });
+                self.summary.members_skipped.push(Skipped::new(
+                    SkipCode::NoLightcraftId,
+                    format!("photo {photo}: not added to an album; the photo has no LightCraft id"),
+                ));
             }
             // Not reachable for removals: lr2lc only recorded members that
             // had a LightCraft id.
@@ -923,11 +947,12 @@ impl Run<'_> {
             }
         }
         if ids.len() < 2 {
-            self.summary.stacks_skipped.push(Skipped {
-                reason: format!(
+            self.summary.stacks_skipped.push(Skipped::new(
+                SkipCode::TooFewPhotos,
+                format!(
                     "stack {stack_id}: fewer than two photos with a LightCraft id; not grouped"
                 ),
-            });
+            ));
             return Ok(());
         }
         let recorded: Vec<String> = self
@@ -952,12 +977,13 @@ impl Run<'_> {
                     }
                 }
                 Err(WriteError::Command { command, .. }) => {
-                    self.summary.stacks_incomplete.push(Skipped {
-                        reason: format!(
+                    self.summary.stacks_incomplete.push(Skipped::new(
+                        SkipCode::Rejected,
+                        format!(
                             "stack {stack_id}: LightCraft rejected `{command}`; \
                              the stack is grouped again by the next run"
                         ),
-                    });
+                    ));
                     return Ok(());
                 }
                 Err(e) => return Err(e),
@@ -974,12 +1000,13 @@ impl Run<'_> {
     /// Reports an album as incomplete, once per run.
     fn mark_incomplete(&mut self, collection_id: i64, command: &str) {
         if self.incomplete.insert(collection_id) {
-            self.summary.collections_incomplete.push(Skipped {
-                reason: format!(
+            self.summary.collections_incomplete.push(Skipped::new(
+                SkipCode::Rejected,
+                format!(
                     "collection {collection_id}: LightCraft rejected `{command}`; \
                      its members are written again by the next run"
                 ),
-            });
+            ));
         }
     }
 
@@ -990,10 +1017,10 @@ impl Run<'_> {
         });
         if parent_failed {
             self.failed_keywords.insert(path.to_string());
-            self.summary.keywords_skipped.push(Skipped {
-                reason: "keyword not created: `keyword.create` failed for its parent keyword"
-                    .to_string(),
-            });
+            self.summary.keywords_skipped.push(Skipped::new(
+                SkipCode::ParentFailed,
+                "keyword not created: `keyword.create` failed for its parent keyword".to_string(),
+            ));
             return Ok(());
         }
         match self.client.execute("keyword.create", params.clone()) {
@@ -1012,9 +1039,10 @@ impl Run<'_> {
             }
             Err(WriteError::Command { command, .. }) => {
                 self.failed_keywords.insert(path.to_string());
-                self.summary.keywords_skipped.push(Skipped {
-                    reason: format!("keyword not created: LightCraft rejected `{command}`"),
-                });
+                self.summary.keywords_skipped.push(Skipped::new(
+                    SkipCode::Rejected,
+                    format!("keyword not created: LightCraft rejected `{command}`"),
+                ));
                 Ok(())
             }
             Err(e) => Err(e),
@@ -1029,10 +1057,11 @@ impl Run<'_> {
         };
         let params = import_params(path);
         let sent_path = params["paths"][0].clone();
-        let skip = |summary: &mut ApplySummary, why: &str| {
-            summary.photos_skipped.push(Skipped {
-                reason: format!("photo {}: {why}", photo.lightroom_id),
-            });
+        let skip = |summary: &mut ApplySummary, code: SkipCode, why: &str| {
+            summary.photos_skipped.push(Skipped::new(
+                code,
+                format!("photo {}: {why}", photo.lightroom_id),
+            ));
         };
         match self.client.execute("library.import", params) {
             Ok(Outcome::Applied(result)) => match import_id(&result, &sent_path) {
@@ -1047,6 +1076,7 @@ impl Run<'_> {
                 ImportResult::Failed => {
                     skip(
                         &mut self.summary,
+                        SkipCode::ImportFailed,
                         "`library.import` reported the file as failed",
                     );
                     self.fail_current();
@@ -1054,6 +1084,7 @@ impl Run<'_> {
                 ImportResult::NoId => {
                     skip(
                         &mut self.summary,
+                        SkipCode::NoIdReturned,
                         "`library.import` returned no id for the file",
                     );
                     self.fail_current();
@@ -1063,6 +1094,7 @@ impl Run<'_> {
                 self.summary.not_saved += 1;
                 skip(
                     &mut self.summary,
+                    SkipCode::AppliedNotSaved,
                     "`library.import` was applied but not saved and returned no id; \
                      run again to find the photo",
                 );
@@ -1071,6 +1103,7 @@ impl Run<'_> {
             Err(WriteError::Command { command, .. }) => {
                 skip(
                     &mut self.summary,
+                    SkipCode::Rejected,
                     &format!("LightCraft rejected `{command}`"),
                 );
                 self.fail_current();
@@ -1123,12 +1156,13 @@ impl Run<'_> {
 
     /// Marks the running photo as incomplete after a rejected command.
     fn reject(&mut self, lightroom_id: i64, command: &str) {
-        self.summary.photos_incomplete.push(Skipped {
-            reason: format!(
+        self.summary.photos_incomplete.push(Skipped::new(
+            SkipCode::Rejected,
+            format!(
                 "photo {lightroom_id}: LightCraft rejected `{command}`; \
                  the photo is incomplete and is updated again by the next run"
             ),
-        });
+        ));
         self.fail_current();
     }
 

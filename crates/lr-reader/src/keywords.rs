@@ -5,7 +5,7 @@
 //! Skip reasons name ids only, never keyword names or synonym texts.
 
 use crate::catalog::{Catalog, ReadError};
-use model::{Keyword, Photo, Report};
+use model::{Keyword, Photo, Report, SkipCode, Skipped};
 use rusqlite::OptionalExtension;
 use rusqlite::types::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -146,7 +146,7 @@ impl Catalog {
                     by_id.insert(id, keyword.clone());
                     keywords.push(keyword);
                 }
-                Err(reason) => keyword_report.skipped(reason),
+                Err(skip) => keyword_report.push_skipped(skip),
             }
         }
 
@@ -306,9 +306,12 @@ enum Top {
 /// cycle, if its global id is missing or a duplicate (see
 /// [`global_ids`]), or if its name is empty or contains `|`; checked in
 /// this order. A converted keyword carries its global id.
-fn resolve_keywords(rows: &[KeywordRow], root: Option<i64>) -> Vec<(i64, Result<Keyword, String>)> {
+fn resolve_keywords(
+    rows: &[KeywordRow],
+    root: Option<i64>,
+) -> Vec<(i64, Result<Keyword, Skipped>)> {
     let index: HashMap<i64, &KeywordRow> = rows.iter().map(|r| (r.id, r)).collect();
-    let mut done: HashMap<i64, Result<Keyword, String>> = HashMap::new();
+    let mut done: HashMap<i64, Result<Keyword, Skipped>> = HashMap::new();
     let mut ids = global_ids(rows, root);
 
     for row in rows {
@@ -345,9 +348,9 @@ fn resolve_keywords(rows: &[KeywordRow], root: Option<i64>) -> Vec<(i64, Result<
         };
         for current in chain.into_iter().rev() {
             let result = match parent {
-                Err(p) => Err(format!(
-                    "keyword {}: parent keyword {p} is skipped",
-                    current.id
+                Err(p) => Err(Skipped::new(
+                    SkipCode::ParentSkipped,
+                    format!("keyword {}: parent keyword {p} is skipped", current.id),
                 )),
                 Ok(mut path) => ids
                     .remove(&current.id)
@@ -357,7 +360,7 @@ fn resolve_keywords(rows: &[KeywordRow], root: Option<i64>) -> Vec<(i64, Result<
                         path.push(name);
                         Keyword::new(path)
                             .map(|k| k.with_global_id(global_id))
-                            .map_err(|_| format!("keyword {}: name is empty", current.id))
+                            .map_err(|_| name_empty(current.id))
                     }),
             };
             parent = match &result {
@@ -382,7 +385,7 @@ fn resolve_keywords(rows: &[KeywordRow], root: Option<i64>) -> Vec<(i64, Result<
 /// row is later skipped for another reason (its name or its parent): a
 /// keyword's fate depends on its ancestors, which may come later in
 /// `id_local` order, so ownership is decided on the rows alone.
-fn global_ids(rows: &[KeywordRow], root: Option<i64>) -> HashMap<i64, Result<String, String>> {
+fn global_ids(rows: &[KeywordRow], root: Option<i64>) -> HashMap<i64, Result<String, Skipped>> {
     let mut seen: HashSet<&str> = HashSet::new();
     let mut out = HashMap::new();
     let mut sorted: Vec<&KeywordRow> = rows.iter().filter(|r| Some(r.id) != root).collect();
@@ -393,10 +396,16 @@ fn global_ids(rows: &[KeywordRow], root: Option<i64>) -> HashMap<i64, Result<Str
                 if seen.insert(g) {
                     Ok(g.to_owned())
                 } else {
-                    Err(format!("keyword {}: duplicate global id", row.id))
+                    Err(Skipped::new(
+                        SkipCode::DuplicateGlobalId,
+                        format!("keyword {}: duplicate global id", row.id),
+                    ))
                 }
             }
-            _ => Err(format!("keyword {}: missing global id", row.id)),
+            _ => Err(Skipped::new(
+                SkipCode::MissingGlobalId,
+                format!("keyword {}: missing global id", row.id),
+            )),
         };
         out.insert(row.id, result);
     }
@@ -404,15 +413,21 @@ fn global_ids(rows: &[KeywordRow], root: Option<i64>) -> HashMap<i64, Result<Str
 }
 
 /// The keyword's own name, or the reason it cannot be used.
-fn own_name(row: &KeywordRow) -> Result<String, String> {
+fn own_name(row: &KeywordRow) -> Result<String, Skipped> {
     match row.name.as_deref() {
-        None => Err(format!("keyword {}: name is empty", row.id)),
-        Some(n) if n.trim().is_empty() => Err(format!("keyword {}: name is empty", row.id)),
-        Some(n) if n.contains('|') => {
-            Err(format!("keyword {}: name contains a vertical bar", row.id))
-        }
+        None => Err(name_empty(row.id)),
+        Some(n) if n.trim().is_empty() => Err(name_empty(row.id)),
+        Some(n) if n.contains('|') => Err(Skipped::new(
+            SkipCode::NameHasBar,
+            format!("keyword {}: name contains a vertical bar", row.id),
+        )),
         Some(n) => Ok(n.to_owned()),
     }
+}
+
+/// The skip entry of keyword `id` with an empty name.
+fn name_empty(id: i64) -> Skipped {
+    Skipped::new(SkipCode::NameEmpty, format!("keyword {id}: name is empty"))
 }
 
 /// Groups the synonym texts per keyword id, in row order. Every row is
@@ -423,7 +438,7 @@ fn own_name(row: &KeywordRow) -> Result<String, String> {
 fn group_synonyms(
     rows: &[SynonymRow],
     known: &HashSet<i64>,
-    resolved: &[(i64, Result<Keyword, String>)],
+    resolved: &[(i64, Result<Keyword, Skipped>)],
     report: &mut Report,
 ) -> HashMap<i64, Vec<String>> {
     let converted: HashSet<i64> = resolved
@@ -438,12 +453,19 @@ fn group_synonyms(
         match row.keyword {
             Some(k) if converted.contains(&k) => match row.name.as_deref() {
                 Some(n) if !n.trim().is_empty() => out.entry(k).or_default().push(n.to_owned()),
-                _ => report.skipped(format!("synonym {}: name is empty", row.id)),
+                _ => report.skip(
+                    SkipCode::NameEmpty,
+                    format!("synonym {}: name is empty", row.id),
+                ),
             },
-            Some(k) if known.contains(&k) => {
-                report.skipped(format!("synonym {}: keyword {keyword} is skipped", row.id))
-            }
-            _ => report.skipped(format!("synonym {}: keyword {keyword} is unknown", row.id)),
+            Some(k) if known.contains(&k) => report.skip(
+                SkipCode::KeywordSkipped,
+                format!("synonym {}: keyword {keyword} is skipped", row.id),
+            ),
+            _ => report.skip(
+                SkipCode::KeywordUnknown,
+                format!("synonym {}: keyword {keyword} is unknown", row.id),
+            ),
         }
     }
     out
@@ -464,16 +486,22 @@ fn assign(
         let image = row.image.filter(|i| photos.contains(i));
         let keyword = row.tag.and_then(|t| keywords.get(&t));
         match (image, keyword) {
-            (None, _) => report.skipped(format!(
-                "assignment {}: photo {} is skipped or unknown",
-                row.id,
-                id_text(row.image)
-            )),
-            (Some(_), None) => report.skipped(format!(
-                "assignment {}: keyword {} is skipped",
-                row.id,
-                id_text(row.tag)
-            )),
+            (None, _) => report.skip(
+                SkipCode::AssignmentPhotoSkipped,
+                format!(
+                    "assignment {}: photo {} is skipped or unknown",
+                    row.id,
+                    id_text(row.image)
+                ),
+            ),
+            (Some(_), None) => report.skip(
+                SkipCode::AssignmentKeywordSkipped,
+                format!(
+                    "assignment {}: keyword {} is skipped",
+                    row.id,
+                    id_text(row.tag)
+                ),
+            ),
             (Some(image), Some(keyword)) => out.entry(image).or_default().push(keyword.clone()),
         }
     }
@@ -507,10 +535,10 @@ mod tests {
         r
     }
 
-    fn reasons(resolved: &[(i64, Result<Keyword, String>)]) -> Vec<String> {
+    fn reasons(resolved: &[(i64, Result<Keyword, Skipped>)]) -> Vec<String> {
         resolved
             .iter()
-            .filter_map(|(_, r)| r.as_ref().err().cloned())
+            .filter_map(|(_, r)| r.as_ref().err().map(|e| e.reason.clone()))
             .collect()
     }
 
@@ -707,6 +735,37 @@ mod tests {
         }
     }
 
+    fn codes(report: &Report) -> Vec<SkipCode> {
+        report.skipped_items().iter().map(|s| s.code).collect()
+    }
+
+    #[test]
+    fn keyword_skips_have_their_codes() {
+        let rows = [
+            row(1, None, None),
+            with_gid(row(2, Some("A"), Some(1)), None),
+            with_gid(row(3, Some("B"), Some(1)), Some("g4")),
+            row(4, Some("C"), Some(1)),
+            row(5, Some(""), Some(1)),
+            row(6, Some("a|b"), Some(1)),
+            row(7, Some("D"), Some(2)),
+        ];
+        let got: Vec<SkipCode> = resolve_keywords(&rows, Some(1))
+            .into_iter()
+            .filter_map(|(_, r)| r.err().map(|e| e.code))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                SkipCode::MissingGlobalId,
+                SkipCode::DuplicateGlobalId,
+                SkipCode::NameEmpty,
+                SkipCode::NameHasBar,
+                SkipCode::ParentSkipped,
+            ]
+        );
+    }
+
     fn assignment(id: i64, image: i64, tag: i64) -> AssignmentRow {
         AssignmentRow {
             id,
@@ -738,6 +797,15 @@ mod tests {
             .iter()
             .map(|s| s.reason.as_str())
             .collect();
+        assert_eq!(
+            codes(&report),
+            [
+                SkipCode::AssignmentKeywordSkipped,
+                SkipCode::AssignmentKeywordSkipped,
+                SkipCode::AssignmentPhotoSkipped,
+                SkipCode::AssignmentPhotoSkipped,
+            ]
+        );
         assert_eq!(
             reasons,
             vec![
@@ -803,6 +871,17 @@ mod tests {
             .iter()
             .map(|s| s.reason.as_str())
             .collect();
+        assert_eq!(
+            codes(&report),
+            [
+                SkipCode::KeywordSkipped,
+                SkipCode::KeywordSkipped,
+                SkipCode::KeywordUnknown,
+                SkipCode::KeywordUnknown,
+                SkipCode::NameEmpty,
+                SkipCode::NameEmpty,
+            ]
+        );
         assert_eq!(
             reasons,
             vec![

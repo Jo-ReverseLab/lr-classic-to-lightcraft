@@ -9,10 +9,12 @@ use std::path::PathBuf;
 
 pub mod label;
 pub mod mapping;
+pub mod skip;
 pub mod smart;
 
 pub use label::{ColorLabel, LabelSet};
 pub use mapping::{PathMapping, PathMappings};
+pub use skip::{SkipCode, Skipped};
 pub use smart::{SmartCollection, SmartCombine, SmartRule, SmartRules, SmartValue};
 
 /// Errors raised when building model values.
@@ -323,13 +325,6 @@ pub struct Stack {
     pub collapsed: bool,
 }
 
-/// An element that could not be converted.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Skipped {
-    /// Why the element was skipped. Never empty.
-    pub reason: String,
-}
-
 /// Counts of a run: every element read is either converted or skipped.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Report {
@@ -357,16 +352,27 @@ impl Report {
         self.converted += 1;
     }
 
-    /// Records one element skipped, with a reason.
+    /// Records one element skipped, with a reason but no specific code
+    /// ([`SkipCode::Unspecified`]). The reader and the writer use [`Self::skip`].
     /// An empty reason is replaced by "unspecified".
     pub fn skipped(&mut self, reason: impl Into<String>) {
-        let reason = reason.into();
-        let reason = if reason.trim().is_empty() {
-            Self::UNSPECIFIED_REASON.to_string()
-        } else {
-            reason
-        };
-        self.skipped.push(Skipped { reason });
+        self.skip(SkipCode::Unspecified, reason);
+    }
+
+    /// Records one element skipped, with its code and reason.
+    /// An empty reason is replaced by "unspecified".
+    pub fn skip(&mut self, code: SkipCode, reason: impl Into<String>) {
+        self.skipped.push(Skipped::new(code, reason));
+    }
+
+    /// Records one skip entry built elsewhere.
+    pub fn push_skipped(&mut self, item: Skipped) {
+        self.skipped.push(item);
+    }
+
+    /// Counts the skipped elements per code, keyed by the code's text.
+    pub fn skipped_by_code(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        skip::count_by_code(&self.skipped)
     }
 
     /// Number of elements read.
@@ -406,10 +412,10 @@ impl Report {
         moved
     }
 
-    /// Replaces the reason of every skipped element whose reason starts
-    /// with `prefix`; an empty `reason` is replaced by "unspecified".
-    /// Returns how many changed.
-    pub fn replace_skipped(&mut self, prefix: &str, reason: &str) -> usize {
+    /// Replaces the reason and the code of every skipped element whose
+    /// reason starts with `prefix`; an empty `reason` is replaced by
+    /// "unspecified". Returns how many changed.
+    pub fn replace_skipped(&mut self, prefix: &str, code: SkipCode, reason: &str) -> usize {
         let reason = if reason.trim().is_empty() {
             Self::UNSPECIFIED_REASON
         } else {
@@ -422,6 +428,7 @@ impl Report {
             .filter(|s| s.reason.starts_with(prefix))
         {
             s.reason = reason.to_string();
+            s.code = code;
             changed += 1;
         }
         changed
@@ -454,12 +461,28 @@ mod tests {
     }
 
     #[test]
+    fn skip_records_the_code_and_counts_by_code() {
+        let mut r = Report::new();
+        r.skip(SkipCode::Video, "v");
+        r.skip(SkipCode::Video, "w");
+        r.skipped("x");
+        r.push_skipped(Skipped::new(SkipCode::Missing, "m"));
+        assert_eq!(r.skipped_items()[0].code, SkipCode::Video);
+        assert_eq!(r.skipped_items()[2].code, SkipCode::Unspecified);
+        let by = r.skipped_by_code();
+        assert_eq!(by.get("video"), Some(&2));
+        assert_eq!(by.get("missing"), Some(&1));
+        assert_eq!(by.get("unspecified"), Some(&1));
+    }
+
+    #[test]
     fn replace_skipped_changes_only_matching_reasons() {
         let mut r = report(&["c 1: a", "c 10: b"]);
-        assert_eq!(r.replace_skipped("c 1:", "c 1: new"), 1);
+        assert_eq!(r.replace_skipped("c 1:", SkipCode::Video, "c 1: new"), 1);
+        assert_eq!(r.skipped_items()[0].code, SkipCode::Video);
         assert_eq!(r.skipped_items()[0].reason, "c 1: new");
         assert_eq!(r.skipped_items()[1].reason, "c 10: b");
-        r.replace_skipped("c 10:", " ");
+        r.replace_skipped("c 10:", SkipCode::Video, " ");
         assert_eq!(r.skipped_items()[1].reason, Report::UNSPECIFIED_REASON);
         assert!(r.is_balanced());
     }

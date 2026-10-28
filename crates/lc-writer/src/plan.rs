@@ -38,7 +38,8 @@
 use crate::smart::{convertible, translate};
 use crate::state::{PhotoFields, State, keyword_text, snapshot};
 use model::{
-    Collection, CollectionKind, Keyword, Photo, QuickCollection, Skipped, SmartCollection, Stack,
+    Collection, CollectionKind, Keyword, Photo, QuickCollection, SkipCode, Skipped,
+    SmartCollection, Stack,
 };
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -475,9 +476,9 @@ fn plan_smart(input: &WriteInput, state: &State, out: &mut Plan) {
                     params,
                 });
             }
-            Err(why) => out.smart_skips.push(Skipped {
-                reason: smart_skip_reason(s.lightroom_id, &why),
-            }),
+            Err((code, why)) => out
+                .smart_skips
+                .push(Skipped::new(code, smart_skip_reason(s.lightroom_id, &why))),
         }
     }
 }
@@ -499,9 +500,10 @@ fn plan_quick(input: &WriteInput, state: &State, out: &mut Plan) {
         match global_ids.get(member) {
             Some(gid) if !wanted.iter().any(|g| g == gid) => wanted.push((*gid).to_string()),
             Some(_) => {}
-            None => out.quick_skips.push(Skipped {
-                reason: format!("photo {member}: no global id; not added to the quick collection"),
-            }),
+            None => out.quick_skips.push(Skipped::new(
+                SkipCode::NoGlobalId,
+                format!("photo {member}: no global id; not added to the quick collection"),
+            )),
         }
     }
     out.quick_removed = recorded.iter().filter(|g| !wanted.contains(g)).count();
@@ -553,11 +555,12 @@ fn plan_keywords(
         let text = keyword_text(&w.keyword);
         if let Some(entry) = state.keyword(&text) {
             if w.explicit && !entry.same_attributes(&w.keyword) {
-                out.skipped.push(Skipped {
-                    reason: "keyword synonyms or attributes changed after the keyword was \
+                out.skipped.push(Skipped::new(
+                    SkipCode::KeywordChanged,
+                    "keyword synonyms or attributes changed after the keyword was \
                              created in LightCraft; not updated"
                         .to_string(),
-                });
+                ));
             }
             continue;
         }
@@ -588,17 +591,19 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
     let mut by_gid: BTreeMap<&str, &Photo> = BTreeMap::new();
     for p in &input.photos {
         match p.global_id.as_deref() {
-            None => out.skipped.push(Skipped {
-                reason: format!("photo {} has no global id", p.lightroom_id),
-            }),
+            None => out.skipped.push(Skipped::new(
+                SkipCode::MissingGlobalId,
+                format!("photo {} has no global id", p.lightroom_id),
+            )),
             Some(gid) => {
                 if by_gid.contains_key(gid) {
-                    out.skipped.push(Skipped {
-                        reason: format!(
+                    out.skipped.push(Skipped::new(
+                        SkipCode::DuplicateGlobalId,
+                        format!(
                             "photo {} has the same global id as another photo",
                             p.lightroom_id
                         ),
-                    });
+                    ));
                 } else {
                     by_gid.insert(gid, p);
                 }
@@ -618,12 +623,13 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
             Some(entry) => entry.fields.clone(),
             None => {
                 if p.path.to_str().is_none() {
-                    out.skipped.push(Skipped {
-                        reason: format!(
+                    out.skipped.push(Skipped::new(
+                        SkipCode::PathNotUtf8,
+                        format!(
                             "photo {} has a file path that is not valid UTF-8",
                             p.lightroom_id
                         ),
-                    });
+                    ));
                     continue;
                 }
                 out.steps.push(Step::Import {
@@ -675,12 +681,13 @@ fn plan_stacks(input: &WriteInput, state: &State, out: &mut Plan) {
             }
         }
         if gids.len() < 2 {
-            out.stack_skips.push(Skipped {
-                reason: format!(
+            out.stack_skips.push(Skipped::new(
+                SkipCode::TooFewPhotos,
+                format!(
                     "stack {}: fewer than two photos with a global id; not grouped",
                     s.lightroom_id
                 ),
-            });
+            ));
             continue;
         }
         let recorded: &[String] = state
@@ -765,12 +772,13 @@ fn plan_collections(input: &WriteInput, state: &State, out: &mut Plan) {
                         wanted.push((*gid).to_string());
                     }
                 }
-                None => out.member_skips.push(Skipped {
-                    reason: format!(
+                None => out.member_skips.push(Skipped::new(
+                    SkipCode::NoGlobalId,
+                    format!(
                         "photo {member}: not added to an album; the photo is not converted or \
                          has no global id"
                     ),
-                }),
+                )),
             }
         }
         let recorded: &[String] = state
@@ -973,6 +981,47 @@ mod tests {
         assert_eq!(p.steps.len(), 1);
         assert_eq!(p.skipped.len(), 1);
         assert!(p.skipped[0].reason.contains('2'));
+        assert_eq!(p.skipped[0].code, SkipCode::DuplicateGlobalId);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_that_is_not_utf8_is_skipped_with_its_code() {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::ffi::OsStr::from_bytes(b"a\xff.jpg");
+        let input = WriteInput {
+            photos: vec![Photo::new(path, 3, Rating::default()).with_global_id("g")],
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &State::default(), &BTreeSet::new());
+        assert!(p.steps.is_empty());
+        assert_eq!(p.photo_skips()[0].code, SkipCode::PathNotUtf8);
+    }
+
+    #[test]
+    fn members_without_a_global_id_are_skipped_with_their_code() {
+        let input = WriteInput {
+            photos: vec![Photo::new("a.jpg", 1, Rating::default())],
+            collections: vec![Collection {
+                kind: CollectionKind::Album,
+                members: vec![1],
+                ..collection(5, None)
+            }],
+            quick: Some(QuickCollection {
+                lightroom_id: 9,
+                members: vec![1],
+            }),
+            stacks: vec![Stack {
+                lightroom_id: 4,
+                members: vec![1, 2],
+                collapsed: false,
+            }],
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &State::default(), &BTreeSet::new());
+        assert_eq!(p.member_skips()[0].code, SkipCode::NoGlobalId);
+        assert_eq!(p.quick_skips()[0].code, SkipCode::NoGlobalId);
+        assert_eq!(p.stack_skips()[0].code, SkipCode::TooFewPhotos);
     }
 
     #[test]
@@ -1019,6 +1068,8 @@ mod tests {
         assert_eq!(p.keyword_skips().len(), 1);
         assert_eq!(p.photo_skips().len(), 1);
         assert!(p.photo_skips()[0].reason.contains('7'));
+        assert_eq!(p.keyword_skips()[0].code, SkipCode::KeywordChanged);
+        assert_eq!(p.photo_skips()[0].code, SkipCode::MissingGlobalId);
     }
 
     #[test]

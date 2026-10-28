@@ -2,14 +2,16 @@
 //! LightCraft control port with `--apply`.
 
 use crate::dry_run::Converted;
-use crate::output::{ReasonJson, group_reasons};
+use crate::output::group_reasons;
 use anyhow::{Context, Result};
 use lc_writer::apply::{Aborted, ApplySummary, apply_partial};
 use lc_writer::control::{ControlClient, WriteError, preflight};
 use lc_writer::plan::{Plan, Step, WriteInput};
 use lc_writer::state::{State, state_path};
 use model::Skipped;
+use model::skip::count_by_code;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::path::Path;
 
@@ -18,57 +20,82 @@ use std::path::Path;
 #[serde(untagged)]
 pub enum WriterJson {
     /// Dry run: what would be sent.
-    Planned {
-        planned: PlannedJson,
-        photos_skipped: Vec<ReasonJson>,
-        keywords_skipped: Vec<ReasonJson>,
-        members_skipped: Vec<ReasonJson>,
-        stacks_skipped: Vec<ReasonJson>,
-        quick_skipped: Vec<ReasonJson>,
-        smart_skipped: Vec<ReasonJson>,
-    },
+    Planned(Box<PlannedSectionJson>),
     /// `--apply`: what was sent.
-    Applied {
-        keywords_created: usize,
-        photos_imported: usize,
-        photos_existing: usize,
-        photos_updated: usize,
-        photos_unchanged: usize,
-        updates: usize,
-        not_saved: usize,
-        photos_skipped: Vec<ReasonJson>,
-        photos_incomplete: Vec<ReasonJson>,
-        keywords_skipped: Vec<ReasonJson>,
-        folders_created: usize,
-        albums_created: usize,
-        collections_known: usize,
-        collections_existing: usize,
-        members_added: usize,
-        members_removed: usize,
-        collections_renamed: usize,
-        collections_moved: usize,
-        collections_removed: usize,
-        collections_skipped: Vec<ReasonJson>,
-        collections_incomplete: Vec<ReasonJson>,
-        members_skipped: Vec<ReasonJson>,
-        stacks_grouped: usize,
-        stacks_known: usize,
-        stack_members_removed: usize,
-        stacks_skipped: Vec<ReasonJson>,
-        stacks_incomplete: Vec<ReasonJson>,
-        quick_added: usize,
-        quick_already: usize,
-        quick_removed: usize,
-        quick_skipped: Vec<ReasonJson>,
-        quick_incomplete: Vec<ReasonJson>,
-        smart_created: usize,
-        smart_known: usize,
-        smart_rules_changed: usize,
-        smart_skipped: Vec<ReasonJson>,
-        /// Why the run stopped early; absent after a complete run.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        aborted: Option<String>,
-    },
+    Applied(Box<AppliedJson>),
+}
+
+/// The `writer` section of a dry run.
+#[derive(Debug, Serialize)]
+pub struct PlannedSectionJson {
+    planned: PlannedJson,
+    photos_skipped: Vec<SkipJson>,
+    photos_skipped_by_code: ByCode,
+    keywords_skipped: Vec<SkipJson>,
+    keywords_skipped_by_code: ByCode,
+    members_skipped: Vec<SkipJson>,
+    members_skipped_by_code: ByCode,
+    stacks_skipped: Vec<SkipJson>,
+    stacks_skipped_by_code: ByCode,
+    quick_skipped: Vec<SkipJson>,
+    quick_skipped_by_code: ByCode,
+    smart_skipped: Vec<SkipJson>,
+    smart_skipped_by_code: ByCode,
+}
+
+/// The `writer` section of an applied run.
+#[derive(Debug, Serialize)]
+pub struct AppliedJson {
+    keywords_created: usize,
+    photos_imported: usize,
+    photos_existing: usize,
+    photos_updated: usize,
+    photos_unchanged: usize,
+    updates: usize,
+    not_saved: usize,
+    photos_skipped: Vec<SkipJson>,
+    photos_skipped_by_code: ByCode,
+    photos_incomplete: Vec<SkipJson>,
+    photos_incomplete_by_code: ByCode,
+    keywords_skipped: Vec<SkipJson>,
+    keywords_skipped_by_code: ByCode,
+    folders_created: usize,
+    albums_created: usize,
+    collections_known: usize,
+    collections_existing: usize,
+    members_added: usize,
+    members_removed: usize,
+    collections_renamed: usize,
+    collections_moved: usize,
+    collections_removed: usize,
+    collections_skipped: Vec<SkipJson>,
+    collections_skipped_by_code: ByCode,
+    collections_incomplete: Vec<SkipJson>,
+    collections_incomplete_by_code: ByCode,
+    members_skipped: Vec<SkipJson>,
+    members_skipped_by_code: ByCode,
+    stacks_grouped: usize,
+    stacks_known: usize,
+    stack_members_removed: usize,
+    stacks_skipped: Vec<SkipJson>,
+    stacks_skipped_by_code: ByCode,
+    stacks_incomplete: Vec<SkipJson>,
+    stacks_incomplete_by_code: ByCode,
+    quick_added: usize,
+    quick_already: usize,
+    quick_removed: usize,
+    quick_skipped: Vec<SkipJson>,
+    quick_skipped_by_code: ByCode,
+    quick_incomplete: Vec<SkipJson>,
+    quick_incomplete_by_code: ByCode,
+    smart_created: usize,
+    smart_known: usize,
+    smart_rules_changed: usize,
+    smart_skipped: Vec<SkipJson>,
+    smart_skipped_by_code: ByCode,
+    /// Why the run stopped early; absent after a complete run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aborted: Option<String>,
 }
 
 /// Number of planned commands by kind, and the known photos with and
@@ -175,21 +202,27 @@ pub fn planned(plan: &Plan) -> PlannedJson {
 
 /// The report section of a dry run.
 pub fn planned_json(plan: &Plan) -> WriterJson {
-    WriterJson::Planned {
+    WriterJson::Planned(Box::new(PlannedSectionJson {
         planned: planned(plan),
         photos_skipped: reasons(plan.photo_skips()),
+        photos_skipped_by_code: count_by_code(plan.photo_skips()),
         keywords_skipped: reasons(plan.keyword_skips()),
+        keywords_skipped_by_code: count_by_code(plan.keyword_skips()),
         members_skipped: reasons(plan.member_skips()),
+        members_skipped_by_code: count_by_code(plan.member_skips()),
         stacks_skipped: reasons(plan.stack_skips()),
+        stacks_skipped_by_code: count_by_code(plan.stack_skips()),
         quick_skipped: reasons(plan.quick_skips()),
+        quick_skipped_by_code: count_by_code(plan.quick_skips()),
         smart_skipped: reasons(plan.smart_skips()),
-    }
+        smart_skipped_by_code: count_by_code(plan.smart_skips()),
+    }))
 }
 
 /// The report section of an applied run; `aborted` is the error that
 /// stopped it early.
 pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJson {
-    WriterJson::Applied {
+    WriterJson::Applied(Box::new(AppliedJson {
         keywords_created: s.keywords_created,
         photos_imported: s.photos_imported,
         photos_existing: s.photos_existing,
@@ -198,8 +231,11 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         updates: s.updates,
         not_saved: s.not_saved,
         photos_skipped: reasons(&s.photos_skipped),
+        photos_skipped_by_code: count_by_code(&s.photos_skipped),
         photos_incomplete: reasons(&s.photos_incomplete),
+        photos_incomplete_by_code: count_by_code(&s.photos_incomplete),
         keywords_skipped: reasons(&s.keywords_skipped),
+        keywords_skipped_by_code: count_by_code(&s.keywords_skipped),
         folders_created: s.folders_created,
         albums_created: s.albums_created,
         collections_known: s.collections_known,
@@ -210,31 +246,50 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         collections_moved: s.collections_moved,
         collections_removed: s.collections_removed,
         collections_skipped: reasons(&s.collections_skipped),
+        collections_skipped_by_code: count_by_code(&s.collections_skipped),
         collections_incomplete: reasons(&s.collections_incomplete),
+        collections_incomplete_by_code: count_by_code(&s.collections_incomplete),
         members_skipped: reasons(&s.members_skipped),
+        members_skipped_by_code: count_by_code(&s.members_skipped),
         stacks_grouped: s.stacks_grouped,
         stacks_known: s.stacks_known,
         stack_members_removed: s.stack_members_removed,
         stacks_skipped: reasons(&s.stacks_skipped),
+        stacks_skipped_by_code: count_by_code(&s.stacks_skipped),
         stacks_incomplete: reasons(&s.stacks_incomplete),
+        stacks_incomplete_by_code: count_by_code(&s.stacks_incomplete),
         quick_added: s.quick_added,
         quick_already: s.quick_already,
         quick_removed: s.quick_removed,
         quick_skipped: reasons(&s.quick_skipped),
+        quick_skipped_by_code: count_by_code(&s.quick_skipped),
         quick_incomplete: reasons(&s.quick_incomplete),
+        quick_incomplete_by_code: count_by_code(&s.quick_incomplete),
         smart_created: s.smart_created,
         smart_known: s.smart_known,
         smart_rules_changed: s.smart_rules_changed,
         smart_skipped: reasons(&s.smart_skipped),
+        smart_skipped_by_code: count_by_code(&s.smart_skipped),
         aborted: aborted.map(WriteError::short_reason),
-    }
+    }))
 }
 
-fn reasons(items: &[Skipped]) -> Vec<ReasonJson> {
+/// One element the writer skipped or left incomplete.
+#[derive(Debug, Serialize)]
+pub struct SkipJson {
+    pub reason: String,
+    pub code: &'static str,
+}
+
+/// Entries of a writer list per code.
+pub type ByCode = BTreeMap<&'static str, usize>;
+
+fn reasons(items: &[Skipped]) -> Vec<SkipJson> {
     items
         .iter()
-        .map(|s| ReasonJson {
+        .map(|s| SkipJson {
             reason: s.reason.clone(),
+            code: s.code.as_str(),
         })
         .collect()
 }
@@ -426,7 +481,7 @@ pub fn stop_error(e: &WriteError) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::{Photo, Rating};
+    use model::{Photo, Rating, SkipCode};
 
     fn plan_of(photos: Vec<Photo>) -> Plan {
         let input = WriteInput {
@@ -474,21 +529,34 @@ mod tests {
                         "quick_add": 0, "quick_already": 0, "quick_removed": 0,
                         "smart_albums": 0, "smart_known": 0, "smart_rules_changed": 0},
                 "photos_skipped": [],
+                "photos_skipped_by_code": {},
                 "keywords_skipped": [],
+                "keywords_skipped_by_code": {},
                 "members_skipped": [],
+                "members_skipped_by_code": {},
                 "stacks_skipped": [],
+                "stacks_skipped_by_code": {},
                 "quick_skipped": [],
+                "quick_skipped_by_code": {},
                 "smart_skipped": [],
+                "smart_skipped_by_code": {},
             })
         );
         let s = ApplySummary {
-            photos_incomplete: vec![Skipped {
-                reason: "photo 3: x".into(),
-            }],
+            photos_incomplete: vec![
+                Skipped::new(SkipCode::Rejected, "photo 3: x"),
+                Skipped::new(SkipCode::Rejected, "photo 4: x"),
+            ],
             ..ApplySummary::default()
         };
         let v = serde_json::to_value(applied_json(&s, None)).unwrap();
         assert_eq!(v["photos_incomplete"][0]["reason"], "photo 3: x");
+        assert_eq!(v["photos_incomplete"][0]["code"], "rejected");
+        assert_eq!(
+            v["photos_incomplete_by_code"],
+            serde_json::json!({"rejected": 2})
+        );
+        assert_eq!(v["photos_skipped_by_code"], serde_json::json!({}));
         assert_eq!(v["not_saved"], 0);
         assert_eq!(v["photos_updated"], 0);
         assert_eq!(v["photos_unchanged"], 0);
@@ -607,9 +675,10 @@ mod tests {
             folders_created: 2,
             albums_created: 3,
             collections_renamed: 1,
-            collections_skipped: vec![Skipped {
-                reason: "collection 4: LightCraft rejected `album.create`".into(),
-            }],
+            collections_skipped: vec![Skipped::new(
+                SkipCode::Rejected,
+                "collection 4: LightCraft rejected `album.create`",
+            )],
             ..ApplySummary::default()
         };
         let text = applied_summary(&s);

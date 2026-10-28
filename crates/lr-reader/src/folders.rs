@@ -1,7 +1,7 @@
 //! Reading folders (`AgLibraryFolder` joined with `AgLibraryRootFolder`).
 
 use crate::catalog::{Catalog, ReadError};
-use model::{Folder, Report};
+use model::{Folder, Report, SkipCode, Skipped};
 
 impl Catalog {
     /// Reads all folders, ordered by their catalog id.
@@ -41,7 +41,7 @@ impl Catalog {
             report.read();
             match folder_from_row(row) {
                 Ok(folder) => folders.push(folder),
-                Err(reason) => report.skipped(reason),
+                Err(skip) => report.push_skipped(skip),
             }
         }
         Ok(folders)
@@ -59,17 +59,26 @@ struct FolderRow {
 
 /// Turns a joined row into a folder, or returns the reason it is skipped.
 /// Reasons name catalog ids only, never paths.
-fn folder_from_row(row: FolderRow) -> Result<Folder, String> {
+fn folder_from_row(row: FolderRow) -> Result<Folder, Skipped> {
     let id = row.folder_id;
     if !row.root_row {
         return Err(match row.root_id {
-            Some(root) => format!("folder {id}: root folder {root} not found in catalog"),
-            None => format!("folder {id}: has no root folder"),
+            Some(root) => Skipped::new(
+                SkipCode::RootFolderNotFound,
+                format!("folder {id}: root folder {root} not found in catalog"),
+            ),
+            None => Skipped::new(
+                SkipCode::NoRootFolder,
+                format!("folder {id}: has no root folder"),
+            ),
         });
     }
-    let root = row
-        .root_path
-        .ok_or_else(|| format!("folder {id}: root folder has no path"))?;
+    let root = row.root_path.ok_or_else(|| {
+        Skipped::new(
+            SkipCode::RootFolderNoPath,
+            format!("folder {id}: root folder has no path"),
+        )
+    })?;
     Ok(Folder::new(join_folder_path(
         &root,
         row.rel.as_deref().unwrap_or(""),
@@ -168,7 +177,9 @@ mod tests {
         let mut r = row();
         r.root_row = false;
         r.root_id = Some(99);
-        let reason = folder_from_row(r).unwrap_err();
+        let skip = folder_from_row(r).unwrap_err();
+        assert_eq!(skip.code, SkipCode::RootFolderNotFound);
+        let reason = skip.reason;
         assert!(reason.contains("root") && reason.contains('3') && reason.contains("99"));
         assert!(!reason.contains('/'));
     }
@@ -178,14 +189,18 @@ mod tests {
         let mut r = row();
         r.root_row = false;
         r.root_id = None;
-        assert!(folder_from_row(r).unwrap_err().contains("root"));
+        let skip = folder_from_row(r).unwrap_err();
+        assert_eq!(skip.code, SkipCode::NoRootFolder);
+        assert!(skip.reason.contains("root"));
     }
 
     #[test]
     fn root_without_path_is_skipped() {
         let mut r = row();
         r.root_path = None;
-        let reason = folder_from_row(r).unwrap_err();
+        let skip = folder_from_row(r).unwrap_err();
+        assert_eq!(skip.code, SkipCode::RootFolderNoPath);
+        let reason = skip.reason;
         assert!(reason.contains("root") && reason.contains('3'));
     }
 }

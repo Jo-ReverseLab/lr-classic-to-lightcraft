@@ -4,7 +4,7 @@
 use crate::catalog::{Catalog, ReadError};
 use crate::folders::join_folder_path;
 use crate::xmp::{Unreadable, title_from_blob};
-use model::{Flag, Photo, Rating, Report};
+use model::{Flag, Photo, Rating, Report, SkipCode, Skipped};
 use rusqlite::types::Value;
 use std::collections::HashSet;
 
@@ -208,7 +208,7 @@ impl Catalog {
                     }
                     data.photos.push(photo);
                 }
-                Err(reason) => report.skipped(reason),
+                Err(skip) => report.push_skipped(skip),
             }
         }
         Ok(data)
@@ -236,38 +236,67 @@ fn title_from_value(value: &Value) -> Result<Option<String>, Unreadable> {
 /// read in `id_local` order). Only a converted photo adds its global id, so
 /// a row skipped for any reason does not block a later row with the same
 /// global id.
-fn photo_from_row(row: Row, used: &mut HashSet<String>) -> Result<Photo, String> {
+fn photo_from_row(row: Row, used: &mut HashSet<String>) -> Result<Photo, Skipped> {
     let id = row.image_id;
+    let skip = |code, reason: String| Skipped::new(code, reason);
     if let Some(master) = row.master {
-        return Err(format!(
-            "photo {id}: virtual copy of photo {master} is not converted"
+        return Err(skip(
+            SkipCode::VirtualCopy,
+            format!("photo {id}: virtual copy of photo {master} is not converted"),
         ));
     }
     let ext = row.file.as_ref().map(|(_, ext)| ext.as_str());
     if is_video(row.file_format.as_deref(), ext) {
-        return Err(format!("photo {id}: {VIDEO_SKIP_REASON}"));
+        return Err(skip(
+            SkipCode::Video,
+            format!("photo {id}: {VIDEO_SKIP_REASON}"),
+        ));
     }
     let global_id = match row.global_id {
         Some(g) if !g.trim().is_empty() => g,
-        _ => return Err(format!("photo {id}: missing global id")),
+        _ => {
+            return Err(skip(
+                SkipCode::MissingGlobalId,
+                format!("photo {id}: missing global id"),
+            ));
+        }
     };
     if used.contains(&global_id) {
-        return Err(format!("photo {id}: duplicate global id"));
+        return Err(skip(
+            SkipCode::DuplicateGlobalId,
+            format!("photo {id}: duplicate global id"),
+        ));
     }
-    let (base, ext) = row
-        .file
-        .ok_or_else(|| format!("photo {id}: file row not found in catalog"))?;
-    let rel = row
-        .folder
-        .ok_or_else(|| format!("photo {id}: folder row not found in catalog"))?;
+    let (base, ext) = row.file.ok_or_else(|| {
+        skip(
+            SkipCode::FileRowNotFound,
+            format!("photo {id}: file row not found in catalog"),
+        )
+    })?;
+    let rel = row.folder.ok_or_else(|| {
+        skip(
+            SkipCode::FolderRowNotFound,
+            format!("photo {id}: folder row not found in catalog"),
+        )
+    })?;
     if !row.root_row {
-        return Err(format!("photo {id}: root folder row not found in catalog"));
+        return Err(skip(
+            SkipCode::RootFolderNotFound,
+            format!("photo {id}: root folder row not found in catalog"),
+        ));
     }
-    let root = row
-        .root_path
-        .ok_or_else(|| format!("photo {id}: root folder has no path"))?;
-    let rating = rating_from_value(&row.rating)
-        .ok_or_else(|| format!("photo {id}: rating is not a whole number in 0..=5"))?;
+    let root = row.root_path.ok_or_else(|| {
+        skip(
+            SkipCode::RootFolderNoPath,
+            format!("photo {id}: root folder has no path"),
+        )
+    })?;
+    let rating = rating_from_value(&row.rating).ok_or_else(|| {
+        skip(
+            SkipCode::InvalidRating,
+            format!("photo {id}: rating is not a whole number in 0..=5"),
+        )
+    })?;
     let flag = flag_from_value(&row.pick).unwrap_or_default();
     let folder = join_folder_path(&root, &rel);
     used.insert(global_id.clone());
@@ -490,7 +519,7 @@ mod tests {
             let mut r = row();
             r.global_id = g.map(str::to_owned);
             assert_eq!(
-                photo_from_row(r, &mut HashSet::new()).unwrap_err(),
+                photo_from_row(r, &mut HashSet::new()).unwrap_err().reason,
                 "photo 1: missing global id"
             );
         }
@@ -503,7 +532,7 @@ mod tests {
         let mut r = row();
         r.image_id = 2;
         assert_eq!(
-            photo_from_row(r, &mut used).unwrap_err(),
+            photo_from_row(r, &mut used).unwrap_err().reason,
             "photo 2: duplicate global id"
         );
     }
@@ -534,6 +563,7 @@ mod tests {
         assert!(
             photo_from_row(r, &mut HashSet::new())
                 .unwrap_err()
+                .reason
                 .contains("virtual copy")
         );
         let mut r = row();
@@ -542,6 +572,7 @@ mod tests {
         assert!(
             photo_from_row(r, &mut HashSet::new())
                 .unwrap_err()
+                .reason
                 .contains(VIDEO_SKIP_REASON)
         );
         // ... missing rows and the rating after it.
@@ -550,9 +581,44 @@ mod tests {
         r.file = None;
         r.rating = Value::Integer(9);
         assert_eq!(
-            photo_from_row(r, &mut HashSet::new()).unwrap_err(),
+            photo_from_row(r, &mut HashSet::new()).unwrap_err().reason,
             "photo 1: missing global id"
         );
+    }
+
+    #[test]
+    fn every_skip_has_its_code() {
+        let code = |r: Row| photo_from_row(r, &mut HashSet::new()).unwrap_err().code;
+        let mut r = row();
+        r.master = Some(3);
+        assert_eq!(code(r), SkipCode::VirtualCopy);
+        let mut r = row();
+        r.file_format = Some("VIDEO".into());
+        assert_eq!(code(r), SkipCode::Video);
+        let mut r = row();
+        r.global_id = None;
+        assert_eq!(code(r), SkipCode::MissingGlobalId);
+        let mut used = HashSet::new();
+        assert!(photo_from_row(row(), &mut used).is_ok());
+        assert_eq!(
+            photo_from_row(row(), &mut used).unwrap_err().code,
+            SkipCode::DuplicateGlobalId
+        );
+        let mut r = row();
+        r.file = None;
+        assert_eq!(code(r), SkipCode::FileRowNotFound);
+        let mut r = row();
+        r.folder = None;
+        assert_eq!(code(r), SkipCode::FolderRowNotFound);
+        let mut r = row();
+        r.root_row = false;
+        assert_eq!(code(r), SkipCode::RootFolderNotFound);
+        let mut r = row();
+        r.root_path = None;
+        assert_eq!(code(r), SkipCode::RootFolderNoPath);
+        let mut r = row();
+        r.rating = Value::Integer(9);
+        assert_eq!(code(r), SkipCode::InvalidRating);
     }
 
     #[test]
@@ -562,6 +628,7 @@ mod tests {
         assert!(
             photo_from_row(r, &mut HashSet::new())
                 .unwrap_err()
+                .reason
                 .contains("root")
         );
     }
@@ -570,7 +637,7 @@ mod tests {
     fn skip_reasons_do_not_leak_names() {
         let mut r = row();
         r.rating = Value::Integer(9);
-        let reason = photo_from_row(r, &mut HashSet::new()).unwrap_err();
+        let reason = photo_from_row(r, &mut HashSet::new()).unwrap_err().reason;
         assert!(!reason.contains("IMG") && !reason.contains("/r/"));
     }
 
@@ -578,7 +645,7 @@ mod tests {
     fn virtual_copy_reason_does_not_say_missing() {
         let mut r = row();
         r.master = Some(7);
-        let reason = photo_from_row(r, &mut HashSet::new()).unwrap_err();
+        let reason = photo_from_row(r, &mut HashSet::new()).unwrap_err().reason;
         assert!(reason.contains("virtual copy") && !reason.contains("missing"));
     }
 
@@ -609,7 +676,7 @@ mod tests {
         r.image_id = 4;
         r.file = Some(("clip".into(), "MOV".into()));
         assert_eq!(
-            photo_from_row(r, &mut HashSet::new()).unwrap_err(),
+            photo_from_row(r, &mut HashSet::new()).unwrap_err().reason,
             format!("photo 4: {VIDEO_SKIP_REASON}")
         );
     }
@@ -623,6 +690,7 @@ mod tests {
         assert!(
             photo_from_row(r, &mut HashSet::new())
                 .unwrap_err()
+                .reason
                 .contains(VIDEO_SKIP_REASON)
         );
     }
@@ -632,7 +700,7 @@ mod tests {
         let mut r = row();
         r.file_format = Some("VIDEO".into());
         r.master = Some(4);
-        let reason = photo_from_row(r, &mut HashSet::new()).unwrap_err();
+        let reason = photo_from_row(r, &mut HashSet::new()).unwrap_err().reason;
         assert!(reason.contains("virtual copy") && !reason.contains("video"));
     }
 

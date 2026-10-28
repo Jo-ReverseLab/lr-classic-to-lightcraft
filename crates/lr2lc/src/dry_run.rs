@@ -4,10 +4,10 @@
 
 use crate::labels::{self, LabelCounts, LabelMode};
 use anyhow::{Context, Result, bail};
-use lr_reader::{Catalog, KeywordData, VIDEO_SKIP_REASON, checksum, drop_missing_originals};
+use lr_reader::{Catalog, KeywordData, checksum, drop_missing_originals};
 use model::{
     Collection, CollectionKind, Flag, Folder, Keyword, PathMappings, Photo, QuickCollection,
-    Rating, Report, SmartCollection, Stack,
+    Rating, Report, SkipCode, SmartCollection, Stack,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -202,9 +202,9 @@ fn convert_smart(data: &mut lr_reader::CollectionData) -> Vec<SmartCollection> {
                     out.push(s.clone());
                 }
             }
-            Err(why) => {
+            Err((code, why)) => {
                 let reason = format!("{prefix} smart collection is not converted ({why})");
-                data.report.replace_skipped(&prefix, &reason);
+                data.report.replace_skipped(&prefix, code, &reason);
             }
         }
     }
@@ -379,23 +379,13 @@ fn count_captions(photos: &[Photo]) -> usize {
     photos.iter().filter(|p| p.caption.is_some()).count()
 }
 
-/// Counts the photos skipped as videos.
+/// Counts the photos skipped as videos, by their code.
 fn count_videos(photos: &Report) -> usize {
     photos
         .skipped_items()
         .iter()
-        .filter(|s| is_video_reason(&s.reason))
+        .filter(|s| s.code == SkipCode::Video)
         .count()
-}
-
-/// True for the reader's video reason `photo {id}: <VIDEO_SKIP_REASON>`.
-fn is_video_reason(reason: &str) -> bool {
-    reason
-        .strip_prefix("photo ")
-        .and_then(|rest| rest.split_once(": "))
-        .is_some_and(|(id, text)| {
-            !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) && text == VIDEO_SKIP_REASON
-        })
 }
 
 /// Counts photos per star rating; index `n` holds the photos with `n` stars.
@@ -410,6 +400,7 @@ fn rating_counts(photos: &[Photo]) -> [usize; 6] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lr_reader::VIDEO_SKIP_REASON;
 
     #[test]
     fn convertible_smart_collections_move_to_converted() {
@@ -581,22 +572,17 @@ mod tests {
         for _ in 0..5 {
             photos.read();
         }
-        photos.skipped(format!("photo 2: {VIDEO_SKIP_REASON}"));
-        photos.skipped(format!("photo 4: {VIDEO_SKIP_REASON}"));
-        photos.skipped("photo 3: original file is missing");
-        photos.skipped("photo 9: virtual copy of photo 4 is not converted");
+        photos.skip(SkipCode::Video, format!("photo 2: {VIDEO_SKIP_REASON}"));
+        photos.skip(SkipCode::Video, format!("photo 4: {VIDEO_SKIP_REASON}"));
+        photos.skip(SkipCode::Missing, "photo 3: original file is missing");
+        photos.skip(
+            SkipCode::VirtualCopy,
+            "photo 9: virtual copy of photo 4 is not converted",
+        );
+        // The text alone does not make a video: the code does.
+        photos.skipped(format!("photo 5: {VIDEO_SKIP_REASON}"));
         photos.converted();
         assert_eq!(count_videos(&photos), 2);
         assert_eq!(count_videos(&Report::new()), 0);
-    }
-
-    #[test]
-    fn video_reason_needs_a_photo_id() {
-        assert!(is_video_reason(&format!("photo 12: {VIDEO_SKIP_REASON}")));
-        assert!(!is_video_reason(&format!("photo x: {VIDEO_SKIP_REASON}")));
-        assert!(!is_video_reason(&format!("photo : {VIDEO_SKIP_REASON}")));
-        assert!(!is_video_reason(&format!("keyword 1: {VIDEO_SKIP_REASON}")));
-        assert!(!is_video_reason(VIDEO_SKIP_REASON));
-        assert!(!is_video_reason("photo 1: video files"));
     }
 }

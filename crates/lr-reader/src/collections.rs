@@ -15,7 +15,8 @@
 use crate::catalog::{Catalog, ReadError};
 use crate::smart::parse_smart_rules;
 use model::{
-    Collection, CollectionKind, Photo, QuickCollection, Report, SmartCollection, SmartRules,
+    Collection, CollectionKind, Photo, QuickCollection, Report, SkipCode, Skipped, SmartCollection,
+    SmartRules,
 };
 use rusqlite::types::ValueRef;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -68,7 +69,7 @@ type MemberRow = (Option<i64>, Option<i64>);
 #[derive(Debug, Clone)]
 struct Row {
     /// The kind and name, or the reason why the row itself is skipped.
-    own: Result<(CollectionKind, String), String>,
+    own: Result<(CollectionKind, String), Skipped>,
     parent: ParentRef,
     /// The name, if it is valid text.
     name: Option<String>,
@@ -136,7 +137,7 @@ impl Catalog {
                         members: Vec::new(),
                     });
                 }
-                (_, Err(reason)) => data.report.skipped(reason.clone()),
+                (_, Err(skip)) => data.report.push_skipped(skip.clone()),
                 (Err(_), Ok(())) => unreachable!("own skips are part of the status"),
             }
         }
@@ -146,22 +147,17 @@ impl Catalog {
             data.members.read();
             let target = collection.and_then(|c| index.get(&c).copied());
             let outcome = match (collection, image, target) {
-                (None, _, _) => Err(match image {
-                    Some(p) => format!("photo {p}: collection id is not valid"),
-                    None => "collection and photo ids are not valid".to_string(),
-                }),
-                (Some(c), None, _) => Err(format!("collection {c}: photo id is not valid")),
-                (Some(c), Some(p), None) => Err(if rows.contains_key(&c) {
-                    format!("photo {p}: collection skipped (collection {c})")
-                } else {
-                    format!("photo {p}: collection {c} is unknown")
-                }),
                 (Some(c), Some(p), Some(t)) => {
                     let folder = matches!(t, Target::Collection(i)
                         if data.collections[i].kind == CollectionKind::Folder);
                     member_check(c, folder, p, converted.contains(&p), seen.contains(&(c, p)))
                         .map(|()| (c, p, t))
                 }
+                _ => Err(unplaced_member(
+                    collection,
+                    image,
+                    collection.is_some_and(|c| rows.contains_key(&c)),
+                )),
             };
             match outcome {
                 Ok((c, p, t)) => {
@@ -173,7 +169,7 @@ impl Catalog {
                     }
                     data.members.converted();
                 }
-                Err(reason) => data.members.skipped(reason),
+                Err(skip) => data.members.push_skipped(skip),
             }
         }
         Ok(data)
@@ -183,7 +179,7 @@ impl Catalog {
     /// collection with the given id.
     fn collection_rows(
         &self,
-        mut smart: impl FnMut(i64) -> String,
+        mut smart: impl FnMut(i64) -> Skipped,
     ) -> Result<BTreeMap<i64, Row>, ReadError> {
         let mut stmt = self
             .conn
@@ -198,10 +194,8 @@ impl Catalog {
                 let creation = text(row.get_ref(1)?);
                 let system_only = is_nonzero(row.get_ref(2)?);
                 let name = text(row.get_ref(3)?);
-                let own = classify(id, creation, system_only, &mut smart).and_then(|kind| {
-                    name.map(|name| (kind, name.to_owned()))
-                        .ok_or_else(|| format!("collection {id}: name is not valid text"))
-                });
+                let own = classify(id, creation, system_only, &mut smart)
+                    .and_then(|kind| named(id, kind, name));
                 let name = name.map(str::to_owned);
                 let parent = parent_ref(row.get_ref(4)?);
                 Ok((
@@ -301,6 +295,33 @@ fn smart_collections(
         .collect()
 }
 
+/// Why a member row is skipped that has no valid ids or no converted
+/// collection; `known` is true if its collection has a row.
+fn unplaced_member(collection: Option<i64>, image: Option<i64>, known: bool) -> Skipped {
+    match (collection, image) {
+        (None, Some(p)) => Skipped::new(
+            SkipCode::CollectionIdInvalid,
+            format!("photo {p}: collection id is not valid"),
+        ),
+        (None, None) => Skipped::new(
+            SkipCode::IdsInvalid,
+            "collection and photo ids are not valid",
+        ),
+        (Some(c), None) => Skipped::new(
+            SkipCode::CollectionPhotoInvalid,
+            format!("collection {c}: photo id is not valid"),
+        ),
+        (Some(c), Some(p)) if known => Skipped::new(
+            SkipCode::CollectionSkipped,
+            format!("photo {p}: collection skipped (collection {c})"),
+        ),
+        (Some(c), Some(p)) => Skipped::new(
+            SkipCode::CollectionUnknown,
+            format!("photo {p}: collection {c} is unknown"),
+        ),
+    }
+}
+
 /// Checks one member `photo` of the converted collection `c`; `folder` is
 /// true if `c` is a collection set.
 fn member_check(
@@ -309,17 +330,22 @@ fn member_check(
     photo: i64,
     photo_converted: bool,
     repeated: bool,
-) -> Result<(), String> {
+) -> Result<(), Skipped> {
     if folder {
-        Err(format!(
-            "photo {photo}: collection {c} is a collection set and holds no photos"
+        Err(Skipped::new(
+            SkipCode::CollectionIsSet,
+            format!("photo {photo}: collection {c} is a collection set and holds no photos"),
         ))
     } else if !photo_converted {
-        Err(format!(
-            "photo {photo}: skipped or unknown photo, not added to collection {c}"
+        Err(Skipped::new(
+            SkipCode::PhotoNotConverted,
+            format!("photo {photo}: skipped or unknown photo, not added to collection {c}"),
         ))
     } else if repeated {
-        Err(format!("photo {photo}: duplicate member of collection {c}"))
+        Err(Skipped::new(
+            SkipCode::DuplicateMember,
+            format!("photo {photo}: duplicate member of collection {c}"),
+        ))
     } else {
         Ok(())
     }
@@ -336,15 +362,36 @@ fn smart_rules(contents: Option<&[Option<String>]>) -> Option<SmartRules> {
 
 /// The skip reason of smart collection `id`. It names the first criterion
 /// only, never a value, operation or combine text.
-fn smart_reason(id: i64, rules: Option<&SmartRules>) -> String {
-    let detail = match rules {
-        None => "unreadable rules".to_string(),
+fn smart_reason(id: i64, rules: Option<&SmartRules>) -> Skipped {
+    let (code, detail) = match rules {
+        None => (SkipCode::SmartUnreadable, "unreadable rules".to_string()),
         Some(r) => match r.rules.first() {
-            None => "no criteria".to_string(),
-            Some(first) => format!("first criterion: {}", first.criterion),
+            None => (SkipCode::SmartNoCriteria, "no criteria".to_string()),
+            Some(first) => (
+                SkipCode::SmartUntranslatable,
+                format!("first criterion: {}", first.criterion),
+            ),
         },
     };
-    format!("collection {id}: smart collection is not converted ({detail})")
+    Skipped::new(
+        code,
+        format!("collection {id}: smart collection is not converted ({detail})"),
+    )
+}
+
+/// The kind and name of collection `id`, or why it is skipped: its name
+/// is not valid text.
+fn named(
+    id: i64,
+    kind: CollectionKind,
+    name: Option<&str>,
+) -> Result<(CollectionKind, String), Skipped> {
+    name.map(|name| (kind, name.to_owned())).ok_or_else(|| {
+        Skipped::new(
+            SkipCode::NameInvalid,
+            format!("collection {id}: name is not valid text"),
+        )
+    })
 }
 
 /// The kind of a collection, or why it is skipped. The system flag wins
@@ -355,28 +402,33 @@ fn classify(
     id: i64,
     creation_id: Option<&str>,
     system_only: bool,
-    smart: impl FnOnce(i64) -> String,
-) -> Result<CollectionKind, String> {
+    smart: impl FnOnce(i64) -> Skipped,
+) -> Result<CollectionKind, Skipped> {
     if system_only {
-        return Err(format!(
-            "collection {id}: more than one quick collection; not converted"
+        return Err(Skipped::new(
+            SkipCode::QuickDuplicate,
+            format!("collection {id}: more than one quick collection; not converted"),
         ));
     }
     match creation_id {
         Some(PLAIN) => Ok(CollectionKind::Album),
         Some(SET) => Ok(CollectionKind::Folder),
         Some(SMART) => Err(smart(id)),
-        Some(other) => Err(format!(
-            "collection {id}: collection type {other:?} is not converted"
+        Some(other) => Err(Skipped::new(
+            SkipCode::CollectionKindUnsupported,
+            format!("collection {id}: collection type {other:?} is not converted"),
         )),
-        None => Err(format!("collection {id}: collection type is missing")),
+        None => Err(Skipped::new(
+            SkipCode::CollectionKindMissing,
+            format!("collection {id}: collection type is missing"),
+        )),
     }
 }
 
 /// The final status of every row: converted, or the reason why it is
 /// skipped (its own reason, or one about its parent).
-fn resolve(rows: &BTreeMap<i64, Row>) -> HashMap<i64, Result<(), String>> {
-    let mut status: HashMap<i64, Result<(), String>> = HashMap::new();
+fn resolve(rows: &BTreeMap<i64, Row>) -> HashMap<i64, Result<(), Skipped>> {
+    let mut status: HashMap<i64, Result<(), Skipped>> = HashMap::new();
     for (&id, row) in rows {
         if let Err(reason) = &row.own {
             status.insert(id, Err(reason.clone()));
@@ -401,17 +453,24 @@ fn resolve(rows: &BTreeMap<i64, Row>) -> HashMap<i64, Result<(), String>> {
                 ParentRef::Top => break (Some(Ok(())), path.len()),
                 ParentRef::Invalid => {
                     break (
-                        Some(Err(format!("collection {cur}: parent is not a valid id"))),
+                        Some(Err(Skipped::new(
+                            SkipCode::ParentInvalid,
+                            format!("collection {cur}: parent is not a valid id"),
+                        ))),
                         path.len(),
                     );
                 }
                 ParentRef::Id(p) => p,
             };
             let problem = match rows.get(&p).map(|r| &r.own) {
-                None => Some(format!("collection {cur}: parent {p} is missing")),
-                Some(Err(_)) => Some(format!("collection {cur}: parent {p} is skipped")),
-                Some(Ok((CollectionKind::Album, _))) => Some(format!(
-                    "collection {cur}: parent {p} is not a collection set"
+                None => Some(Skipped::new(
+                    SkipCode::ParentMissing,
+                    format!("collection {cur}: parent {p} is missing"),
+                )),
+                Some(Err(_)) => Some(parent_skipped(cur, p)),
+                Some(Ok((CollectionKind::Album, _))) => Some(Skipped::new(
+                    SkipCode::ParentNotSet,
+                    format!("collection {cur}: parent {p} is not a collection set"),
                 )),
                 Some(Ok((CollectionKind::Folder, _))) => None,
             };
@@ -421,7 +480,7 @@ fn resolve(rows: &BTreeMap<i64, Row>) -> HashMap<i64, Result<(), String>> {
             if let Some(known) = status.get(&p) {
                 let mine = match known {
                     Ok(()) => Ok(()),
-                    Err(_) => Err(format!("collection {cur}: parent {p} is skipped")),
+                    Err(_) => Err(parent_skipped(cur, p)),
                 };
                 break (Some(mine), path.len());
             }
@@ -430,7 +489,10 @@ fn resolve(rows: &BTreeMap<i64, Row>) -> HashMap<i64, Result<(), String>> {
         for &id in &path[cycle_from..] {
             status.insert(
                 id,
-                Err(format!("collection {id}: parent chain forms a cycle")),
+                Err(Skipped::new(
+                    SkipCode::ParentCycle,
+                    format!("collection {id}: parent chain forms a cycle"),
+                )),
             );
         }
         let mut below = cycle_from;
@@ -443,12 +505,20 @@ fn resolve(rows: &BTreeMap<i64, Row>) -> HashMap<i64, Result<(), String>> {
             let (id, parent) = (path[i], path[i + 1]);
             let mine = match status[&parent] {
                 Ok(()) => Ok(()),
-                Err(_) => Err(format!("collection {id}: parent {parent} is skipped")),
+                Err(_) => Err(parent_skipped(id, parent)),
             };
             status.insert(id, mine);
         }
     }
     status
+}
+
+/// The skip entry of collection `id` whose parent `parent` is skipped.
+fn parent_skipped(id: i64, parent: i64) -> Skipped {
+    Skipped::new(
+        SkipCode::ParentSkipped,
+        format!("collection {id}: parent {parent} is skipped"),
+    )
 }
 
 /// Where a `parent` value points. NULL and 0 both mean top level, as in
@@ -502,11 +572,15 @@ pub(crate) fn is_nonzero(value: ValueRef<'_>) -> bool {
 mod tests {
     use super::*;
 
+    fn sk(code: SkipCode, reason: &str) -> Skipped {
+        Skipped::new(code, reason)
+    }
+
     fn row(kind: Option<CollectionKind>, parent: ParentRef) -> Row {
         Row {
             own: kind
                 .map(|k| (k, String::new()))
-                .ok_or_else(|| "own".to_string()),
+                .ok_or_else(|| sk(SkipCode::Unspecified, "own")),
             parent,
             name: Some(String::new()),
             quick: false,
@@ -516,7 +590,7 @@ mod tests {
     #[test]
     fn smart_collections_need_rules_and_a_text_name() {
         let named = |name: Option<&str>, parent| Row {
-            own: Err("smart".into()),
+            own: Err(sk(SkipCode::SmartUnreadable, "smart")),
             parent,
             name: name.map(str::to_owned),
             quick: false,
@@ -546,8 +620,8 @@ mod tests {
         assert_eq!(got, want);
     }
 
-    fn smart(id: i64) -> String {
-        format!("smart {id}")
+    fn smart(id: i64) -> Skipped {
+        sk(SkipCode::SmartUnreadable, &format!("smart {id}"))
     }
 
     fn rules(criteria: &[&str]) -> SmartRules {
@@ -570,15 +644,24 @@ mod tests {
     fn smart_reasons_name_the_first_criterion_only() {
         assert_eq!(
             smart_reason(7, Some(&rules(&["rating", "pick"]))),
-            "collection 7: smart collection is not converted (first criterion: rating)"
+            sk(
+                SkipCode::SmartUntranslatable,
+                "collection 7: smart collection is not converted (first criterion: rating)"
+            )
         );
         assert_eq!(
             smart_reason(7, Some(&rules(&[]))),
-            "collection 7: smart collection is not converted (no criteria)"
+            sk(
+                SkipCode::SmartNoCriteria,
+                "collection 7: smart collection is not converted (no criteria)"
+            )
         );
         assert_eq!(
             smart_reason(7, None),
-            "collection 7: smart collection is not converted (unreadable rules)"
+            sk(
+                SkipCode::SmartUnreadable,
+                "collection 7: smart collection is not converted (unreadable rules)"
+            )
         );
     }
 
@@ -612,17 +695,20 @@ mod tests {
             classify(1, Some(SET), false, smart),
             Ok(CollectionKind::Folder)
         );
-        assert_eq!(
-            classify(5, Some(SMART), false, smart),
-            Err("smart 5".into())
-        );
+        assert_eq!(classify(5, Some(SMART), false, smart), Err(smart(5)));
         assert_eq!(
             classify(9, Some("com.example.x"), false, smart),
-            Err("collection 9: collection type \"com.example.x\" is not converted".into())
+            Err(sk(
+                SkipCode::CollectionKindUnsupported,
+                "collection 9: collection type \"com.example.x\" is not converted"
+            ))
         );
         assert_eq!(
             classify(10, None, false, smart),
-            Err("collection 10: collection type is missing".into())
+            Err(sk(
+                SkipCode::CollectionKindMissing,
+                "collection 10: collection type is missing"
+            ))
         );
     }
 
@@ -631,7 +717,10 @@ mod tests {
         for creation in [Some(PLAIN), Some(SET), Some(SMART), None] {
             assert_eq!(
                 classify(8, creation, true, smart),
-                Err("collection 8: more than one quick collection; not converted".into())
+                Err(sk(
+                    SkipCode::QuickDuplicate,
+                    "collection 8: more than one quick collection; not converted"
+                ))
             );
         }
     }
@@ -699,7 +788,8 @@ mod tests {
         .into_iter()
         .collect();
         let s = resolve(&rows);
-        let reason = |id: i64| s[&id].clone().err().unwrap_or_default();
+        let reason = |id: i64| s[&id].clone().err().map(|e| e.reason).unwrap_or_default();
+        let code = |id: i64| s[&id].clone().err().map(|e| e.code);
         for id in [1, 2, 3] {
             assert_eq!(s[&id], Ok(()), "{id}");
         }
@@ -714,6 +804,14 @@ mod tests {
         assert_eq!(reason(12), "collection 12: parent chain forms a cycle");
         assert_eq!(reason(13), "collection 13: parent is not a valid id");
         assert_eq!(s.len(), rows.len());
+        assert_eq!(code(4), Some(SkipCode::ParentMissing));
+        assert_eq!(code(5), Some(SkipCode::ParentNotSet));
+        assert_eq!(code(7), Some(SkipCode::ParentSkipped));
+        assert_eq!(code(8), Some(SkipCode::ParentSkipped));
+        assert_eq!(code(9), Some(SkipCode::ParentCycle));
+        assert_eq!(code(11), Some(SkipCode::ParentSkipped));
+        assert_eq!(code(12), Some(SkipCode::ParentCycle));
+        assert_eq!(code(13), Some(SkipCode::ParentInvalid));
     }
 
     #[test]
@@ -728,19 +826,57 @@ mod tests {
     }
 
     #[test]
+    fn unplaced_members_have_their_codes() {
+        let code = |c, p, known| unplaced_member(c, p, known).code;
+        assert_eq!(code(None, Some(3), false), SkipCode::CollectionIdInvalid);
+        assert_eq!(code(None, None, true), SkipCode::IdsInvalid);
+        assert_eq!(code(Some(7), None, true), SkipCode::CollectionPhotoInvalid);
+        assert_eq!(code(Some(7), Some(3), true), SkipCode::CollectionSkipped);
+        assert_eq!(code(Some(7), Some(3), false), SkipCode::CollectionUnknown);
+        assert_eq!(
+            unplaced_member(Some(7), Some(3), false).reason,
+            "photo 3: collection 7 is unknown"
+        );
+        assert_eq!(
+            unplaced_member(None, None, false).reason,
+            "collection and photo ids are not valid"
+        );
+    }
+
+    #[test]
+    fn name_must_be_text() {
+        assert_eq!(
+            named(4, CollectionKind::Album, Some("a")),
+            Ok((CollectionKind::Album, "a".to_string()))
+        );
+        let skip = named(4, CollectionKind::Album, None).unwrap_err();
+        assert_eq!(skip.code, SkipCode::NameInvalid);
+        assert_eq!(skip.reason, "collection 4: name is not valid text");
+    }
+
+    #[test]
     fn member_checks_in_order() {
         assert_eq!(member_check(7, false, 3, true, false), Ok(()));
         assert_eq!(
             member_check(7, false, 3, false, true),
-            Err("photo 3: skipped or unknown photo, not added to collection 7".into())
+            Err(sk(
+                SkipCode::PhotoNotConverted,
+                "photo 3: skipped or unknown photo, not added to collection 7"
+            ))
         );
         assert_eq!(
             member_check(7, false, 3, true, true),
-            Err("photo 3: duplicate member of collection 7".into())
+            Err(sk(
+                SkipCode::DuplicateMember,
+                "photo 3: duplicate member of collection 7"
+            ))
         );
         assert_eq!(
             member_check(7, true, 3, true, false),
-            Err("photo 3: collection 7 is a collection set and holds no photos".into())
+            Err(sk(
+                SkipCode::CollectionIsSet,
+                "photo 3: collection 7 is a collection set and holds no photos"
+            ))
         );
     }
 }
