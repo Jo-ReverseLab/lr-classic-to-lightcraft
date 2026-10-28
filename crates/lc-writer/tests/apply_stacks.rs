@@ -428,9 +428,9 @@ fn an_incomplete_stack_is_sent_again_by_the_next_run() {
 fn lost_connection_at_the_second_group_repeats_nothing_after_the_next_run() {
     let env = env();
     let mut config = Config::new(&env.library);
-    // 1 keyword.list, 2-5 imports, 6 select, 7 first group, 8 select, 9 the
+    // 1 keyword.list, 2-7 imports, 8 select, 9 first group, 10 select, 11 the
     // second group.
-    config.close_at = Some(9);
+    config.close_at = Some(11);
     let fake = FakeLightCraft::start(config);
     let input = input_with(vec![stack(1, &[101, 102]), stack(2, &[104, 103])]);
     let mut state_in = State::load(&env.state_file).unwrap();
@@ -459,7 +459,7 @@ fn lost_connection_at_the_second_group_repeats_nothing_after_the_next_run() {
 fn lost_connection_at_a_select_makes_no_duplicate() {
     let env = env();
     let mut config = Config::new(&env.library);
-    config.close_at = Some(8);
+    config.close_at = Some(10);
     let fake = FakeLightCraft::start(config);
     let input = input_with(vec![stack(1, &[101, 102]), stack(2, &[104, 103])]);
     let (result, _) = run(&fake, &env, &input);
@@ -474,7 +474,7 @@ fn lost_connection_at_a_select_makes_no_duplicate() {
 fn a_group_that_took_effect_without_an_answer_is_repeated_without_harm() {
     let env = env();
     let mut config = Config::new(&env.library);
-    config.close_at = Some(7);
+    config.close_at = Some(9);
     config.close_applies = true;
     let fake = FakeLightCraft::start(config);
     let input = input_with(vec![stack(1, &[101, 102])]);
