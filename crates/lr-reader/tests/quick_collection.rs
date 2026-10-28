@@ -61,7 +61,11 @@ fn the_first_quick_collection_by_id_is_taken() {
     let d = read(&edge(dir.path()), |p| p);
     let quick = d.quick.expect("quick collection");
     assert_eq!(quick.lightroom_id, e::QUICK_IDS[0]);
-    assert!(d.collections.iter().all(|c| !e::QUICK_IDS.contains(&c.lightroom_id)));
+    assert!(
+        d.collections
+            .iter()
+            .all(|c| !e::QUICK_IDS.contains(&c.lightroom_id))
+    );
 }
 
 #[test]
@@ -76,7 +80,10 @@ fn a_second_quick_collection_is_skipped_with_a_reason() {
             .any(|r| r.contains("more than one quick collection") && has_number(r, second)),
         "{r:?}"
     );
-    assert!(!r.iter().any(|r| has_number(r, first) && r.contains("quick")));
+    assert!(
+        !r.iter()
+            .any(|r| has_number(r, first) && r.contains("quick"))
+    );
     // Balance: the quick collection is converted, not skipped.
     assert_eq!(d.report.read_count() as i64, e::COLLECTIONS);
     assert_eq!(d.report.skipped_count() as i64, e::SKIPPED - 1);
@@ -97,7 +104,11 @@ fn the_real_and_the_integer_flag_both_count() {
         .unwrap();
     let d = read(&path, |p| p);
     assert_eq!(d.quick.expect("quick").lightroom_id, e::QUICK_IDS[1]);
-    assert!(!reasons(&d.report).iter().any(|r| r.contains("more than one")));
+    assert!(
+        !reasons(&d.report)
+            .iter()
+            .any(|r| r.contains("more than one"))
+    );
 }
 
 #[test]
@@ -161,7 +172,9 @@ fn reading_leaves_the_catalog_unchanged() {
 fn no_collection_name_appears_in_a_reason() {
     let dir = tempfile::tempdir().unwrap();
     let d = read(&edge(dir.path()), |p| p);
-    let all = [reasons(&d.report), reasons(&d.members)].concat().join("\n");
+    let all = [reasons(&d.report), reasons(&d.members)]
+        .concat()
+        .join("\n");
     for name in ["zyx-quick-real", "zyx-quick-int"] {
         assert!(!all.contains(name), "{name}");
     }

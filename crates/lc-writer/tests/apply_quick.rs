@@ -131,7 +131,10 @@ fn state(env: &Env) -> Value {
 }
 
 fn quick_members(fake: &FakeLightCraft) -> Vec<i64> {
-    let mut m = fake.quick_collection().map(|a| a.photos).unwrap_or_default();
+    let mut m = fake
+        .quick_collection()
+        .map(|a| a.photos)
+        .unwrap_or_default();
     m.sort_unstable();
     m
 }
@@ -225,7 +228,10 @@ fn members_that_lightcraft_already_has_are_never_sent() {
     let (s, commands) = ok(&fake, &env, &i);
     assert_eq!(of(&commands, "album.setTarget").len(), 1);
     assert_eq!(of(&commands, "catalog.query").len(), 1);
-    assert!(of(&commands, "album.toggleTarget").is_empty(), "{commands:?}");
+    assert!(
+        of(&commands, "album.toggleTarget").is_empty(),
+        "{commands:?}"
+    );
     assert_eq!((s.quick_added, s.quick_already), (0, 2));
     assert_eq!(quick_members(&fake), vec![1001, 1003]);
     // Mixed: one of three is new.
@@ -290,14 +296,23 @@ fn two_albums_named_quick_collection_are_ambiguous() {
     let (s, commands) = ok(&fake, &env, &input(4, &[101, 102]));
     assert_eq!(s.quick_added, 0);
     assert_eq!(s.quick_skipped.len(), 1, "{:?}", s.quick_skipped);
-    assert!(s.quick_skipped[0].reason.to_lowercase().contains("ambiguous"));
+    assert!(
+        s.quick_skipped[0]
+            .reason
+            .to_lowercase()
+            .contains("ambiguous")
+    );
     assert!(of(&commands, "album.toggleTarget").is_empty());
     assert!(of(&commands, "library.select").iter().all(|s| {
         // only photo-command selects (imports need none: no ratings)
         s["ids"] != json!([1001, 1002])
     }));
     assert!(fake.albums().iter().all(|a| a.photos.is_empty()));
-    assert!(state(&env)["quick"]["members"].as_array().is_none_or(Vec::is_empty));
+    assert!(
+        state(&env)["quick"]["members"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+    );
     // The photos themselves were written.
     assert_eq!(fake.photos().len(), 4);
 }
@@ -310,7 +325,10 @@ fn a_member_removed_in_lightroom_is_only_counted() {
     let (s, commands) = ok(&fake, &env, &input(4, &[103]));
     assert_eq!(s.quick_removed, 1);
     assert_eq!((s.quick_added, s.quick_already), (0, 1));
-    assert!(of(&commands, "album.toggleTarget").is_empty(), "{commands:?}");
+    assert!(
+        of(&commands, "album.toggleTarget").is_empty(),
+        "{commands:?}"
+    );
     assert!(of(&commands, "album.clearQuick").is_empty());
     assert_eq!(quick_members(&fake), vec![1001, 1003]);
     // Still recorded: nothing is forgotten silently.

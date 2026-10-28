@@ -125,7 +125,10 @@ fn apply_adds_the_quick_collection_and_the_numbers_add_up() {
     assert!(fake.commands().iter().all(|(c, _)| c != "album.clearQuick"));
     // The report names the quick members as converted.
     let m = &r["collection_members"];
-    assert_eq!(n(&m["read"]), n(&m["converted"]) + n(&m["skipped"]).max(0));
+    assert_eq!(
+        n(&m["read"]),
+        n(&m["converted"]) + m["skipped"].as_array().unwrap().len()
+    );
 }
 
 #[test]
@@ -140,7 +143,13 @@ fn second_run_sends_no_quick_command_and_creates_no_duplicates() {
     assert_eq!(n(&r["writer"]["quick_added"]), 0);
     assert_eq!(n(&r["writer"]["quick_already"]), q::MEMBERS.len());
     assert_eq!(fake.quick_collection().unwrap().photos, members);
-    assert_eq!(fake.albums().iter().filter(|a| a.name == "Quick Collection").count(), 1);
+    assert_eq!(
+        fake.albums()
+            .iter()
+            .filter(|a| a.name == "Quick Collection")
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -151,7 +160,11 @@ fn dry_run_reports_the_plan_and_writes_nothing() {
     assert_eq!(n(&r["writer"]["planned"]["quick_add"]), q::MEMBERS.len());
     assert!(fake.quick_collection().is_none());
     assert!(fake.albums().is_empty());
-    assert!(fake.write_commands().is_empty(), "{:?}", fake.write_commands());
+    assert!(
+        fake.write_commands().is_empty(),
+        "{:?}",
+        fake.write_commands()
+    );
     assert!(!s.work.path().join("Test.lightcraft.lr2lc.json").exists());
     assert_eq!(n(&r["collections"]["quick"]), 1);
 }
@@ -163,18 +176,33 @@ fn edge_fixture_reports_one_quick_collection_and_one_skipped() {
     let r = s.ok(fake.port(), true);
     assert_eq!(n(&r["collections"]["quick"]), 1);
     assert_eq!(n(&r["collections"]["read"]), e::COLLECTIONS as usize);
-    assert_eq!(r["collections"]["skipped"].as_array().unwrap().len(), e::SKIPPED as usize - 1);
+    assert_eq!(
+        r["collections"]["skipped"].as_array().unwrap().len(),
+        e::SKIPPED as usize - 1
+    );
     let reasons: Vec<String> = r["collections"]["skipped"]
         .as_array()
         .unwrap()
         .iter()
         .map(|s| s["reason"].as_str().unwrap().to_lowercase())
         .collect();
-    assert!(reasons.iter().any(|r| r.contains("more than one quick collection")));
-    assert!(!reasons.iter().any(|r| r.contains("14") && r.contains("quick")));
+    assert!(
+        reasons
+            .iter()
+            .any(|r| r.contains("more than one quick collection"))
+    );
+    assert!(
+        !reasons
+            .iter()
+            .any(|r| r.contains("14") && r.contains("quick"))
+    );
     // Its only member has no original here: nothing to add, nothing sent.
     assert_eq!(n(&r["writer"]["quick_added"]), 0);
-    assert!(fake.commands().iter().all(|(c, _)| c != "album.toggleTarget"));
+    assert!(
+        fake.commands()
+            .iter()
+            .all(|(c, _)| c != "album.toggleTarget")
+    );
     // Albums are written as before.
     assert_eq!(n(&r["writer"]["albums_created"]), e::ALBUMS as usize);
 }
