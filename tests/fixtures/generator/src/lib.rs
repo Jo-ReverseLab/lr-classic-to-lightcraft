@@ -408,6 +408,57 @@ pub mod video_edge {
     pub const SKIPPED: i64 = 6;
 }
 
+/// Counts and ids of the stack fixture ([`write_stack_catalog_with_files`]).
+///
+/// It is the video fixture ([`video_edge`]) plus folder stacks. Photos 1, 3
+/// and 6..=19 are converted by `Catalog::photos`; 2, 4, 5 are videos, 20 and
+/// 21 virtual copies. Photo 3 (missing original) is not used by any stack so
+/// that reader and CLI see the same members.
+pub mod stack_edge {
+    /// Rows in `AgLibraryFolderStack`.
+    pub const STACKS: i64 = 8;
+    /// Rows in `AgLibraryFolderStackImage`.
+    pub const MEMBER_ROWS: i64 = 20;
+    /// Converted stacks and their members, top first.
+    ///
+    /// - 1: two photos, `position` REAL (rows inserted out of order)
+    /// - 2: three photos, `position` INTEGER, `collapsed` 1
+    /// - 5: photos 13 and 14; member 5 is a video (skipped)
+    /// - 6: photos 15 and 16
+    /// - 7: photos 17 and 18; member 16 is already in stack 6 (skipped)
+    /// - 8: photos 19 and 1; no member has position 1 (`no_top`); member 999
+    ///   does not exist (skipped)
+    pub const STACK_MEMBERS: [(i64, &[i64]); 6] = [
+        (1, &[6, 7]),
+        (2, &[9, 10, 8]),
+        (5, &[13, 14]),
+        (6, &[15, 16]),
+        (7, &[17, 18]),
+        (8, &[19, 1]),
+    ];
+    pub const CONVERTED: i64 = 6;
+    /// Stack 3 (original 11 plus virtual copy 20) and stack 4 (photo 12 plus
+    /// video 4) keep fewer than two photos.
+    pub const SKIPPED_STACKS: [i64; 2] = [3, 4];
+    pub const SKIPPED: i64 = 2;
+    pub const MEMBERS_CONVERTED: i64 = 13;
+    /// Member rows skipped: stack 3 (2 rows), stack 4 (2), video 5, photo
+    /// 16 in stack 7, photo 999.
+    pub const MEMBERS_SKIPPED: i64 = 7;
+    /// Converted stacks with `collapsed` 1 (stack 2).
+    pub const COLLAPSED: i64 = 1;
+    /// Converted stacks without a member at position 1 (stack 8).
+    pub const NO_TOP: i64 = 1;
+    /// Member photo of the skipped virtual copy / video / unknown rows.
+    pub const VIRTUAL_COPY_MEMBER: i64 = 20;
+    pub const VIDEO_MEMBERS: [i64; 2] = [4, 5];
+    pub const UNKNOWN_MEMBER: i64 = 999;
+    /// Photo in two stacks: kept in the first (6), skipped in the second (7).
+    pub const DOUBLE_PHOTO: i64 = 16;
+    pub const DOUBLE_FIRST: i64 = 6;
+    pub const DOUBLE_SECOND: i64 = 7;
+}
+
 /// Counts and ids of the collection fixture ([`write_collection_catalog`]).
 ///
 /// It is the small fixture with all collection rows replaced. Photos used
@@ -1181,6 +1232,83 @@ fn add_collection_edges(path: &Path) -> Result<()> {
             "INSERT INTO AgLibraryCollectionImage (collection, image, pick, positionInCollection) VALUES (?1, ?2, 0, ?3)",
             params![coll, image, pos],
         )?;
+    }
+    c.execute_batch("COMMIT")?;
+    Ok(())
+}
+
+/// Writes the video fixture plus the folder stacks described in
+/// [`stack_edge`] as `dir/stacks.lrcat` with placeholder originals.
+pub fn write_stack_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("stacks.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_video_edges(&catalog)?;
+    add_stack_edges(&catalog)?;
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+/// Removes the three folder stack tables from the catalog at `path`.
+pub fn drop_stack_tables(path: &Path) -> Result<()> {
+    let c = Connection::open(path)?;
+    c.execute_batch(
+        "DROP TABLE IF EXISTS AgLibraryFolderStackData; \
+         DROP TABLE IF EXISTS AgLibraryFolderStackImage; \
+         DROP TABLE IF EXISTS AgLibraryFolderStack;",
+    )
+}
+
+/// Moves photo `image` to position `position` (REAL) of the stack member
+/// rows in the catalog at `path`.
+pub fn set_stack_member_position(path: &Path, stack: i64, image: i64, position: f64) -> Result<()> {
+    let c = Connection::open(path)?;
+    c.execute(
+        "UPDATE AgLibraryFolderStackImage SET position = ?3 WHERE stack = ?1 AND image = ?2",
+        params![stack, image, position],
+    )?;
+    Ok(())
+}
+
+fn add_stack_edges(path: &Path) -> Result<()> {
+    use rusqlite::types::Value as V;
+    let c = Connection::open(path)?;
+    c.execute_batch(
+        "BEGIN; \
+         CREATE TABLE AgLibraryFolderStack (id_local INTEGER PRIMARY KEY, id_global, collapsed INTEGER, text); \
+         CREATE TABLE AgLibraryFolderStackImage (id_local INTEGER PRIMARY KEY, collapsed INTEGER, image INTEGER, position, stack INTEGER); \
+         CREATE TABLE AgLibraryFolderStackData (stack INTEGER, stackCount INTEGER, stackParent INTEGER);",
+    )?;
+    // (stack, collapsed, [(image, position)]) in row insertion order.
+    let r = |x: f64| V::Real(x);
+    let i = |x: i64| V::Integer(x);
+    let stacks: Vec<(i64, i64, Vec<(i64, V)>)> = vec![
+        (1, 0, vec![(7, r(2.0)), (6, r(1.0))]),
+        (2, 1, vec![(10, i(2)), (8, i(3)), (9, i(1))]),
+        (3, 0, vec![(11, r(1.0)), (20, r(2.0))]),
+        (4, 0, vec![(12, r(1.0)), (4, r(2.0))]),
+        (5, 0, vec![(13, r(1.0)), (14, r(2.0)), (5, r(3.0))]),
+        (6, 0, vec![(15, r(1.0)), (16, r(2.0))]),
+        (7, 0, vec![(17, r(1.0)), (18, r(2.0)), (16, r(3.0))]),
+        (8, 0, vec![(19, r(2.0)), (1, r(3.0)), (999, r(4.0))]),
+    ];
+    let mut row = 0;
+    for (stack, collapsed, members) in stacks {
+        c.execute(
+            "INSERT INTO AgLibraryFolderStack (id_local, id_global, collapsed, text) VALUES (?1, ?2, ?3, '')",
+            params![stack, gid("stack", stack), collapsed],
+        )?;
+        c.execute(
+            "INSERT INTO AgLibraryFolderStackData (stack, stackCount, stackParent) VALUES (?1, ?2, ?3)",
+            params![stack, members.len() as i64, members[0].0],
+        )?;
+        for (image, position) in members {
+            row += 1;
+            c.execute(
+                "INSERT INTO AgLibraryFolderStackImage (id_local, collapsed, image, position, stack) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![row, collapsed, image, position, stack],
+            )?;
+        }
     }
     c.execute_batch("COMMIT")?;
     Ok(())
