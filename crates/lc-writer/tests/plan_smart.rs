@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! Acceptance tests for the pure planning rules of smart collections (task
 //! P5b-4b), module `lc_writer::plan`.
 //!

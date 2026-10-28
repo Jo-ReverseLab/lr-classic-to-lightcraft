@@ -26,12 +26,20 @@
 //! - only members that lr2lc added are ever removed; a known collection that
 //!   was renamed, moved or deleted in Lightroom gets no command, it is only
 //!   counted;
-//! - the Quick Collection comes last: one step with its members, in
-//!   Lightroom order, that are not recorded in the mapping file; recorded
-//!   members that left it in Lightroom are only counted.
+//! - then the Quick Collection: one step with its members, in Lightroom
+//!   order, that are not recorded in the mapping file; recorded members
+//!   that left it in Lightroom are only counted;
+//! - smart collections come last, in input order: one `album.createSmart`
+//!   with `name`, `parent` (below top level, as for `album.create`) and the
+//!   translated `rules` (see [`crate::smart`]) for each one that is not
+//!   recorded yet; a recorded one gets no command, whatever changed, and a
+//!   change of its rules is only counted.
 
+use crate::smart::{convertible, translate};
 use crate::state::{PhotoFields, State, keyword_text, snapshot};
-use model::{Collection, CollectionKind, Keyword, Photo, QuickCollection, Skipped, Stack};
+use model::{
+    Collection, CollectionKind, Keyword, Photo, QuickCollection, Skipped, SmartCollection, Stack,
+};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -52,6 +60,8 @@ pub struct WriteInput {
     pub stacks: Vec<Stack>,
     /// The Quick Collection, if the catalog has one.
     pub quick: Option<QuickCollection>,
+    /// The smart collections to write as smart albums.
+    pub smart: Vec<SmartCollection>,
 }
 
 /// One command of the plan.
@@ -112,6 +122,14 @@ pub enum Step {
         /// Lightroom global ids of the photos, in Lightroom order.
         gids: Vec<String>,
     },
+    /// Create a smart album (`album.createSmart`).
+    CreateSmart {
+        /// Lightroom id of the smart collection.
+        collection_id: i64,
+        /// `name`, `rules` and, below top level, `parent`: a LightCraft id
+        /// or the placeholder `lr-collection:<Lightroom id>`.
+        params: Value,
+    },
     /// Remove photos that lr2lc added from an album (`album.removePhotos`).
     RemoveMembers {
         /// Lightroom id of the collection.
@@ -158,6 +176,13 @@ pub struct Plan {
     quick_removed: usize,
     /// Quick Collection members that cannot be written.
     quick_skips: Vec<Skipped>,
+    /// Input smart collections already in the mapping file.
+    smart_known: usize,
+    /// Known smart collections whose translated rules differ from the
+    /// recorded ones (or no longer translate).
+    smart_rules_changed: usize,
+    /// Smart collections that cannot be written.
+    smart_skips: Vec<Skipped>,
 }
 
 impl Plan {
@@ -183,26 +208,47 @@ impl Plan {
         self.photos_unchanged
     }
 
+    /// The input smart collections already in the mapping file; they get
+    /// no `album.createSmart`.
+    pub fn smart_known(&self) -> usize {
+        self.smart_known
+    }
+
+    /// The known smart collections whose rules changed in Lightroom since
+    /// their creation (the translation differs from the recorded one or is
+    /// no longer possible); they are not changed in LightCraft.
+    pub fn smart_rules_changed(&self) -> usize {
+        self.smart_rules_changed
+    }
+
+    /// The smart collections that are not written: their rules have no
+    /// exact LightCraft equivalent, or their parent is not a converted
+    /// collection set. The reason names the Lightroom id and, for a rule,
+    /// the criterion.
+    pub fn smart_skips(&self) -> &[Skipped] {
+        &self.smart_skips
+    }
+
     /// The input collections already in the mapping file; they get no
     /// `album.create`.
     pub fn collections_known(&self) -> usize {
         self.collections_known
     }
 
-    /// The known collections renamed in Lightroom since their creation;
-    /// they are not renamed in LightCraft.
+    /// The known collections and smart collections renamed in Lightroom
+    /// since their creation; they are not renamed in LightCraft.
     pub fn collections_renamed(&self) -> usize {
         self.collections_renamed
     }
 
-    /// The known collections moved in Lightroom since their creation; they
-    /// are not moved in LightCraft.
+    /// The known collections and smart collections moved in Lightroom
+    /// since their creation; they are not moved in LightCraft.
     pub fn collections_moved(&self) -> usize {
         self.collections_moved
     }
 
-    /// The recorded collections that are no longer in the input; they are
-    /// not deleted in LightCraft.
+    /// The recorded collections and smart collections that are no longer in
+    /// the input; they are not deleted in LightCraft.
     pub fn collections_removed(&self) -> usize {
         self.collections_removed
     }
@@ -282,6 +328,10 @@ impl Plan {
                 Step::CreateAlbum { params, .. } => {
                     selected = None;
                     push("album.create", params.clone());
+                }
+                Step::CreateSmart { params, .. } => {
+                    selected = None;
+                    push("album.createSmart", params.clone());
                 }
                 Step::GroupStack { gids, .. } => {
                     selected = None;
@@ -395,7 +445,47 @@ pub fn plan(input: &WriteInput, state: &State, library_keywords: &BTreeSet<Strin
     plan_stacks(input, state, &mut out);
     plan_collections(input, state, &mut out);
     plan_quick(input, state, &mut out);
+    plan_smart(input, state, &mut out);
     out
+}
+
+fn plan_smart(input: &WriteInput, state: &State, out: &mut Plan) {
+    for s in &input.smart {
+        if let Some(entry) = state.collection(s.lightroom_id) {
+            out.smart_known += 1;
+            if entry.name != s.name {
+                out.collections_renamed += 1;
+            }
+            if entry.parent != s.parent {
+                out.collections_moved += 1;
+            }
+            if translate(&s.rules).ok() != entry.rules {
+                out.smart_rules_changed += 1;
+            }
+            continue;
+        }
+        match convertible(s, &input.collections) {
+            Ok(rules) => {
+                let mut params = json!({"name": s.name, "rules": rules});
+                if let Some(parent) = s.parent {
+                    params["parent"] = album_ref(state, parent);
+                }
+                out.steps.push(Step::CreateSmart {
+                    collection_id: s.lightroom_id,
+                    params,
+                });
+            }
+            Err(why) => out.smart_skips.push(Skipped {
+                reason: smart_skip_reason(s.lightroom_id, &why),
+            }),
+        }
+    }
+}
+
+/// The reason of a smart collection that is not written; `why` must not
+/// hold a name or a rule value.
+pub(crate) fn smart_skip_reason(collection_id: i64, why: &str) -> String {
+    format!("smart collection {collection_id}: {why}; not converted")
 }
 
 fn plan_quick(input: &WriteInput, state: &State, out: &mut Plan) {
@@ -640,9 +730,10 @@ fn plan_collections(input: &WriteInput, state: &State, out: &mut Plan) {
             None => new.push(c),
         }
     }
+    let smart: BTreeSet<i64> = input.smart.iter().map(|s| s.lightroom_id).collect();
     out.collections_removed = state
         .collections()
-        .filter(|(id, _)| !by_id.contains_key(id))
+        .filter(|(id, _)| !by_id.contains_key(id) && !smart.contains(id))
         .count();
 
     // Folders first, then albums; within each, shallower before deeper, so
@@ -780,6 +871,51 @@ mod tests {
 
     fn kw(parts: &[&str]) -> Keyword {
         Keyword::new(parts.iter().map(|s| s.to_string()).collect()).unwrap()
+    }
+
+    #[test]
+    fn smart_entry_without_recorded_rules_counts_as_changed() {
+        use crate::state::{CollectionEntry, EntryKind};
+        use model::{SmartCombine, SmartRule, SmartRules, SmartValue};
+        let rules = SmartRules {
+            combine: SmartCombine::Union,
+            rules: vec![SmartRule {
+                criterion: "rating".into(),
+                operation: "==".into(),
+                value: Some(SmartValue::Number(2.0)),
+                value2: None,
+                units: None,
+            }],
+        };
+        let mut state = State::default();
+        state.record_collection(
+            4,
+            CollectionEntry {
+                lightcraft_id: json!(9),
+                kind: EntryKind::Smart,
+                name: "s".into(),
+                parent: None,
+                members: Vec::new(),
+                rules: None,
+            },
+        );
+        let input = WriteInput {
+            smart: vec![SmartCollection {
+                lightroom_id: 4,
+                name: "s".into(),
+                parent: None,
+                rules,
+            }],
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &state, &BTreeSet::new());
+        assert!(p.steps.is_empty());
+        assert_eq!((p.smart_known(), p.smart_rules_changed()), (1, 1));
+        assert_eq!(p.collections_removed(), 0);
+        assert_eq!(
+            smart_skip_reason(4, "why"),
+            "smart collection 4: why; not converted"
+        );
     }
 
     #[test]

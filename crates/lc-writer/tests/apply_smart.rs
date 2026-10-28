@@ -1,4 +1,3 @@
-#![cfg(any())]
 //! Acceptance tests for writing smart collections as smart albums (task
 //! P5b-4b), module `lc_writer::apply`, against the stateful fake LightCraft
 //! (which implements `album.createSmart` like the real app: `rules` is

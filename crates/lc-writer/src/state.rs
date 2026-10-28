@@ -8,7 +8,8 @@
 //! (`a|b|c`) together with the attributes they were created with.
 //! Collections are kept under their Lightroom id with the LightCraft id of
 //! the album or album folder, the name and parent they were created with,
-//! and the members lr2lc added.
+//! and the members lr2lc added. Smart collections are kept the same way as
+//! smart albums, with the translated rules that were sent and no members.
 
 use model::{CollectionKind, ColorLabel, Flag, Keyword, Photo};
 use serde::{Deserialize, Serialize};
@@ -142,6 +143,8 @@ pub enum EntryKind {
     Album,
     /// An album folder (Lightroom: collection set).
     Folder,
+    /// A smart album (Lightroom: smart collection).
+    Smart,
 }
 
 impl From<CollectionKind> for EntryKind {
@@ -165,8 +168,12 @@ pub struct CollectionEntry {
     /// The Lightroom id of the parent at creation; `None` on top level.
     pub parent: Option<i64>,
     /// Global ids of the photos lr2lc added and did not remove, sorted and
-    /// without duplicates.
+    /// without duplicates. Always empty for a smart album.
     pub members: Vec<String>,
+    /// The `rules` parameter sent with `album.createSmart`; only for a
+    /// smart album. Missing in older files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rules: Option<Value>,
 }
 
 /// One stack grouped in the library.
@@ -520,6 +527,7 @@ mod tests {
             name: "A".to_string(),
             parent: Some(1),
             members: members.iter().map(|s| s.to_string()).collect(),
+            rules: None,
         }
     }
 
@@ -566,9 +574,35 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("s.lr2lc.json");
         let text = r#"{"version":1,"photos":{},"keywords":{},"collections":{"1":
-            {"lightcraft_id":1,"kind":"smart","name":"x","parent":null,"members":[]}}}"#;
+            {"lightcraft_id":1,"kind":"zyx","name":"x","parent":null,"members":[]}}}"#;
         std::fs::write(&path, text).unwrap();
         assert!(matches!(State::load(&path), Err(StateError::Parse { .. })));
+    }
+
+    #[test]
+    fn smart_entries_keep_their_rules_and_rules_are_optional() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.lr2lc.json");
+        let mut s = State::default();
+        let rules = json!({"ruleSet": {"match": "all", "rules": []}});
+        s.record_collection(
+            5,
+            CollectionEntry {
+                kind: EntryKind::Smart,
+                rules: Some(rules.clone()),
+                ..collection_entry(&[])
+            },
+        );
+        s.save(&path).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["collections"]["5"]["kind"], "smart");
+        assert_eq!(v["collections"]["5"]["rules"], rules);
+        assert_eq!(State::load(&path).unwrap(), s);
+        let text = r#"{"version":1,"photos":{},"keywords":{},"collections":{"1":
+            {"lightcraft_id":1,"kind":"smart","name":"x","parent":null,"members":[]}}}"#;
+        std::fs::write(&path, text).unwrap();
+        let loaded = State::load(&path).unwrap();
+        assert_eq!(loaded.collection(1).unwrap().rules, None);
     }
 
     #[test]

@@ -33,7 +33,11 @@
 //!    `library.select {ids, active: first}` and `album.toggleTarget {ids}`
 //!    (a toggle of photos that are all in it would remove them). Several
 //!    such albums skip the Quick Collection as ambiguous; lr2lc never
-//!    removes members and never sends `album.clearQuick`.
+//!    removes members and never sends `album.clearQuick`;
+//! 7. last the smart collections: `album.createSmart {name, parent?, rules}`
+//!    for each one not in the mapping file, with the LightCraft id of its
+//!    parent folder; nothing else is sent for a smart album (no select, no
+//!    members). A parent folder that was not created skips it.
 //!
 //! Rules:
 //! - every finished step is recorded in the mapping file at once, so an
@@ -52,7 +56,9 @@
 //!   collections match, is skipped as ambiguous with its descendants;
 //!   nothing is created for it;
 //! - every input collection counts exactly once: created as folder or
-//!   album, known, adopted (existing), or skipped;
+//!   album, known, adopted (existing), or skipped; every input smart
+//!   collection exactly once: created, known or skipped; a rejected
+//!   `album.createSmart` skips it and the next run tries again;
 //! - every input photo counts exactly once: imported, existing, updated,
 //!   unchanged or skipped; a stopped run hands back the numbers up to the
 //!   stop ([`Aborted`]);
@@ -64,10 +70,10 @@ use crate::albums::{Decision, Existing, Node, parse_album_list};
 use crate::control::{ControlClient, Outcome, WriteError};
 use crate::plan::{
     Step, WriteInput, group_params, import_params, members_select_params, plan, same_members,
-    select_params,
+    select_params, smart_skip_reason,
 };
-use crate::state::{CollectionEntry, PhotoFields, State, keyword_text, snapshot};
-use model::{Collection, CollectionKind, Keyword, Photo, Skipped};
+use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, keyword_text, snapshot};
+use model::{Collection, CollectionKind, Keyword, Photo, Skipped, SmartCollection};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -158,6 +164,18 @@ pub struct ApplySummary {
     /// Quick Collection commands that LightCraft rejected; a later run
     /// sends the members again.
     pub quick_incomplete: Vec<Skipped>,
+    /// Smart albums created by this run.
+    pub smart_created: usize,
+    /// Input smart collections already in the mapping file. Together with
+    /// the created and skipped ones every input smart collection counts
+    /// once.
+    pub smart_known: usize,
+    /// Known smart collections whose rules changed in Lightroom; not
+    /// changed in LightCraft.
+    pub smart_rules_changed: usize,
+    /// Smart collections not created, each with a reason; a later run tries
+    /// again.
+    pub smart_skipped: Vec<Skipped>,
 }
 
 /// A run that stopped: the error and what was done up to it.
@@ -218,6 +236,9 @@ pub fn apply_partial(
             quick_already: plan.quick_already(),
             quick_removed: plan.quick_removed(),
             quick_skipped: plan.quick_skips().to_vec(),
+            smart_known: plan.smart_known(),
+            smart_rules_changed: plan.smart_rules_changed(),
+            smart_skipped: plan.smart_skips().to_vec(),
             ..ApplySummary::default()
         },
         keywords: wanted_keywords(input),
@@ -234,6 +255,7 @@ pub fn apply_partial(
             .iter()
             .map(|c| (c.lightroom_id, c))
             .collect(),
+        smart: input.smart.iter().map(|s| (s.lightroom_id, s)).collect(),
         incomplete: BTreeSet::new(),
         existing: None,
         album_nodes: None,
@@ -337,6 +359,8 @@ struct Run<'a> {
     current: Option<Current>,
     /// The input collections by Lightroom id.
     collections: BTreeMap<i64, &'a Collection>,
+    /// The input smart collections by Lightroom id.
+    smart: BTreeMap<i64, &'a SmartCollection>,
     /// Lightroom ids of the collections already reported as incomplete.
     incomplete: BTreeSet<i64>,
     /// The library's albums that may be adopted, read before the first
@@ -448,7 +472,80 @@ impl Run<'_> {
                 self.finish_photo()?;
                 self.quick_add(gids)
             }
+            Step::CreateSmart {
+                collection_id,
+                params,
+            } => {
+                self.finish_photo()?;
+                self.create_smart(*collection_id, params)
+            }
         }
+    }
+
+    /// Creates one smart album and records it at once. The parent's
+    /// LightCraft id is taken from the mapping file; a parent folder that
+    /// was not created skips the smart collection.
+    fn create_smart(&mut self, collection_id: i64, params: &Value) -> Result<(), WriteError> {
+        let Some(s) = self.smart.get(&collection_id).copied() else {
+            // Not reachable: the plan only creates input smart collections.
+            return Ok(());
+        };
+        let mut params = params.clone();
+        if let Some(parent) = s.parent {
+            match self.state.collection(parent) {
+                Some(entry) if entry.kind == EntryKind::Folder => {
+                    params["parent"] = entry.lightcraft_id.clone();
+                }
+                _ => {
+                    self.skip_smart(
+                        collection_id,
+                        &format!("its parent collection {parent} was not created"),
+                    );
+                    return Ok(());
+                }
+            }
+        }
+        let rules = params["rules"].clone();
+        match self.client.execute("album.createSmart", params) {
+            Ok(Outcome::Applied(result)) => {
+                let Some(id) = result.get("id").and_then(valid_id) else {
+                    self.skip_smart(collection_id, "`album.createSmart` returned no id");
+                    return Ok(());
+                };
+                self.summary.smart_created += 1;
+                let entry = CollectionEntry {
+                    lightcraft_id: id,
+                    kind: EntryKind::Smart,
+                    name: s.name.clone(),
+                    parent: s.parent,
+                    members: Vec::new(),
+                    rules: Some(rules),
+                };
+                self.state.record_collection(collection_id, entry);
+                self.state.save(self.state_file)?;
+                Ok(())
+            }
+            Ok(Outcome::AppliedNotSaved(_)) => {
+                self.summary.not_saved += 1;
+                self.skip_smart(
+                    collection_id,
+                    "`album.createSmart` was applied but not saved and returned no id; \
+                     the next run creates it again, check LightCraft for a duplicate",
+                );
+                Ok(())
+            }
+            Err(WriteError::Command { command, .. }) => {
+                self.skip_smart(collection_id, &format!("LightCraft rejected `{command}`"));
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn skip_smart(&mut self, collection_id: i64, why: &str) {
+        self.summary.smart_skipped.push(Skipped {
+            reason: smart_skip_reason(collection_id, why),
+        });
     }
 
     /// The library's album tree from `albums.list`, read at most once per
@@ -715,6 +812,7 @@ impl Run<'_> {
             name: c.name.clone(),
             parent: c.parent,
             members: Vec::new(),
+            rules: None,
         };
         self.state.record_collection(collection_id, entry);
         self.state.save(self.state_file)?;
