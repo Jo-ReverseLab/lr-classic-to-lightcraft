@@ -178,7 +178,11 @@ fn import_without_id_is_no_id_returned() {
     assert!(e.reason.contains("library.import"), "{}", e.reason);
     clean(&e.reason);
     assert_eq!(s.photos_imported + s.photos_existing, 0);
-    assert!(state(&env)["photos"].as_object().is_none_or(|m| m.is_empty()));
+    assert!(
+        state(&env)["photos"]
+            .as_object()
+            .is_none_or(|m| m.is_empty())
+    );
 }
 
 // ---- applied_not_saved -------------------------------------------------
@@ -222,7 +226,11 @@ fn import_not_saved_is_applied_not_saved() {
     assert_eq!(e.code, SkipCode::AppliedNotSaved);
     clean(&e.reason);
     assert_eq!(s.not_saved, 1);
-    assert!(state(&env)["photos"].as_object().is_none_or(|m| m.is_empty()));
+    assert!(
+        state(&env)["photos"]
+            .as_object()
+            .is_none_or(|m| m.is_empty())
+    );
 }
 
 // ---- ambiguous ---------------------------------------------------------
@@ -254,7 +262,11 @@ fn two_matching_smart_albums_are_ambiguous_and_nothing_is_created() {
     let s = run(&fake, &env, &smart_input()).unwrap();
     let e = only(&s.smart_skipped);
     assert_eq!(e.code, SkipCode::Ambiguous);
-    assert!(e.reason.contains("ambiguous: 2 smart albums"), "{}", e.reason);
+    assert!(
+        e.reason.contains("ambiguous: 2 smart albums"),
+        "{}",
+        e.reason
+    );
     clean(&e.reason);
     assert_eq!(fake.albums().len(), 2, "nothing created");
 }

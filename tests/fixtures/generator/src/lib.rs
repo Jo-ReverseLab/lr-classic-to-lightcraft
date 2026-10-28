@@ -1510,6 +1510,20 @@ pub fn clear_collections(path: &Path) -> Result<()> {
     c.execute_batch("DELETE FROM AgLibraryCollectionImage; DELETE FROM AgLibraryCollection;")
 }
 
+/// Replaces the rules of smart collection `id` with a rule that cannot be
+/// translated (`pick`), so a collection written earlier is still in the
+/// catalog but no longer translatable.
+pub fn make_smart_untranslatable(path: &Path, id: i64) -> Result<()> {
+    let c = Connection::open(path)?;
+    let text = "s = {\n\t{\n\t\tcriteria = \"pick\",\n\t\toperation = \"==\",\n\t\tvalue = 1,\n\t},\n\tcombine = \"intersect\",\n}";
+    let changed = c.execute(
+        "UPDATE AgLibraryCollectionContent SET content = ?1 WHERE collection = ?2 AND owningModule = ?3",
+        params![text, id, smart_edge::SMART],
+    )?;
+    assert_eq!(changed, 1, "smart collection {id} has no smart content row");
+    Ok(())
+}
+
 fn add_collection_edges(path: &Path) -> Result<()> {
     use rusqlite::types::Value as V;
     const COLL: &str = "com.adobe.ag.library.collection";
