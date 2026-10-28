@@ -228,8 +228,9 @@ fn create_smart_gets_the_translated_rules_and_the_right_parent() {
     assert_eq!(top.rules, Some(translate(&good(3.0)).unwrap()));
     assert_eq!((top.parent, deep.parent), (None, Some(set.id)));
     assert!(!top.folder && !deep.folder);
-    // Rule 12 is not in the library.
-    assert_eq!(fake.albums().len(), 5);
+    // Set, Plain, Top Smart and Deep Smart exist; smart collection 12 is not
+    // translatable and is not in the library.
+    assert_eq!(fake.albums().len(), 4);
 }
 
 #[test]
