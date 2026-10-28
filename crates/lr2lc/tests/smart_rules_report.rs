@@ -1,9 +1,10 @@
 //! Acceptance tests for smart collections in the CLI dry run,
 //! on `lrcat_fixtures::write_smart_catalog_with_files`.
 //!
-//! At this stage nothing is translated, so every smart collection is skipped:
-//! - `collections`: read == converted + skipped; the smart collections are
-//!   all in `skipped` (25 reasons containing "smart collection").
+//! Smart collections are skipped with a reason, except the one rating rule
+//! that is translated:
+//! - `collections`: read == converted + skipped; the untranslated smart
+//!   collections are in `skipped` (reasons containing "smart collection").
 //! - Reasons name the first criterion (`rating`, `pick`, ...) or say
 //!   "unreadable rules"; report.json, stdout and stderr contain no rule
 //!   value, operation, combine text or collection name.

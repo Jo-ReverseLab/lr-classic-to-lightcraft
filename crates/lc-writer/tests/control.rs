@@ -1,5 +1,5 @@
-//! Acceptance tests for the control-port client and the pre-flight checks
-//!, against a fake port built from `std::net::TcpListener`.
+//! Acceptance tests for the control-port client and the pre-flight checks,
+//! against a fake port built from `std::net::TcpListener`.
 //!
 //! API under test (crate `lc-writer`, module `control`; all names below are
 //! imported from `lc_writer::control`):

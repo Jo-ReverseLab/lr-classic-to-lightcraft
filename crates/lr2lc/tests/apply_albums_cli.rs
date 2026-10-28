@@ -1,6 +1,5 @@
-//! CLI acceptance tests for writing collections as albums and album folders
-//!, with the generator fixture `collection_edge`, against the
-//! stateful fake LightCraft.
+//! CLI acceptance tests for writing collections as albums and album folders,
+//! with the generator fixture `collection_edge`, against the stateful fake LightCraft.
 //!
 //! `report.json`, section `writer`:
 //! - applied run: integers `folders_created`, `albums_created`,

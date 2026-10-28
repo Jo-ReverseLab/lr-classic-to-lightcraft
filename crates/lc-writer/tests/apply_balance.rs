@@ -1,5 +1,5 @@
-//! Acceptance tests for the photo balance of `lc_writer::apply` in EVERY run
-//!, against the stateful fake LightCraft.
+//! Acceptance tests for the photo balance of `lc_writer::apply` in EVERY run,
+//! against the stateful fake LightCraft.
 //!
 //! New fields of `ApplySummary` (usize):
 //! - `photos_updated`: the photo is already known (mapping file) and at least

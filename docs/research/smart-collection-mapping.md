@@ -93,4 +93,4 @@ Only exception worth a live test: a **single** keyword with `any`/`==` mapped to
 
 ## Recommendation
 
-Implement the parser and model first (report names only). Implement the translation with a allowlist that starts with `rating` only, and enable `pick`, colour-name `labelColor`, and `keywords empty` one by one after the live tests. Skip every other collection whole, with a reason. Do not translate keyword, date or text rules until their semantics are verified against both applications.
+Implement the parser and model first (report names only). Implement the translation with an allowlist that starts with `rating` only, and enable `pick`, colour-name `labelColor`, and `keywords empty` one by one after the live tests. Skip every other collection whole, with a reason. Do not translate keyword, date or text rules until their semantics are verified against both applications.

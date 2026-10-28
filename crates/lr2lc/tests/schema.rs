@@ -25,7 +25,7 @@ fn missing_collection_table_exits_1_without_report() {
 
 #[test]
 fn missing_synonym_table_exits_1_without_report() {
-    // the synonym table is required too.
+    // The synonym table is required too.
     let dir = tempfile::tempdir().unwrap();
     let cat = dir.path().join("damaged.lrcat");
     lrcat_fixtures::write_small_catalog_without(&cat, "AgLibraryKeywordSynonym", None).unwrap();
