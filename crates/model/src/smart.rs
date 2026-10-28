@@ -27,13 +27,16 @@ impl SmartCombine {
     }
 }
 
-/// A rule value: a number or a text. A number written as text stays text.
+/// A rule value: a number, a text or a boolean. A number written as text
+/// stays text.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SmartValue {
     /// A number as stored: whole, negative or fractional.
     Number(f64),
     /// A text as stored, with escapes decoded. May hold user data.
     Text(String),
+    /// `true` or `false` as stored.
+    Bool(bool),
 }
 
 /// One criterion of a smart collection.

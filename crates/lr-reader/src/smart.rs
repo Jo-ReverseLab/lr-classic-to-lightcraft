@@ -67,7 +67,7 @@ pub enum SmartParseError {
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     Nil,
-    Bool,
+    Bool(bool),
     Number(f64),
     Text(String),
     Table(Table),
@@ -123,11 +123,14 @@ fn rule(t: &Table) -> Result<SmartRule, SmartParseError> {
         None | Some(Value::Nil) => Ok(None),
         Some(Value::Number(n)) => Ok(Some(SmartValue::Number(*n))),
         Some(Value::Text(s)) => Ok(Some(SmartValue::Text(s.clone()))),
+        Some(Value::Bool(b)) => Ok(Some(SmartValue::Bool(*b))),
         Some(_) => Err(SmartParseError::WrongType(key)),
     };
     let units = match t.get("value_units") {
         None | Some(Value::Nil) => None,
         Some(Value::Text(s)) => Some(s.clone()),
+        // Units are names; a boolean keeps its literal text.
+        Some(Value::Bool(b)) => Some(b.to_string()),
         Some(_) => return Err(SmartParseError::WrongType("value_units")),
     };
     Ok(SmartRule {
@@ -214,7 +217,8 @@ impl<'a> Parser<'a> {
             Some(b) if b.is_ascii_alphabetic() || b == b'_' => {
                 let at = self.pos;
                 match self.name()? {
-                    "true" | "false" => Ok(Value::Bool),
+                    "true" => Ok(Value::Bool(true)),
+                    "false" => Ok(Value::Bool(false)),
                     "nil" => Ok(Value::Nil),
                     _ => Err(SmartParseError::UnexpectedChar(at)),
                 }
@@ -450,6 +454,14 @@ mod tests {
     }
 
     #[test]
+    fn booleans_are_values_and_literal_units() {
+        let r = rule_of(&wrap("value = true, value2 = false, value_units = false"));
+        assert_eq!(r.value, Some(SmartValue::Bool(true)));
+        assert_eq!(r.value2, Some(SmartValue::Bool(false)));
+        assert_eq!(r.units.as_deref(), Some("false"));
+    }
+
+    #[test]
     fn unknown_keys_are_ignored() {
         let r = rule_of(&wrap(
             "flag = true, other = false, nested = { a = { 1, 2 } }, [\"x y\"] = 1, value = 1",
@@ -505,7 +517,7 @@ mod tests {
             WrongType("criteria")
         );
         assert_eq!(
-            parse_smart_rules(&wrap("value = true")).unwrap_err(),
+            parse_smart_rules(&wrap("value = {}")).unwrap_err(),
             WrongType("value")
         );
         assert_eq!(
