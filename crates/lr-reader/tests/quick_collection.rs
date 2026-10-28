@@ -122,7 +122,9 @@ fn members_follow_the_album_rules() {
     for photo in [20, 999] {
         let n = r
             .iter()
-            .filter(|r| has_number(r, photo) && !r.contains("collection skipped"))
+            .filter(|r| {
+                has_number(r, photo) && has_number(r, 14) && !r.contains("collection skipped")
+            })
             .count();
         assert_eq!(n, 1, "photo {photo}: {r:?}");
     }
