@@ -286,7 +286,7 @@ pub fn apply_partial(
 const QUICK_NAME: &str = "Quick Collection";
 
 /// The page size of `catalog.query`.
-const QUERY_PAGE: usize = 200;
+pub(crate) const QUERY_PAGE: usize = 200;
 
 /// The ids of the nodes that may be the Quick Collection: top-level albums
 /// named [`QUICK_NAME`] that are neither folders nor smart albums nor one of
@@ -303,13 +303,13 @@ fn quick_candidates(nodes: Vec<Node>, claimed: &[&Value]) -> Vec<Value> {
 
 /// One page of a `catalog.query` answer.
 #[derive(Debug, PartialEq)]
-struct QueryPage {
-    total: usize,
-    ids: Vec<Value>,
+pub(crate) struct QueryPage {
+    pub(crate) total: usize,
+    pub(crate) ids: Vec<Value>,
 }
 
 /// Reads `{total, photos: [{id, …}]}`; any other shape is a protocol error.
-fn parse_query_page(value: &Value) -> Result<QueryPage, WriteError> {
+pub(crate) fn parse_query_page(value: &Value) -> Result<QueryPage, WriteError> {
     let bad = || WriteError::Protocol("catalog.query answered in an unknown shape".into());
     let total = value["total"].as_u64().ok_or_else(bad)? as usize;
     let ids = value["photos"]
@@ -322,11 +322,11 @@ fn parse_query_page(value: &Value) -> Result<QueryPage, WriteError> {
 }
 
 /// True if two LightCraft ids are equal, as numbers or as text.
-fn same_id(a: &Value, b: &Value) -> bool {
+pub(crate) fn same_id(a: &Value, b: &Value) -> bool {
     a == b || id_text(a).is_some_and(|t| Some(t) == id_text(b))
 }
 
-fn id_text(v: &Value) -> Option<String> {
+pub(crate) fn id_text(v: &Value) -> Option<String> {
     match v {
         Value::Number(n) => Some(n.to_string()),
         Value::String(s) => Some(s.clone()),
@@ -1411,7 +1411,7 @@ fn valid_id(value: &Value) -> Option<Value> {
 /// The keyword path texts (`a|b`) of a `keyword.list` answer: an array of
 /// path texts, an array of `{name, children}` trees, or an object with a
 /// `keywords` field holding either.
-fn parse_keyword_list(value: &Value) -> Result<BTreeSet<String>, WriteError> {
+pub(crate) fn parse_keyword_list(value: &Value) -> Result<BTreeSet<String>, WriteError> {
     let items = match value {
         Value::Array(items) => items,
         Value::Object(map) => match map.get("keywords") {
