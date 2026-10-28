@@ -1,0 +1,68 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+The project has not made a release yet.
+
+## [Unreleased]
+
+### Added
+
+- Reader for Lightroom Classic catalogs, opened read-only with a version
+  check, a check of the required tables and columns, and a refusal if
+  unsaved `-wal` or `-journal` changes are pending. A checksum before and
+  after each run proves the catalog is unchanged.
+- Reading of folders and photos, with a check that the original files exist.
+  Videos and virtual copies are skipped with a reason.
+- Path mapping (`--map OLD=NEW`) for moved catalogs and photo folders, with
+  the same behaviour on every platform.
+- Keywords with their hierarchy, synonyms and attributes (export flags,
+  person type) and their assignments to photos.
+- Star ratings (0 to 5), pick/reject flags, colour labels with
+  `--label-set` (`en`, `de`, `auto` or a JSON file), titles, captions,
+  copyright and creator.
+- Collections as albums and collection sets as album folders, with their
+  members and nesting; smart collections (rule parser, strict translation of
+  star-rating rules); folder stacks; the Quick Collection.
+- Stable identity of photos and keywords through Lightroom's global ids, so
+  repeated runs create no duplicates.
+- Dry run by default. The summary and `--report FILE` (`report.json`) list
+  everything that is not converted, each with a reason and a fixed code
+  (such as `missing`, `video` or `smart_untranslatable`); read equals
+  converted plus skipped for every area.
+- Protection of the catalog and of other files: `--report` and `--script`
+  refuse the catalog and its companion files (detected by file identity, also
+  through symbolic and hard links on Linux and macOS) and files that are not
+  earlier lr2lc output.
+- Writer that talks to the control port of the running LightCraft app
+  (`--apply`, `--library`, `--port`, `--allow-xmp`). It checks the app before
+  writing anything (persistent library, matching library, no library
+  problem, XMP auto-write off), keeps a mapping file next to the library for
+  idempotent re-runs, and writes `report.json` also when a run is aborted.
+- `library.select` before every photo command, as LightCraft requires.
+- Albums and album folders with their members; stacks (written expanded);
+  smart albums only when the rule is proven to be equivalent (star-rating
+  rules); the Quick Collection, which is only added to.
+- Recovery after a lost mapping file: existing albums and smart albums with
+  the same name, parent and rules are taken over; ambiguous matches are
+  skipped and reported.
+- `--script FILE` writes the planned commands as JSON lines.
+- A read-only snapshot of the current LightCraft library state, as groundwork
+  for comparing it with Lightroom.
+- CI for Linux, macOS and Windows (format, clippy, tests).
+- Research notes on the Lightroom catalog schema and on LightCraft in
+  `docs/research`.
+
+### Changed
+
+- Photos, collections and stacks each satisfy a strict balance in the
+  summary and report, in dry runs and real runs alike.
+- Documentation brought up to date: README options, limits and the status of
+  the research notes.
+
+### Fixed
+
+- `ui.inspect` is now sent as a method of the control port instead of an
+  engine command. Before, every `--apply` against the real app stopped in
+  the pre-flight check.
