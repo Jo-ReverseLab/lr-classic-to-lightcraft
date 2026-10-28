@@ -14,11 +14,11 @@ applies path mappings and checks that the original files exist. It also
 reads keywords with their hierarchy and synonyms, their assignments to
 photos, the star ratings, the pick/reject flags and the colour labels.
 It reads collections as albums and collection sets as album folders, with
-their members, and folder stacks.
+their members, folder stacks and the Quick Collection.
 With `--apply`, lr2lc writes keywords, photos (as references), ratings,
 flags, labels, titles, captions, copyright and creator, and the
 collections as albums and album folders with their members, and the
-stacks (always expanded), into a
+stacks (always expanded) and the Quick Collection, into a
 LightCraft library through the control port of the running LightCraft app.
 
 Once the repository is on GitHub, CI runs formatting, lint and tests on
@@ -59,9 +59,8 @@ flags: pick 4, reject 2, none 11, unknown 0
 ```
 
 Collections become albums and collection sets become album folders, with
-their nesting and names unchanged. Smart collections, the Quick Collection
-(and other system collections) and other kinds such as web or print
-collections are skipped with a reason. A collection whose parent is missing,
+their nesting and names unchanged. Smart collections and other kinds such
+as web or print collections are skipped with a reason. A collection whose parent is missing,
 skipped, not a collection set or part of a cycle is skipped, and so is
 everything below it. Empty collections are kept. Members keep Lightroom's
 order; a member is skipped if its photo is not converted (for example a
@@ -69,6 +68,24 @@ missing original or a virtual copy), if it repeats a photo already in the
 collection, if its collection is skipped, or if it belongs to a collection
 set, which holds no photos. Collection names never appear in the output or
 in the report.
+
+The first system collection (`systemOnly` not zero) by id is the Quick
+Collection. It counts as converted (`collections.quick` is 1, and
+`collections.converted` is folders + albums + quick); every further one is
+skipped with `more than one quick collection`. Its members follow the album
+rules above. With `--apply` lr2lc runs, as the very last step and only when
+some member is not yet in the mapping file: `album.setTarget {id: null}`
+(so a target album you chose is not used), `albums.list`, then reads the
+members of the one top-level album named `Quick Collection` with
+`catalog.query` (200 per page). Only photos it does not hold yet are sent,
+with `library.select` and `album.toggleTarget`; LightCraft creates the
+album when it is missing. Two such albums skip the step as ambiguous
+(`quick_skipped`). lr2lc never removes photos from it and never empties it:
+members that left the Quick Collection in Lightroom are only counted
+(`quick_removed`). The writer section reports `quick_added`,
+`quick_already`, `quick_removed`, `quick_skipped` and `quick_incomplete`;
+the dry run reports `planned.quick_add`. The mapping file keeps the added
+members under `quick` as `{"members": [...]}` (sorted global ids).
 
 Folder stacks are read with their members, the top photo first. Members
 are ordered by Lightroom's position (the top photo has position 1), then by
@@ -202,7 +219,8 @@ Writes a machine-readable report to `FILE` after the run:
     "skipped": [{ "reason": "collection 4: smart collection is not converted" }],
     "albums": 1,
     "folders": 1,
-    "duplicate_names": 0
+    "duplicate_names": 0,
+    "quick": 0
   },
   "collection_members": {
     "read": 2,
