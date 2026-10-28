@@ -30,7 +30,9 @@ impl SmartCombine {
 /// A rule value: a number or a text. A number written as text stays text.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SmartValue {
+    /// A number as stored: whole, negative or fractional.
     Number(f64),
+    /// A text as stored, with escapes decoded. May hold user data.
     Text(String),
 }
 
@@ -52,7 +54,9 @@ pub struct SmartRule {
 /// All rules of one smart collection, in stored order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SmartRules {
+    /// How the rules are combined (key `combine`).
     pub combine: SmartCombine,
+    /// The criteria, in stored order; empty if the collection has none.
     pub rules: Vec<SmartRule>,
 }
 

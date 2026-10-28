@@ -16,61 +16,52 @@
 //! never a part of the input.
 
 use model::{SmartCombine, SmartRule, SmartRules, SmartValue};
-use std::fmt;
 
 /// Deepest table nesting accepted. Rules need two levels; unknown extra
 /// keys may hold a few more.
 pub const MAX_DEPTH: usize = 32;
 
-/// Why a rule text could not be read.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Why a rule text could not be read. The messages carry no part of the
+/// input, only byte offsets and key names.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SmartParseError {
     /// The text ends before the value is complete.
+    #[error("rule text ends early")]
     UnexpectedEnd,
     /// An unexpected character at the given byte offset.
+    #[error("unexpected character at byte {0}")]
     UnexpectedChar(usize),
     /// Tables are nested deeper than [`MAX_DEPTH`].
+    #[error("tables nested deeper than {MAX_DEPTH} levels")]
     TooDeep,
     /// A string holds an escape that is not supported (byte offset).
+    #[error("unsupported string escape at byte {0}")]
     BadEscape(usize),
     /// A number cannot be read (byte offset).
+    #[error("number not readable at byte {0}")]
     BadNumber(usize),
     /// More text follows the outer table (byte offset).
+    #[error("unexpected text after the rules at byte {0}")]
     TrailingText(usize),
     /// The assigned value is not a table.
+    #[error("rules are not a table")]
     NotATable,
     /// The same key appears twice in one table.
+    #[error("a key appears twice in one table")]
     DuplicateKey,
     /// A rule entry is not a table.
+    #[error("a rule is not a table")]
     RuleNotATable,
     /// A rule lacks `criteria` or `operation`.
+    #[error("a rule has no {0:?}")]
     MissingKey(&'static str),
     /// A known key holds a value of the wrong type.
+    #[error("key {0:?} has a value of the wrong type")]
     WrongType(&'static str),
     /// The outer table has no `combine`.
+    #[error("rules have no \"combine\"")]
     MissingCombine,
 }
-
-impl fmt::Display for SmartParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnexpectedEnd => write!(f, "rule text ends early"),
-            Self::UnexpectedChar(at) => write!(f, "unexpected character at byte {at}"),
-            Self::TooDeep => write!(f, "tables nested deeper than {MAX_DEPTH} levels"),
-            Self::BadEscape(at) => write!(f, "unsupported string escape at byte {at}"),
-            Self::BadNumber(at) => write!(f, "number not readable at byte {at}"),
-            Self::TrailingText(at) => write!(f, "unexpected text after the rules at byte {at}"),
-            Self::NotATable => write!(f, "rules are not a table"),
-            Self::DuplicateKey => write!(f, "a key appears twice in one table"),
-            Self::RuleNotATable => write!(f, "a rule is not a table"),
-            Self::MissingKey(key) => write!(f, "a rule has no {key:?}"),
-            Self::WrongType(key) => write!(f, "key {key:?} has a value of the wrong type"),
-            Self::MissingCombine => write!(f, "rules have no \"combine\""),
-        }
-    }
-}
-
-impl std::error::Error for SmartParseError {}
 
 /// A parsed Lua value.
 #[derive(Debug, Clone, PartialEq)]
