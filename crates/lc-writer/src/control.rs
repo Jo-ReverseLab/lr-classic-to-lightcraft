@@ -2,8 +2,9 @@
 //! read-only pre-flight checks that must pass before anything is written.
 //!
 //! The protocol is JSON lines over a loopback TCP connection: one request
-//! object per line, one reply object per line, in order. Every command goes
-//! through the `engine.execute` method.
+//! object per line, one reply object per line, in order. Engine commands go
+//! through the `engine.execute` method; `ui.inspect` is a method of the port
+//! itself and is sent as such (see `ControlClient::call`).
 //!
 //! Safety rules implemented here:
 //! - only `127.0.0.1` is ever contacted;
@@ -128,6 +129,25 @@ impl ControlClient {
     /// The command is sent exactly once. If the reply cannot be read the
     /// result is `ConnectionLost`, never a retry.
     pub fn execute(&mut self, command: &str, params: Value) -> Result<Outcome, WriteError> {
+        self.send(
+            "engine.execute",
+            json!({"command": command, "params": params}),
+            command,
+        )
+    }
+
+    /// Call a method of the control port itself (for example `ui.inspect`),
+    /// which is not an engine command.
+    ///
+    /// Same rules as `execute`: sent exactly once, never retried. Errors
+    /// name the port method.
+    pub fn call(&mut self, method: &str, params: Value) -> Result<Outcome, WriteError> {
+        self.send(method, params, method)
+    }
+
+    /// Send one request and read its reply; `name` is used in errors.
+    fn send(&mut self, method: &str, params: Value, name: &str) -> Result<Outcome, WriteError> {
+        let command = name;
         let mut connection = match self.connection.take() {
             Some(c) => c,
             None => open(self.port)?,
@@ -136,8 +156,8 @@ impl ControlClient {
         self.next_id += 1;
         let request = json!({
             "id": id,
-            "method": "engine.execute",
-            "params": {"command": command, "params": params},
+            "method": method,
+            "params": params,
         });
         let lost = || WriteError::ConnectionLost {
             command: command.to_string(),
@@ -233,8 +253,9 @@ fn read(client: &mut ControlClient, command: &str) -> Result<Value, WriteError> 
 
 /// Check that the app is ready for writing into `library`.
 ///
-/// Sends only the read commands `library.info`, `ui.inspect` and
-/// `library.xmpPreferences`, each with empty params, and changes nothing.
+/// Sends only the read requests `library.info` and `library.xmpPreferences`
+/// (engine commands) and the port method `ui.inspect`, each with empty
+/// params, and changes nothing.
 /// Fails if the session is not persistent, another library is open, the
 /// app reports a library problem, or XMP auto-write is on and `allow_xmp`
 /// is false.
@@ -265,7 +286,15 @@ pub fn preflight(
         });
     }
 
-    let inspect = read(client, "ui.inspect")?;
+    let inspect = match client.call("ui.inspect", json!({}))? {
+        Outcome::Applied(value) => value,
+        Outcome::AppliedNotSaved(message) => {
+            return Err(WriteError::Command {
+                command: "ui.inspect".to_string(),
+                message,
+            });
+        }
+    };
     match inspect.get("libraryProblem") {
         None | Some(Value::Null) => {}
         Some(Value::String(text)) => return Err(WriteError::LibraryProblem(text.clone())),

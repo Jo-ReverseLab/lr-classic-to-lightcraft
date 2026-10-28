@@ -22,7 +22,7 @@ All paths are relative to the LightCraft source root (the LightCraft source chec
 - `library.source` does **not** answer this. It selects what the browser shows (`kind: all|recentlyAdded|album|recentlyDeleted|picks|missing|libraryFolder`, `crates/engine/src/cmd/library.rs:383-389`).
 - **`library.info {}`** (`library.rs:1662`): returns `{"persistent":false,…}` for an in-memory/temporary session, else `{"persistent":true,"path":<library dir>,"photos":n,"albums":n,"seq",…,"unsavedOps",…}` (`library.rs:1676-1690`). `path` is the library folder. Use this to compare against the target library and to refuse a temporary session (`persistent:false`).
 - `app.recentLibraries` returns `[{path,name,exists,checking,open,lastOpened}]` with an `open` flag (`docs/control-protocol.md:200-203`).
-- `ui.inspect` → `libraryProblem` is non-null when the app has no usable library (`docs/control-protocol.md:170-177`); the writer should abort in that case.
+- `ui.inspect` is a method of the control port itself, **not** an engine command: it is sent as `{"id":N,"method":"ui.inspect","params":{}}`, never through `engine.execute` (which rejects it as an unknown command). Its `libraryProblem` is non-null when the app has no usable library (`docs/control-protocol.md:170-177`); the writer should abort in that case.
 
 ## 3. XMP auto-write (F-017 point 3)
 
@@ -80,7 +80,7 @@ Note: `photo.virtualCopy` copies the settings of the source photo; a copy create
 ## Recommendation
 
 - Use the control port with `engine.execute` (accepted alias `command` also works, `control.rs:329`). One connection, sequential requests, new connection after any error line; never replay after an unknown outcome — instead re-query state (all commands above except `photo.virtualCopy` and probably `keyword.create` are safe to repeat).
-- Pre-flight checks, abort on failure: `library.info` → `persistent:true` and `path` equals the target library; `ui.inspect` → `libraryProblem` is null; `library.xmpPreferences {}` → `autoWrite` is false.
+- Pre-flight checks, abort on failure: `library.info` (engine command) → `persistent:true` and `path` equals the target library; `ui.inspect` (port method) → `libraryProblem` is null; `library.xmpPreferences {}` → `autoWrite` is false.
 - Import only with `mode:"add"` explicitly and only `paths` (+ nothing else); set everything per photo afterwards with `photo.rate`, `photo.flag`, `photo.label`, `photo.setMeta` — always with explicit `ids`.
 - Keep lr2lc's own index (Lightroom `id_global` → LightCraft id), because `Photo` has no external-id field (`lightcraft-import.md:44`); virtual copies must be created exactly once.
 - Before building the writer, run one live smoke test against a scratch library (`--library`) to close open questions 1–3.
