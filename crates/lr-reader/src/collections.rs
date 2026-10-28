@@ -14,7 +14,9 @@
 
 use crate::catalog::{Catalog, ReadError};
 use crate::smart::parse_smart_rules;
-use model::{Collection, CollectionKind, Photo, QuickCollection, Report, SmartRules};
+use model::{
+    Collection, CollectionKind, Photo, QuickCollection, Report, SmartCollection, SmartRules,
+};
 use rusqlite::types::ValueRef;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -40,6 +42,12 @@ pub struct CollectionData {
     /// collections are skipped all the same; the rules are kept for
     /// translation.
     pub smart: BTreeMap<i64, SmartRules>,
+    /// The smart collections with readable rules and a name that is valid
+    /// text, ascending by id, with their parent as stored (`None` on top
+    /// level or for a parent that is not a valid id). They are skipped in
+    /// `report` all the same; whether one can be converted is decided by
+    /// the writer side.
+    pub smart_collections: Vec<SmartCollection>,
 }
 
 /// Where a row points with its `parent` column.
@@ -62,6 +70,8 @@ struct Row {
     /// The kind and name, or the reason why the row itself is skipped.
     own: Result<(CollectionKind, String), String>,
     parent: ParentRef,
+    /// The name, if it is valid text.
+    name: Option<String>,
     /// `systemOnly` is set: a Quick Collection candidate.
     quick: bool,
 }
@@ -92,8 +102,10 @@ impl Catalog {
             reason
         })?;
         let status = resolve(&rows);
+        let smart_collections = smart_collections(&smart, &rows);
         let mut data = CollectionData {
             smart,
+            smart_collections,
             ..CollectionData::default()
         };
         let mut index: HashMap<i64, Target> = HashMap::new();
@@ -190,12 +202,14 @@ impl Catalog {
                     name.map(|name| (kind, name.to_owned()))
                         .ok_or_else(|| format!("collection {id}: name is not valid text"))
                 });
+                let name = name.map(str::to_owned);
                 let parent = parent_ref(row.get_ref(4)?);
                 Ok((
                     id,
                     Row {
                         own,
                         parent,
+                        name,
                         quick: system_only,
                     },
                 ))
@@ -262,6 +276,29 @@ impl Catalog {
             .map_err(ReadError::Query)?;
         rows.collect::<Result<_, _>>().map_err(ReadError::Query)
     }
+}
+
+/// The smart collections with readable rules whose name is valid text, by
+/// id.
+fn smart_collections(
+    smart: &BTreeMap<i64, SmartRules>,
+    rows: &BTreeMap<i64, Row>,
+) -> Vec<SmartCollection> {
+    smart
+        .iter()
+        .filter_map(|(&id, rules)| {
+            let row = rows.get(&id)?;
+            Some(SmartCollection {
+                lightroom_id: id,
+                name: row.name.clone()?,
+                parent: match row.parent {
+                    ParentRef::Id(p) => Some(p),
+                    _ => None,
+                },
+                rules: rules.clone(),
+            })
+        })
+        .collect()
 }
 
 /// Checks one member `photo` of the converted collection `c`; `folder` is
@@ -471,8 +508,42 @@ mod tests {
                 .map(|k| (k, String::new()))
                 .ok_or_else(|| "own".to_string()),
             parent,
+            name: Some(String::new()),
             quick: false,
         }
+    }
+
+    #[test]
+    fn smart_collections_need_rules_and_a_text_name() {
+        let named = |name: Option<&str>, parent| Row {
+            own: Err("smart".into()),
+            parent,
+            name: name.map(str::to_owned),
+            quick: false,
+        };
+        let rows: BTreeMap<i64, Row> = [
+            (1, named(Some("a"), ParentRef::Top)),
+            (2, named(Some("b"), ParentRef::Id(7))),
+            (3, named(None, ParentRef::Top)),
+            (4, named(Some("d"), ParentRef::Invalid)),
+            (5, named(Some("e"), ParentRef::Top)),
+        ]
+        .into_iter()
+        .collect();
+        let smart: BTreeMap<i64, SmartRules> = [1, 2, 3, 4]
+            .into_iter()
+            .map(|id| (id, rules(&["rating"])))
+            .collect();
+        let got: Vec<(i64, String, Option<i64>)> = smart_collections(&smart, &rows)
+            .into_iter()
+            .map(|s| (s.lightroom_id, s.name, s.parent))
+            .collect();
+        let want = [(1, "a", None), (2, "b", Some(7)), (4, "d", None)];
+        let want: Vec<(i64, String, Option<i64>)> = want
+            .iter()
+            .map(|(i, n, p)| (*i, n.to_string(), *p))
+            .collect();
+        assert_eq!(got, want);
     }
 
     fn smart(id: i64) -> String {
