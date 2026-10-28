@@ -1282,7 +1282,8 @@ fn add_stack_edges(path: &Path) -> Result<()> {
     // (stack, collapsed, [(image, position)]) in row insertion order.
     let r = |x: f64| V::Real(x);
     let i = |x: i64| V::Integer(x);
-    let stacks: Vec<(i64, i64, Vec<(i64, V)>)> = vec![
+    type Stack = (i64, i64, Vec<(i64, V)>);
+    let stacks: Vec<Stack> = vec![
         (1, 0, vec![(7, r(2.0)), (6, r(1.0))]),
         (2, 1, vec![(10, i(2)), (8, i(3)), (9, i(1))]),
         (3, 0, vec![(11, r(1.0)), (20, r(2.0))]),
