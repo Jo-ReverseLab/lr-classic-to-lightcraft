@@ -1131,6 +1131,44 @@ pub fn write_collection_catalog_with_files(dir: &Path) -> Result<PathBuf> {
     Ok(catalog)
 }
 
+/// Ids of the quick collection fixture ([`write_quick_catalog_with_files`]):
+/// the collection fixture with exactly one quick collection (id 14,
+/// `systemOnly` REAL 1.0) whose members are given in [`quick_edge::ROWS`].
+pub mod quick_edge {
+    pub const QUICK_ID: i64 = 14;
+    /// `(photo, position)` rows of the quick collection, in row order. 20 is a
+    /// virtual copy and 999 does not exist: both are skipped.
+    pub const ROWS: [(i64, f64); 5] = [(1, 3.0), (9, 1.0), (7, 2.0), (20, 4.0), (999, 5.0)];
+    /// The converted members in Lightroom order.
+    pub const MEMBERS: [i64; 3] = [9, 7, 1];
+    pub const MEMBERS_SKIPPED: i64 = 2;
+}
+
+/// Writes the collection fixture as `dir/quick.lrcat` with placeholder
+/// originals, but with a single quick collection (id 14) that has the member
+/// rows of [`quick_edge::ROWS`]; quick collection 15 and the member rows of
+/// 14 and 15 of the original fixture are removed.
+pub fn write_quick_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("quick.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_collection_edges(&catalog)?;
+    let c = Connection::open(&catalog)?;
+    c.execute_batch(
+        "DELETE FROM AgLibraryCollectionImage WHERE collection IN (14, 15); \
+         DELETE FROM AgLibraryCollection WHERE id_local = 15;",
+    )?;
+    for (photo, pos) in quick_edge::ROWS {
+        c.execute(
+            "INSERT INTO AgLibraryCollectionImage (collection, image, pick, positionInCollection) VALUES (14, ?1, 0, ?2)",
+            params![photo, pos],
+        )?;
+    }
+    drop(c);
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
 /// Removes every collection and every collection member from the catalog at
 /// `path`.
 pub fn clear_collections(path: &Path) -> Result<()> {
