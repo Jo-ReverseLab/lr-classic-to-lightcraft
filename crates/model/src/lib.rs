@@ -9,9 +9,11 @@ use std::path::PathBuf;
 
 pub mod label;
 pub mod mapping;
+pub mod smart;
 
 pub use label::{ColorLabel, LabelSet};
 pub use mapping::{PathMapping, PathMappings};
+pub use smart::{SmartCombine, SmartRule, SmartRules, SmartValue};
 
 /// Errors raised when building model values.
 #[derive(Debug, Clone, PartialEq, Eq)]
