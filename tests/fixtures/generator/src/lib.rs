@@ -1169,6 +1169,195 @@ pub fn write_quick_catalog_with_files(dir: &Path) -> Result<PathBuf> {
     Ok(catalog)
 }
 
+/// Smart collection fixture ([`write_smart_catalog`]): the small fixture
+/// plus smart collections 101.. with rule text in
+/// `AgLibraryCollectionContent`. All values are invented; the marker
+/// [`SECRET`] appears in every value and name so that tests can prove that
+/// reports never contain them.
+pub mod smart_edge {
+    /// Substring of every rule value and of every collection name added here.
+    pub const SECRET: &str = "ZyxSecret";
+    /// `(collection id, owningModule, content)`. Content `None` is SQL NULL.
+    /// Collection ids 5 and 6 of the small fixture have no content row at
+    /// all; the table itself exists in this fixture.
+    pub type Row = (i64, &'static str, Option<&'static str>);
+    pub const SMART: &str = "ag.library.smart_collection";
+    /// Readable rule texts, in id order. See the expectations in
+    /// `crates/lr-reader/tests/smart_rules.rs`.
+    pub const READABLE: [(i64, &str); 14] = [
+        (
+            101,
+            "s = {\n\t{\n\t\tcriteria = \"rating\",\n\t\toperation = \">=\",\n\t\tvalue = 3,\n\t\tvalue2 = 0,\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+        (
+            102,
+            "s = {\n\tcombine = \"union\",\n\t{\n\t\tcriteria = \"pick\",\n\t\toperation = \"==\",\n\t\tvalue = -1,\n\t},\n}",
+        ),
+        (
+            103,
+            "s = {\n\t{\n\t\tcriteria = \"labelColor\",\n\t\toperation = \"==\",\n\t\tvalue = \"red ZyxSecret\",\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+        (
+            104,
+            "s = {\n\t{\n\t\tcriteria = \"keywords\",\n\t\toperation = \"any\",\n\t\tvalue = \"Z\u{fc}\u{df}e \u{1f305} ZyxSecret\",\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+        (
+            105,
+            "s = {\n\t{\n\t\tcriteria = \"keywords\",\n\t\toperation = \"empty\",\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+        (
+            106,
+            "s = {\n\t{\n\t\tcriteria = \"captureTime\",\n\t\toperation = \"inLast\",\n\t\tvalue = 30,\n\t\tvalue_units = \"days\",\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+        (
+            107,
+            "s = {\n\t{\n\t\tcriteria = \"touchTime\",\n\t\toperation = \"inLast\",\n\t\tvalue = 2,\n\t\tvalue_units = \"months\",\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+        (
+            108,
+            "s = {\n\t{\n\t\tcriteria = \"fileFormat\",\n\t\toperation = \"==\",\n\t\tvalue = \"DNG ZyxSecret\",\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+        // Several rules, union, a string and a number as value, the same
+        // criterion twice.
+        (
+            109,
+            "s = {\n\t{\n\t\tcriteria = \"rating\",\n\t\toperation = \"==\",\n\t\tvalue = 5,\n\t},\n\t{\n\t\tcriteria = \"labelColor\",\n\t\toperation = \"==\",\n\t\tvalue = \"blue ZyxSecret\",\n\t},\n\t{\n\t\tcriteria = \"rating\",\n\t\toperation = \"==\",\n\t\tvalue = 4,\n\t},\n\tcombine = \"union\",\n}",
+        ),
+        // Unknown criterion, operation and combine are kept verbatim.
+        (
+            110,
+            "s = {\n\t{\n\t\tcriteria = \"zyxCriterion\",\n\t\toperation = \"zyxOp\",\n\t\tvalue = \"ZyxSecret\",\n\t},\n\tcombine = \"zyxCombine\",\n}",
+        ),
+        // Negative and fractional numbers, a number written as text.
+        (
+            111,
+            "s = {\n\t{\n\t\tcriteria = \"rating\",\n\t\toperation = \"<\",\n\t\tvalue = 2.5,\n\t\tvalue2 = -1,\n\t},\n\t{\n\t\tcriteria = \"rating\",\n\t\toperation = \">\",\n\t\tvalue = \"3\",\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+        // Escapes inside strings, an unknown extra key holding an escaped
+        // nested table (as in the synthetic sample), a boolean extra value.
+        (
+            112,
+            "s = {\n\t{\n\t\tcriteria = \"keywords\",\n\t\toperation = \"any\",\n\t\tvalue = \"say \\\"ZyxSecret\\\" \\\\ ok\",\n\t\tsomeOther = \"anObject = {\\\nkey = \\\"lr\\\",\\\n}\\\n\",\n\t\tflag = true,\n\t},\n\tcombine = \"intersect\",\n}",
+        ),
+        // No criteria at all.
+        (113, "s = {\n\tcombine = \"intersect\",\n}"),
+        // Compact formatting without newlines or tabs.
+        (
+            114,
+            "s={{criteria=\"pick\",operation=\"==\",value=1,},combine=\"union\",}",
+        ),
+    ];
+    /// Unreadable rule texts: truncated, malformed, empty, NULL.
+    pub const UNREADABLE: [(i64, Option<&str>); 8] = [
+        (
+            121,
+            Some("s = {\n\t{\n\t\tcriteria = \"rating\",\n\t\toperation = \">=\",\n\t\tvalue = 3,"),
+        ),
+        (
+            122,
+            Some(
+                "s = {\n\t{\n\t\tcriteria = \"rating\",\n\t\toperation = \">=\",\n\t\tvalue = \"ZyxSecr",
+            ),
+        ),
+        (123, Some("this is not a table ZyxSecret")),
+        (124, Some("")),
+        (125, None),
+        (
+            126,
+            Some("s = {\n\t{\n\t\tcriteria = ,\n\t},\n\tcombine = \"intersect\",\n}"),
+        ),
+        (
+            127,
+            Some("s = { { criteria = \"rating\" } } }}}} ZyxSecret"),
+        ),
+        (
+            128,
+            Some("s = \u{0}\u{1}\u{ff}{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{"),
+        ),
+    ];
+    /// Smart collections whose only content row has another `owningModule`
+    /// (and so no rules).
+    pub const OTHER_MODULE_ONLY: i64 = 129;
+    /// A collection of the small fixture's kind "plain" (id 4) gets a
+    /// smart-module content row too; it must be ignored.
+    pub const PLAIN_WITH_RULES: i64 = 4;
+    /// Rows added to `AgLibraryCollection` (ids 101..=114, 121..=128, 129).
+    pub const ADDED: i64 = 23;
+    /// Smart collections in the whole fixture: the 2 of the small fixture
+    /// (5, 6; no content row) plus the 23 added.
+    pub const SMART_TOTAL: i64 = 25;
+    /// Smart collections that give readable rules.
+    pub const READABLE_COUNT: i64 = 14;
+    /// Smart collections without readable rules: 5, 6, 121..=128, 129.
+    pub const UNREADABLE_COUNT: i64 = 11;
+}
+
+/// Writes the small fixture plus the smart collections of [`smart_edge`].
+/// Smart collection 101 also has a view-settings content row (other
+/// `owningModule`) with garbage text that must be ignored.
+pub fn write_smart_catalog(path: &Path) -> Result<()> {
+    write_small_catalog(path)?;
+    add_smart_edges(path)
+}
+
+/// Like [`write_smart_catalog`], but as `dir/smart.lrcat` with placeholder
+/// originals.
+pub fn write_smart_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("smart.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_smart_edges(&catalog)?;
+    create_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+fn add_smart_edges(path: &Path) -> Result<()> {
+    let c = Connection::open(path)?;
+    c.execute_batch(
+        "CREATE TABLE AgLibraryCollectionContent (id_local INTEGER PRIMARY KEY, collection INTEGER, content, owningModule);",
+    )?;
+    let ids: Vec<i64> = smart_edge::READABLE
+        .iter()
+        .map(|(id, _)| *id)
+        .chain(smart_edge::UNREADABLE.iter().map(|(id, _)| *id))
+        .chain([smart_edge::OTHER_MODULE_ONLY])
+        .collect();
+    for id in ids {
+        c.execute(
+            "INSERT INTO AgLibraryCollection (id_local, creationId, genealogy, imageCount, name, parent, systemOnly) VALUES (?1, 'com.adobe.ag.library.smart_collection', ?2, 0, ?3, NULL, 0)",
+            params![id, format!("/{id}"), format!("Smart {} {id}", smart_edge::SECRET)],
+        )?;
+    }
+    let insert = |coll: i64, module: &str, content: Option<&str>| {
+        c.execute(
+            "INSERT INTO AgLibraryCollectionContent (collection, content, owningModule) VALUES (?1, ?2, ?3)",
+            params![coll, content, module],
+        )
+    };
+    for (id, text) in smart_edge::READABLE {
+        insert(id, smart_edge::SMART, Some(text))?;
+    }
+    for (id, text) in smart_edge::UNREADABLE {
+        insert(id, smart_edge::SMART, text)?;
+    }
+    insert(
+        101,
+        "com.adobe.ag.library.sortType",
+        Some("s = {{{ not rules ZyxSecret"),
+    )?;
+    insert(
+        smart_edge::OTHER_MODULE_ONLY,
+        "com.adobe.ag.library.sortDirection",
+        Some("s = { combine = \"intersect\", }"),
+    )?;
+    insert(
+        smart_edge::PLAIN_WITH_RULES,
+        smart_edge::SMART,
+        Some(smart_edge::READABLE[0].1),
+    )?;
+    Ok(())
+}
+
 /// Removes every collection and every collection member from the catalog at
 /// `path`.
 pub fn clear_collections(path: &Path) -> Result<()> {
