@@ -401,8 +401,8 @@ photos, keywords and albums it creates stay in the library.
 `--apply` needs `--library DIR`, the LightCraft library to write; without
 it lr2lc stops with exit code 2. LightCraft must be running with that
 library open and its control port enabled (start the app with `--control N`;
-lr2lc uses `--port N`, default 7980, and contacts only `127.0.0.1`). lr2lc reads the catalog as in a dry run, then
-checks the app before it writes anything and stops with exit code 1 if:
+lr2lc uses `--port N`, default 7980, and contacts only `127.0.0.1`).
+lr2lc reads the catalog as in a dry run, then checks the app before it writes anything and stops with exit code 1 if:
 
 - the app runs a temporary in-memory session or has another library open;
 - the app reports a problem with its library;
@@ -589,12 +589,16 @@ counts the smart collections converted as smart albums.
 - The collapsed or expanded state of stacks is only counted, not written;
   stacks are always written expanded.
 - Development settings (the Lightroom edit state) are not converted yet.
-- A second run adds what is new and changes only what you did not change in
-  LightCraft; lr2lc does not yet compare the live LightCraft values with the
-  catalog, so a value you changed in LightCraft may be overwritten if the
-  same value also changed in Lightroom. Removals and renames are only
-  counted, never applied.
-- Windows is covered by the CI workflow but has not been tested by hand.
+- A second run sends what changed in Lightroom since the last run, compared
+  with the mapping file. lr2lc does not yet compare these values with what
+  LightCraft holds now, so a value you changed in LightCraft may be
+  overwritten if the same value also changed in Lightroom.
+- Renaming, moving and deleting collections, photos that left a stack and
+  photos that left the Quick Collection are only counted, never applied.
+  Photos that left a collection are removed from the album, and keywords
+  removed in Lightroom are removed from the photo, but only what lr2lc wrote
+  itself.
+- The CI workflow runs format, lint and tests on Linux, macOS and Windows.
 - Only `127.0.0.1` is contacted; a LightCraft app on another machine is not
   supported.
 

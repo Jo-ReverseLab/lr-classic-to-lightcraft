@@ -1,6 +1,6 @@
 # Three-way reconciliation with LightCraft (groundwork)
 
-> **Status:** The read-only snapshot of the LightCraft state (step a below) is done. The three-way decision for photo fields and keywords (step b) and the handling of albums, removed and renamed items (step c) are open; sections 3 and 4 describe the planned behaviour, not the current one. Decision: only values that still have their default (0 stars, no flag, no label, empty text) may be overwritten in a photo that LightCraft already had before the first run; any other difference is reported as a conflict and nothing is written.
+> **Status:** The read-only snapshot of the LightCraft state (step a below) is done. The three-way decision for photo fields and keywords (step b) and the handling of albums, removed and renamed items (step c) are open; sections 3 and 4 describe the planned behaviour, not the current one. Today, collection renames, moves and deletions, and photos that left a stack or the Quick Collection, are only counted; photos that left a collection are removed from the album and keywords removed in Lightroom are removed from the photo, in both cases only what lr2lc wrote itself. Planned, not implemented yet: only values that still have their default (0 stars, no flag, no label, empty text) may be overwritten in a photo that LightCraft already had before the first run; any other difference is reported as a conflict and nothing is written.
 
 Paths are relative to the lr2lc repo (`crates/…`, `docs/…`) or, where marked `LC:`, to the LightCraft source checkout (read only). Statements without file:line are marked *(assumption)*.
 
@@ -109,7 +109,7 @@ Acceptance: each item of §4 has a test and a report code; renamed keyword by gl
 
 ## Open questions
 
-1. Behaviour for photos already in LightCraft before the first lr2lc run (base unknown): treat defaults as writable and everything else as conflict, or ask? (User decision; also written to QUESTIONS.)
+1. Behaviour for photos already in LightCraft before the first lr2lc run (base unknown): treat defaults as writable and everything else as conflict, or ask? (User decision.)
 2. Should Lightroom-side removals (keyword removed from a photo, photo removed from an album) ever be applied, e.g. with an explicit `--prune`? Default here: report only.
 3. May reports contain field values, or only field names and ids?
 4. Is `catalog.query` with `filter: {}` complete (Local-only and deleted photos)? Not verified (`lightcraft-albums.md` A5 assumption).

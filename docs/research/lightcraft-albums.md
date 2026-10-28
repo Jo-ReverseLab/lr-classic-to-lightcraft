@@ -239,10 +239,10 @@ Rules:
 
 - Skip with reason: `systemOnly` rows, web/print/book/slideshow, unknown `creationId`; members whose image is not converted (counted per collection); collections whose set is skipped.
 - Idempotence: keep `Lightroom collection id_local (or id_global) → LightCraft album id` in the mapping file (same file as photos). On a rerun: id known and still present in `albums.list` → only `album.addPhotos` (idempotent) for missing members; id known but album gone (deleted by the user in LightCraft) → report, do not recreate (reconciliation); id unknown → create. Never find by name.
-- Duplicate names: LightCraft allows them (A1), so lr2lc may keep names as they are. Adding a suffix such as " (2)" is therefore only a readability choice; recommend **not** renaming (less loss of information) and listing duplicates in the report as a notice. Ask the user (QUESTIONS, point 2).
+- Duplicate names: LightCraft allows them (A1), so lr2lc may keep names as they are. Adding a suffix such as " (2)" is therefore only a readability choice; recommend **not** renaming (less loss of information) and listing duplicates in the report as a notice. This was a user decision; duplicates are kept.
 - Photo commands need `library.select` first (section 0). Group `album.addPhotos` calls in chunks (the whole id list at once is linear, `library.rs:1386-1393`), but keep each call within the 60 s limit; chunk size 500 *(assumption)*.
 - Empty collections: create them (empty albums are allowed).
-- Neutral model draft: `model::Collection { id: CollectionId(i64), name, parent: Option<CollectionId>, kind: CollectionKind::{Set, Regular, Smart, Quick}, members: Vec<PhotoRef> /* in position order */ }`, plus `Report` entries for skipped ones. Keep `Smart` and `Quick` as kinds so one reader pass serves P5b-3/4/6.
+- Neutral model draft: `model::Collection { id: CollectionId(i64), name, parent: Option<CollectionId>, kind: CollectionKind::{Set, Regular, Smart, Quick}, members: Vec<PhotoRef> /* in position order */ }`, plus `Report` entries for skipped ones. Keep `Smart` and `Quick` as kinds so one reader pass serves collections, smart collections and the Quick Collection.
 
 ### C2. Smart collections → smart albums
 
@@ -271,7 +271,7 @@ What LightCraft offers: `albums.list` (names, tree, counts), `catalog.query` + f
 
 - **Removed in Lightroom** (collection gone, member removed from a collection, photo gone from the catalog, keyword removed): with the mapping file the diff can be computed (mapped ids no longer in the new read). Recommended default: **report only**, do not delete anything in LightCraft automatically (principles: "Nothing is lost silently", user data). Optional `--prune` later: `album.removePhotos`, `album.delete` (descendants too, `library.rs:1253-1290`; careful), `photo.delete` (moves to Recently Deleted, recoverable, `library.rs:990`).
 - **Renamed in Lightroom** (collection or keyword renamed, photo file renamed/moved): identity by mapped id, so a collection rename → `album.rename {id, name}` (idempotent, `library.rs:1246-1251`); a keyword rename has no id in LightCraft (keywords are path strings in photos' metadata, `lightcraft-library.md`) → `keyword.rename {from, to}` exists (`keywords.rs:516-530`), but only if the old path is still the one lr2lc wrote; otherwise report. A moved/renamed file: the photo's `source.path` differs from the new path; LightCraft cannot re-point a photo through any command read here *(assumption; `library.relocate`-like commands were not searched)*: report, so reconciliation should be limited to reporting renamed files.
-- **Edited in LightCraft** after the first run (user changed name or members): with only the mapping file lr2lc cannot tell who changed it. Recommended rule: the first run's state is stored (a hash of what lr2lc wrote) in the mapping file; on conflict, do not overwrite, report. This needs a design decision (QUESTIONS).
+- **Edited in LightCraft** after the first run (user changed name or members): with only the mapping file lr2lc cannot tell who changed it. Recommended rule: the first run's state is stored (a hash of what lr2lc wrote) in the mapping file; on conflict, do not overwrite, report. This needs a design decision.
 - The needed reads (`albums.list`, `catalog.query` per album, one `photo.inspect` per photo) are linear in library size; for large catalogs budget with paging and the 60 s limit per request.
 
 ### C6. Writer fixes derived from this research
@@ -309,7 +309,7 @@ Decisions taken or still open:
 14. Duplicate album names: keep, or add a suffix such as " (2)"? Decided: keep. LightCraft allows duplicates (A1).
 15. Collapsed state of stacks: map it (one parameter) or not? Decided: not mapped, written expanded.
 16. Smart collections without an exact rule translation: skip (recommended, implemented) or import as a regular album with current membership (what LightCraft's own importer does)?
-17. Removed/renamed items: report only (recommended) or prune? Currently report only.
+17. Removed/renamed items: report only (recommended) or prune? Current behaviour: renames, moves and deletions of collections, and photos that left a stack or the Quick Collection, are only counted. Photos that left a collection are removed from the album, but only photos lr2lc added itself. A keyword removed from a photo in Lightroom is removed from it in LightCraft (`removeKeywords`), based on what lr2lc wrote earlier.
 18. Handling of web, print, book, slideshow collections: skip with reason (recommended).
 
 ## Recommendation
