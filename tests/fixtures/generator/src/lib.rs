@@ -1524,6 +1524,49 @@ pub fn make_smart_untranslatable(path: &Path, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// How [`break_smart_rules`] destroys the rules of a smart collection.
+#[derive(Debug, Clone, Copy)]
+pub enum RuleDamage {
+    /// The rule text is cut off in the middle of a rule.
+    Truncated,
+    /// The content row is deleted.
+    RowMissing,
+    /// The content is SQL NULL.
+    NullContent,
+    /// The whole `AgLibraryCollectionContent` table is dropped.
+    TableMissing,
+}
+
+/// Makes the rules of smart collection `id` unreadable while the
+/// collection row itself stays (task K-7).
+pub fn break_smart_rules(path: &Path, id: i64, damage: RuleDamage) -> Result<()> {
+    let c = Connection::open(path)?;
+    match damage {
+        RuleDamage::Truncated => {
+            c.execute(
+                "UPDATE AgLibraryCollectionContent SET content = 's = {\n\t{\n\t\tcriteria = \"rating\",' WHERE collection = ?1 AND owningModule = ?2",
+                params![id, smart_edge::SMART],
+            )?;
+        }
+        RuleDamage::RowMissing => {
+            c.execute(
+                "DELETE FROM AgLibraryCollectionContent WHERE collection = ?1 AND owningModule = ?2",
+                params![id, smart_edge::SMART],
+            )?;
+        }
+        RuleDamage::NullContent => {
+            c.execute(
+                "UPDATE AgLibraryCollectionContent SET content = NULL WHERE collection = ?1 AND owningModule = ?2",
+                params![id, smart_edge::SMART],
+            )?;
+        }
+        RuleDamage::TableMissing => {
+            c.execute_batch("DROP TABLE AgLibraryCollectionContent;")?;
+        }
+    }
+    Ok(())
+}
+
 fn add_collection_edges(path: &Path) -> Result<()> {
     use rusqlite::types::Value as V;
     const COLL: &str = "com.adobe.ag.library.collection";
