@@ -44,11 +44,10 @@ use model::{ColorLabel, Keyword, Photo, Rating};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{
     Config, Failure, FakeLightCraft, ImportIdStyle, KeywordListFormat, READ_COMMANDS,
 };
+use lc_test_support::fake_lightcraft;
 
 const PHOTO_DIR: &str = "/Users/example/Pictures";
 

@@ -30,9 +30,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, FakeLightCraft};
+use lc_test_support::fake_lightcraft;
 
 struct Setup {
     _photos: tempfile::TempDir,

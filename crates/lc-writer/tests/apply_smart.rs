@@ -40,9 +40,8 @@ use model::{
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{AlbumFailure, Config, FakeLightCraft};
+use lc_test_support::fake_lightcraft;
 
 const SECRET: &str = "ZyxSecret";
 

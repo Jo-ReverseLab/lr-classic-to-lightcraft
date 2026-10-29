@@ -39,9 +39,8 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, FakeLightCraft, READ_COMMANDS};
+use lc_test_support::fake_lightcraft;
 
 /// Names that must never appear in stdout or report.json.
 const SECRET_NAMES: [&str; 6] = [

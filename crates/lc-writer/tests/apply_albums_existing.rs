@@ -32,9 +32,8 @@ use model::{Collection, CollectionKind, Photo, Rating};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{AlbumView, Config, FakeLightCraft, SeedAlbum};
+use lc_test_support::fake_lightcraft;
 
 const NAMES: [&str; 5] = ["Set A", "Set B", "Deep", "Top Album", "Empty"];
 const AMBIGUOUS: &str = "ambiguous: 2 albums with the same name and parent in LightCraft";

@@ -24,11 +24,11 @@
 //!   a method of the port itself (`ControlClient::call`), the others through
 //!   `engine.execute`.
 //!
-//! The fake port is in `tests/support/fake_port.rs`; it records every line.
+//! The fake port is in the `lc-test-support` crate (`lc_test_support::fake_port`);
+//! it records every line.
 //!
 
-#[path = "support/fake_port.rs"]
-mod fake_port;
+use lc_test_support::fake_port;
 
 use fake_port::{FakePort, Reply};
 use lc_writer::control::{ControlClient, Outcome, WriteError, preflight};

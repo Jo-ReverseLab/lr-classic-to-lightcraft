@@ -17,9 +17,8 @@ use std::ffi::OsStr;
 use std::fs;
 use std::process::Command;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, FakeLightCraft};
+use lc_test_support::fake_lightcraft;
 
 fn n(v: &Value) -> usize {
     v.as_u64().unwrap_or_else(|| panic!("not a number: {v}")) as usize

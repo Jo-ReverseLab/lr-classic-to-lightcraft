@@ -24,9 +24,8 @@ use std::ffi::OsStr;
 use std::fs;
 use std::process::Command;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, FakeLightCraft};
+use lc_test_support::fake_lightcraft;
 
 struct Run {
     report: Value,

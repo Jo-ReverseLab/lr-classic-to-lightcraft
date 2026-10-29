@@ -36,9 +36,8 @@ use model::{SmartCollection, SmartCombine, SmartRule, SmartRules, SmartValue};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, FakeLightCraft};
+use lc_test_support::fake_lightcraft;
 
 fn good() -> SmartRules {
     SmartRules {

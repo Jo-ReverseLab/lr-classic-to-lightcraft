@@ -33,9 +33,8 @@ use model::{
 use serde_json::Value;
 use std::path::PathBuf;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, FakeLightCraft, SeedAlbum};
+use lc_test_support::fake_lightcraft;
 
 const NAME: &str = "ZyxName";
 

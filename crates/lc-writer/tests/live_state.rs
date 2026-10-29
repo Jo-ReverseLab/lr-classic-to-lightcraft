@@ -45,9 +45,8 @@ use lc_writer::state::{CollectionEntry, EntryKind, PhotoFields, State};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, FakeLightCraft, SeedAlbum, SeedPhoto};
+use lc_test_support::fake_lightcraft;
 
 const READS: [&str; 4] = [
     "catalog.query",

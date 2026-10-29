@@ -33,9 +33,8 @@ use model::{Collection, CollectionKind, Photo, QuickCollection, Rating};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, Failure, FakeLightCraft, SeedAlbum};
+use lc_test_support::fake_lightcraft;
 
 type Commands = Vec<(String, Value)>;
 

@@ -39,9 +39,8 @@ use model::{Photo, Rating, Stack};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, Failure, FakeLightCraft, StackView};
+use lc_test_support::fake_lightcraft;
 
 fn stack(id: i64, members: &[i64]) -> Stack {
     Stack {

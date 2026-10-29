@@ -128,9 +128,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{AlbumFailure, Config, Failure, FakeLightCraft};
+use lc_test_support::fake_lightcraft;
 
 /// The catalog areas: (json key, name in the text summary).
 const AREAS: [(&str, &str); 9] = [

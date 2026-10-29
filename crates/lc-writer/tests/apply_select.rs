@@ -26,9 +26,8 @@ use model::{ColorLabel, Photo, Rating};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, Failure, FakeLightCraft};
+use lc_test_support::fake_lightcraft;
 
 fn photo(gid: &str, lr_id: i64, rating: u8) -> Photo {
     Photo::new(

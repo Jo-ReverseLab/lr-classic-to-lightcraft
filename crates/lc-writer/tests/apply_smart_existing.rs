@@ -40,9 +40,8 @@ use model::{
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{AlbumView, Config, FakeLightCraft, SeedAlbum};
+use lc_test_support::fake_lightcraft;
 
 const AMBIGUOUS: &str =
     "ambiguous: 2 smart albums with the same name, parent and rules in LightCraft";

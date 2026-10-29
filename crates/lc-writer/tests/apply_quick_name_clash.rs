@@ -14,9 +14,8 @@ use lc_writer::state::State;
 use model::{Collection, CollectionKind, Photo, QuickCollection, Rating};
 use serde_json::{Value, json};
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, FakeLightCraft};
+use lc_test_support::fake_lightcraft;
 
 type Commands = Vec<(String, Value)>;
 

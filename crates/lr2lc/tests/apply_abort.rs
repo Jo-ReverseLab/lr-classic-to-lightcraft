@@ -29,9 +29,8 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, FakeLightCraft};
+use lc_test_support::fake_lightcraft;
 
 /// Counters of the `writer` section that must be 0 when nothing was sent.
 const COUNTERS: [&str; 5] = [

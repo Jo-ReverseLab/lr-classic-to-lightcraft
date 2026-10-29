@@ -27,9 +27,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, FakeLightCraft};
+use lc_test_support::fake_lightcraft;
 
 const AMBIGUOUS: &str = "ambiguous: 2 albums with the same name and parent in LightCraft";
 /// Converted collections minus the two "Twin" albums.
