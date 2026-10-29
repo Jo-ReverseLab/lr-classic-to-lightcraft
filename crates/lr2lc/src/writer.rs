@@ -194,6 +194,7 @@ pub fn planned(plan: &Plan) -> PlannedJson {
         match step {
             Step::CreateKeyword { .. } => out.keywords += 1,
             Step::Import { .. } => out.photos += 1,
+            Step::VirtualCopy { .. } => out.photos += 1,
             Step::Update { .. } => out.updates += 1,
             Step::CreateAlbum { params, .. } => {
                 if params["folder"] == true {

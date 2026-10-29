@@ -87,6 +87,16 @@ pub enum Step {
         /// The photo's file.
         path: PathBuf,
     },
+    /// Create one virtual copy from its master (`photo.virtualCopy`). The
+    /// copy is created at most once: the step is planned only when the copy
+    /// is not yet in the mapping file. The master's LightCraft id is read
+    /// from the mapping file during the run, so the master is imported first.
+    VirtualCopy {
+        /// Lightroom global id of the copy.
+        global_id: String,
+        /// Lightroom global id of the master.
+        master_global_id: String,
+    },
     /// Change a field of one photo. `params` never contains `ids`; the
     /// photo is named by its global id.
     Update {
@@ -342,6 +352,13 @@ impl Plan {
                 Step::Import { path, .. } => {
                     selected = None;
                     push("library.import", import_params(path));
+                }
+                Step::VirtualCopy {
+                    master_global_id, ..
+                } => {
+                    selected = None;
+                    let master = photo_ref(state, master_global_id);
+                    push("photo.virtualCopy", json!({"ids": [master]}));
                 }
                 Step::CreateAlbum { params, .. } => {
                     selected = None;
@@ -628,7 +645,22 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
         }
     }
 
-    for (gid, p) in by_gid {
+    // A copy names its master by Lightroom id; resolve that to the master's
+    // global id so the writer can look the master up in the mapping file.
+    let master_gid: BTreeMap<i64, &str> = by_gid
+        .iter()
+        .map(|(gid, p)| (p.lightroom_id, *gid))
+        .collect();
+
+    // Masters are planned before their copies: the copy step reads the
+    // master's LightCraft id from the mapping file, which the master's import
+    // step writes earlier in the same run. `by_gid` iterates sorted by global
+    // id; the two passes keep that order within each group.
+    let mut order: Vec<&str> = by_gid.keys().copied().collect();
+    order.sort_by_key(|gid| by_gid[gid].master.is_some());
+
+    for gid in order {
+        let p = by_gid[gid];
         let keywords = input
             .photo_keywords
             .get(&p.lightroom_id)
@@ -639,20 +671,43 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
         let old = match state.photo(gid) {
             Some(entry) => entry.fields.clone(),
             None => {
-                if p.path.to_str().is_none() {
-                    out.skipped.push(Skipped::new(
-                        SkipCode::PathNotUtf8,
-                        format!(
-                            "photo {} has a file path that is not valid UTF-8",
-                            p.lightroom_id
-                        ),
-                    ));
-                    continue;
+                if let Some(master) = p.master {
+                    // A virtual copy is created from its master, never
+                    // imported as a file. The master must be in the input
+                    // (was converted by the reader) and, during the run, get
+                    // a LightCraft id. If the master was skipped at read
+                    // time it is absent here and the copy cannot be created.
+                    let Some(master_global_id) = master_gid.get(&master).copied() else {
+                        out.skipped.push(Skipped::new(
+                            SkipCode::VirtualCopy,
+                            format!(
+                                "photo {}: virtual copy of photo {} cannot be created, \
+                                 the master was not converted",
+                                p.lightroom_id, master
+                            ),
+                        ));
+                        continue;
+                    };
+                    out.steps.push(Step::VirtualCopy {
+                        global_id: gid.to_string(),
+                        master_global_id: master_global_id.to_string(),
+                    });
+                } else {
+                    if p.path.to_str().is_none() {
+                        out.skipped.push(Skipped::new(
+                            SkipCode::PathNotUtf8,
+                            format!(
+                                "photo {} has a file path that is not valid UTF-8",
+                                p.lightroom_id
+                            ),
+                        ));
+                        continue;
+                    }
+                    out.steps.push(Step::Import {
+                        global_id: gid.to_string(),
+                        path: p.path.clone(),
+                    });
                 }
-                out.steps.push(Step::Import {
-                    global_id: gid.to_string(),
-                    path: p.path.clone(),
-                });
                 PhotoFields::imported_default()
             }
         };
