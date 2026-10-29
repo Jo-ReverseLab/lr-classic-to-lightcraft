@@ -50,6 +50,15 @@ impl LabelMode {
             LabelChoice::File(path) => LabelMode::Fixed(load_file(path)?, "file"),
         })
     }
+
+    /// The label set name written to `report.json`: `auto` for the combined
+    /// set, otherwise `en`, `de` or `file`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            LabelMode::Auto => "auto",
+            LabelMode::Fixed(_, name) => name,
+        }
+    }
 }
 
 /// Reads a label set file: a JSON object `{"<name>": "<colour>"}`.
@@ -107,13 +116,13 @@ pub struct LabelCounts {
     pub none: usize,
     /// Photos whose label is not in the set; converted without a label.
     pub custom: usize,
-    /// `en`, `de`, `file` or `none`.
+    /// `auto`, `en`, `de` or `file`.
     pub set: &'static str,
     /// Ids of the custom photos, ascending.
     pub custom_ids: Vec<i64>,
-    /// The set was detected automatically, found nothing and left custom
-    /// labels: the user should choose a set.
-    pub recommend: bool,
+    /// Under `auto`, the standard sets whose names matched at least one
+    /// converted photo, in the order `en`, `de`. Empty for a fixed set.
+    pub matched_sets: Vec<&'static str>,
 }
 
 /// Sets the label of each photo from `raw` (`(id, text)` pairs of
@@ -121,6 +130,13 @@ pub struct LabelCounts {
 ///
 /// Only labels of the given photos count, so labels of skipped photos
 /// never influence the automatic detection.
+///
+/// With `auto`, each label is matched against the English and German
+/// standard names together: a name that equals one of them exactly maps to
+/// its colour, whatever the other labels are. The standard names do not
+/// overlap, so a name matches at most one set, and `matched_sets` records
+/// which set(s) were used. Any other non-empty label is a custom label of
+/// its own photo. Nothing else is guessed.
 pub fn apply(photos: &mut [Photo], raw: &[(i64, String)], mode: &LabelMode) -> LabelCounts {
     let ids: HashSet<i64> = photos.iter().map(|p| p.lightroom_id).collect();
     let text: HashMap<i64, &str> = raw
@@ -128,21 +144,40 @@ pub fn apply(photos: &mut [Photo], raw: &[(i64, String)], mode: &LabelMode) -> L
         .filter(|(id, t)| ids.contains(id) && !t.is_empty())
         .map(|(id, t)| (*id, t.as_str()))
         .collect();
-    let (set, name) = match mode {
-        LabelMode::Fixed(set, name) => (Some(set.clone()), *name),
-        LabelMode::Auto => detect(text.values().copied()),
+    let fixed_set = match mode {
+        LabelMode::Fixed(set, _) => Some(set.clone()),
+        LabelMode::Auto => None,
     };
+    let en = LabelSet::en();
+    let de = LabelSet::de();
     let mut counts = LabelCounts {
-        set: name,
+        set: mode.name(),
         ..LabelCounts::default()
     };
+    let mut matched_en = false;
+    let mut matched_de = false;
     for photo in photos.iter_mut() {
         photo.label = None;
         let Some(t) = text.get(&photo.lightroom_id) else {
             counts.none += 1;
             continue;
         };
-        match set.as_ref().and_then(|s| s.resolve(t)) {
+        let resolved = match mode {
+            LabelMode::Auto => en
+                .resolve(t)
+                .map(|c| {
+                    matched_en = true;
+                    c
+                })
+                .or_else(|| {
+                    de.resolve(t).map(|c| {
+                        matched_de = true;
+                        c
+                    })
+                }),
+            LabelMode::Fixed(_) => fixed_set.as_ref().and_then(|s| s.resolve(t)),
+        };
+        match resolved {
             Some(label) => {
                 photo.label = Some(label);
                 *counts.slot(label) += 1;
@@ -154,21 +189,17 @@ pub fn apply(photos: &mut [Photo], raw: &[(i64, String)], mode: &LabelMode) -> L
         }
     }
     counts.custom_ids.sort_unstable();
-    counts.recommend = matches!(mode, LabelMode::Auto) && set.is_none() && counts.custom > 0;
-    counts
-}
-
-/// The built-in set that contains every label exactly, or none.
-fn detect<'a>(labels: impl Iterator<Item = &'a str> + Clone) -> (Option<LabelSet>, &'static str) {
-    if labels.clone().next().is_none() {
-        return (None, "none");
-    }
-    for (set, name) in [(LabelSet::en(), "en"), (LabelSet::de(), "de")] {
-        if labels.clone().all(|t| set.resolve(t).is_some()) {
-            return (Some(set), name);
+    if matches!(mode, LabelMode::Auto) {
+        let mut matched = Vec::new();
+        if matched_en {
+            matched.push("en");
         }
+        if matched_de {
+            matched.push("de");
+        }
+        counts.matched_sets = matched;
     }
-    (None, "none")
+    counts
 }
 
 impl LabelCounts {
@@ -210,44 +241,68 @@ mod tests {
     }
 
     #[test]
-    fn auto_detects_a_complete_set() {
+    fn auto_maps_german_names_together() {
         let mut p = photos(&[1, 2, 3]);
         let c = apply(&mut p, &raw(&[(1, "Rot"), (2, "Blau")]), &LabelMode::Auto);
-        assert_eq!((c.red, c.blue, c.none, c.custom, c.set), (1, 1, 1, 0, "de"));
+        assert_eq!(
+            (c.red, c.blue, c.none, c.custom, c.set),
+            (1, 1, 1, 0, "auto")
+        );
+        assert_eq!(c.matched_sets, ["de"]);
         assert_eq!(p[0].label, Some(ColorLabel::Red));
-        assert!(!c.recommend);
     }
 
     #[test]
-    fn auto_with_mixed_sets_makes_all_custom_and_recommends() {
+    fn auto_maps_mixed_english_and_german_together() {
         let mut p = photos(&[1, 2]);
         let c = apply(&mut p, &raw(&[(2, "Rot"), (1, "Red")]), &LabelMode::Auto);
-        assert_eq!((c.custom, c.set), (2, "none"));
-        assert_eq!(c.custom_ids, [1, 2]);
-        assert!(c.recommend);
-        assert!(p.iter().all(|p| p.label.is_none()));
+        assert_eq!((c.red, c.custom, c.set), (2, 0, "auto"));
+        assert_eq!(c.matched_sets, ["en", "de"]);
+        assert!(p.iter().all(|p| p.label == Some(ColorLabel::Red)));
     }
 
     #[test]
-    fn auto_without_labels_is_none_without_recommendation() {
+    fn auto_without_labels_reports_auto_and_no_match() {
         let mut p = photos(&[1]);
         let c = apply(&mut p, &[], &LabelMode::Auto);
-        assert_eq!((c.none, c.set, c.recommend), (1, "none", false));
+        assert_eq!((c.none, c.set), (1, "auto"));
+        assert!(c.matched_sets.is_empty());
+    }
+
+    #[test]
+    fn auto_treats_unknown_names_as_custom_with_no_match() {
+        let mut p = photos(&[1]);
+        let c = apply(&mut p, &raw(&[(1, "Pinkish")]), &LabelMode::Auto);
+        assert_eq!((c.custom, c.none, c.set), (1, 0, "auto"));
+        assert!(c.matched_sets.is_empty());
+        assert_eq!(c.custom_ids, [1]);
+        assert!(p[0].label.is_none());
+    }
+
+    #[test]
+    fn auto_does_not_match_nfd_gruen() {
+        // The German set stores NFC `Grün`; a decomposed form stays custom.
+        let mut p = photos(&[1]);
+        let c = apply(&mut p, &raw(&[(1, "Gru\u{308}n")]), &LabelMode::Auto);
+        assert_eq!(c.custom, 1);
+        assert!(c.matched_sets.is_empty());
     }
 
     #[test]
     fn labels_of_other_photos_are_ignored() {
         let mut p = photos(&[1]);
         let c = apply(&mut p, &raw(&[(1, "Red"), (9, "Rot")]), &LabelMode::Auto);
-        assert_eq!((c.red, c.set), (1, "en"));
+        assert_eq!((c.red, c.set), (1, "auto"));
+        assert_eq!(c.matched_sets, ["en"]);
     }
 
     #[test]
-    fn fixed_set_never_recommends() {
+    fn fixed_set_has_no_matched_sets() {
         let mut p = photos(&[1]);
         let mode = LabelMode::Fixed(LabelSet::en(), "en");
         let c = apply(&mut p, &raw(&[(1, "Rot")]), &mode);
-        assert_eq!((c.custom, c.set, c.recommend), (1, "en", false));
+        assert_eq!((c.custom, c.set), (1, "en"));
+        assert!(c.matched_sets.is_empty());
     }
 
     #[test]
