@@ -184,13 +184,14 @@ impl Catalog {
             .map_err(ReadError::Query)?;
         let mut data = PhotoData::default();
         let mut used = HashSet::new();
+        let mut converted: HashSet<i64> = HashSet::new();
         for row in rows {
             let row = row.map_err(ReadError::Query)?;
             report.read();
             let unknown_flag = flag_from_value(&row.pick).is_none();
             let color_label = row.color_label.clone();
             let title = title_from_value(&row.xmp);
-            match photo_from_row(row, &mut used) {
+            match photo_from_row(row, &mut used, &mut converted) {
                 Ok(photo) => {
                     let photo = match title {
                         Ok(Some(title)) => photo.with_title(title),
@@ -229,20 +230,37 @@ fn title_from_value(value: &Value) -> Result<Option<String>, Unreadable> {
 /// Turns a joined row into a photo, or returns the reason it is skipped.
 ///
 /// Reasons name the photo's catalog id but never paths, file names or the
-/// global id. The checks run in this order: virtual copy, video, missing
-/// or duplicate global id, file, folder and root folder rows, rating.
+/// global id. The checks run in this order: virtual copy whose master was not
+/// converted, video, missing or duplicate global id, file, folder and root
+/// folder rows, rating. A virtual copy whose master was converted is itself
+/// converted with its `master` set; the writer then creates it once with
+/// `photo.virtualCopy`. A copy whose master was skipped (a video, a missing
+/// original, ...) cannot be created and is skipped here with the reason
+/// `virtual_copy`.
 ///
 /// `used` holds the global ids of the photos converted so far (rows are
 /// read in `id_local` order). Only a converted photo adds its global id, so
 /// a row skipped for any reason does not block a later row with the same
-/// global id.
-fn photo_from_row(row: Row, used: &mut HashSet<String>) -> Result<Photo, Skipped> {
+/// global id. `converted` holds the `lightroom_id` of every photo converted
+/// so far, so a copy can tell whether its master was converted (masters are
+/// read before their copies).
+fn photo_from_row(
+    row: Row,
+    used: &mut HashSet<String>,
+    converted: &mut HashSet<i64>,
+) -> Result<Photo, Skipped> {
     let id = row.image_id;
     let skip = |code, reason: String| Skipped::new(code, reason);
-    if let Some(master) = row.master {
+    let master = row.master;
+    if let Some(master) = master
+        && !converted.contains(&master)
+    {
         return Err(skip(
             SkipCode::VirtualCopy,
-            format!("photo {id}: virtual copy of photo {master} is not converted"),
+            format!(
+                "photo {id}: virtual copy of photo {master} cannot be created, \
+                 the master was not converted"
+            ),
         ));
     }
     let ext = row.file.as_ref().map(|(_, ext)| ext.as_str());
@@ -300,9 +318,14 @@ fn photo_from_row(row: Row, used: &mut HashSet<String>) -> Result<Photo, Skipped
     let flag = flag_from_value(&row.pick).unwrap_or_default();
     let folder = join_folder_path(&root, &rel);
     used.insert(global_id.clone());
+    converted.insert(id);
     let photo = Photo::new(join_file_path(&folder, &file_name(&base, &ext)), id, rating)
         .with_global_id(global_id)
         .with_flag(flag);
+    let photo = match master {
+        Some(master) => photo.with_master(master),
+        None => photo,
+    };
     let photo = match row.caption {
         Some(caption) => photo.with_caption(caption),
         None => photo,
@@ -444,9 +467,9 @@ mod tests {
     fn caption_of_the_row_is_carried_by_the_photo() {
         let mut r = row();
         r.caption = Some(" a ".into());
-        let p = photo_from_row(r, &mut HashSet::new()).unwrap();
+        let p = photo_from_row(r, &mut HashSet::new(), &mut HashSet::new()).unwrap();
         assert_eq!(p.caption.as_deref(), Some(" a "));
-        let p = photo_from_row(row(), &mut HashSet::new()).unwrap();
+        let p = photo_from_row(row(), &mut HashSet::new(), &mut HashSet::new()).unwrap();
         assert_eq!(p.caption, None);
     }
 
@@ -455,10 +478,10 @@ mod tests {
         let mut r = row();
         r.copyright = Some(" c ".into());
         r.creator = Some(" a ".into());
-        let p = photo_from_row(r, &mut HashSet::new()).unwrap();
+        let p = photo_from_row(r, &mut HashSet::new(), &mut HashSet::new()).unwrap();
         assert_eq!(p.copyright.as_deref(), Some(" c "));
         assert_eq!(p.creator.as_deref(), Some(" a "));
-        let p = photo_from_row(row(), &mut HashSet::new()).unwrap();
+        let p = photo_from_row(row(), &mut HashSet::new(), &mut HashSet::new()).unwrap();
         assert_eq!((p.copyright, p.creator), (None, None));
     }
 
@@ -486,20 +509,24 @@ mod tests {
         let mut r = row();
         r.pick = Value::Integer(-1);
         assert_eq!(
-            photo_from_row(r, &mut HashSet::new()).unwrap().flag,
+            photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
+                .unwrap()
+                .flag,
             Flag::Reject
         );
         let mut r = row();
         r.pick = Value::Integer(2);
         assert_eq!(
-            photo_from_row(r, &mut HashSet::new()).unwrap().flag,
+            photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
+                .unwrap()
+                .flag,
             Flag::None
         );
     }
 
     #[test]
     fn valid_row_becomes_photo() {
-        let p = photo_from_row(row(), &mut HashSet::new()).unwrap();
+        let p = photo_from_row(row(), &mut HashSet::new(), &mut HashSet::new()).unwrap();
         assert_eq!(p.path, std::path::PathBuf::from("/r/a/IMG.jpg"));
         assert_eq!(p.lightroom_id, 1);
         assert_eq!(p.rating.get(), 0);
@@ -509,7 +536,7 @@ mod tests {
     fn global_id_is_kept_byte_for_byte() {
         let mut r = row();
         r.global_id = Some(" a\u{1F305} ".into());
-        let p = photo_from_row(r, &mut HashSet::new()).unwrap();
+        let p = photo_from_row(r, &mut HashSet::new(), &mut HashSet::new()).unwrap();
         assert_eq!(p.global_id.as_deref(), Some(" a\u{1F305} "));
     }
 
@@ -519,7 +546,9 @@ mod tests {
             let mut r = row();
             r.global_id = g.map(str::to_owned);
             assert_eq!(
-                photo_from_row(r, &mut HashSet::new()).unwrap_err().reason,
+                photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
+                    .unwrap_err()
+                    .reason,
                 "photo 1: missing global id"
             );
         }
@@ -528,11 +557,14 @@ mod tests {
     #[test]
     fn duplicate_global_id_is_skipped_without_naming_it() {
         let mut used = HashSet::new();
-        assert!(photo_from_row(row(), &mut used).is_ok());
+        let mut converted = HashSet::new();
+        assert!(photo_from_row(row(), &mut used, &mut converted).is_ok());
         let mut r = row();
         r.image_id = 2;
         assert_eq!(
-            photo_from_row(r, &mut used).unwrap_err().reason,
+            photo_from_row(r, &mut used, &mut converted)
+                .unwrap_err()
+                .reason,
             "photo 2: duplicate global id"
         );
     }
@@ -542,16 +574,42 @@ mod tests {
         // Lead decision: only a converted photo claims its global id, so a
         // later row with the same id is converted instead.
         let mut used = HashSet::new();
+        let mut converted = HashSet::new();
         let mut bad = row();
         bad.rating = Value::Integer(9);
-        assert!(photo_from_row(bad, &mut used).is_err());
+        assert!(photo_from_row(bad, &mut used, &mut converted).is_err());
         let mut copy = row();
         copy.master = Some(5);
-        assert!(photo_from_row(copy, &mut used).is_err());
+        assert!(photo_from_row(copy, &mut used, &mut converted).is_err());
         assert!(used.is_empty());
         let mut later = row();
         later.image_id = 2;
-        assert_eq!(photo_from_row(later, &mut used).unwrap().lightroom_id, 2);
+        assert_eq!(
+            photo_from_row(later, &mut used, &mut converted)
+                .unwrap()
+                .lightroom_id,
+            2
+        );
+    }
+
+    #[test]
+    fn virtual_copy_of_a_converted_master_is_converted_with_master() {
+        // A copy whose master was converted is itself converted and carries
+        // the master's Lightroom id; the writer then creates it once.
+        let mut used = HashSet::new();
+        let mut converted = HashSet::new();
+        let mut master = row();
+        master.image_id = 1;
+        master.global_id = Some("g-1".into());
+        let master_photo = photo_from_row(master, &mut used, &mut converted).unwrap();
+        assert_eq!(master_photo.master, None);
+        let mut copy = row();
+        copy.image_id = 2;
+        copy.global_id = Some("g-2".into());
+        copy.master = Some(1);
+        let copy_photo = photo_from_row(copy, &mut used, &mut converted).unwrap();
+        assert_eq!(copy_photo.lightroom_id, 2);
+        assert_eq!(copy_photo.master, Some(1));
     }
 
     #[test]
@@ -561,7 +619,7 @@ mod tests {
         r.global_id = None;
         r.master = Some(3);
         assert!(
-            photo_from_row(r, &mut HashSet::new())
+            photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
                 .unwrap_err()
                 .reason
                 .contains("virtual copy")
@@ -570,7 +628,7 @@ mod tests {
         r.global_id = None;
         r.file_format = Some("VIDEO".into());
         assert!(
-            photo_from_row(r, &mut HashSet::new())
+            photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
                 .unwrap_err()
                 .reason
                 .contains(VIDEO_SKIP_REASON)
@@ -581,14 +639,20 @@ mod tests {
         r.file = None;
         r.rating = Value::Integer(9);
         assert_eq!(
-            photo_from_row(r, &mut HashSet::new()).unwrap_err().reason,
+            photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
+                .unwrap_err()
+                .reason,
             "photo 1: missing global id"
         );
     }
 
     #[test]
     fn every_skip_has_its_code() {
-        let code = |r: Row| photo_from_row(r, &mut HashSet::new()).unwrap_err().code;
+        let code = |r: Row| {
+            photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
+                .unwrap_err()
+                .code
+        };
         let mut r = row();
         r.master = Some(3);
         assert_eq!(code(r), SkipCode::VirtualCopy);
@@ -599,9 +663,12 @@ mod tests {
         r.global_id = None;
         assert_eq!(code(r), SkipCode::MissingGlobalId);
         let mut used = HashSet::new();
-        assert!(photo_from_row(row(), &mut used).is_ok());
+        let mut converted = HashSet::new();
+        assert!(photo_from_row(row(), &mut used, &mut converted).is_ok());
         assert_eq!(
-            photo_from_row(row(), &mut used).unwrap_err().code,
+            photo_from_row(row(), &mut used, &mut converted)
+                .unwrap_err()
+                .code,
             SkipCode::DuplicateGlobalId
         );
         let mut r = row();
@@ -626,7 +693,7 @@ mod tests {
         let mut r = row();
         r.root_path = None;
         assert!(
-            photo_from_row(r, &mut HashSet::new())
+            photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
                 .unwrap_err()
                 .reason
                 .contains("root")
@@ -637,7 +704,9 @@ mod tests {
     fn skip_reasons_do_not_leak_names() {
         let mut r = row();
         r.rating = Value::Integer(9);
-        let reason = photo_from_row(r, &mut HashSet::new()).unwrap_err().reason;
+        let reason = photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
+            .unwrap_err()
+            .reason;
         assert!(!reason.contains("IMG") && !reason.contains("/r/"));
     }
 
@@ -645,7 +714,9 @@ mod tests {
     fn virtual_copy_reason_does_not_say_missing() {
         let mut r = row();
         r.master = Some(7);
-        let reason = photo_from_row(r, &mut HashSet::new()).unwrap_err().reason;
+        let reason = photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
+            .unwrap_err()
+            .reason;
         assert!(reason.contains("virtual copy") && !reason.contains("missing"));
     }
 
@@ -676,7 +747,9 @@ mod tests {
         r.image_id = 4;
         r.file = Some(("clip".into(), "MOV".into()));
         assert_eq!(
-            photo_from_row(r, &mut HashSet::new()).unwrap_err().reason,
+            photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
+                .unwrap_err()
+                .reason,
             format!("photo 4: {VIDEO_SKIP_REASON}")
         );
     }
@@ -688,7 +761,7 @@ mod tests {
         r.file = None;
         r.rating = Value::Integer(9);
         assert!(
-            photo_from_row(r, &mut HashSet::new())
+            photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
                 .unwrap_err()
                 .reason
                 .contains(VIDEO_SKIP_REASON)
@@ -700,7 +773,9 @@ mod tests {
         let mut r = row();
         r.file_format = Some("VIDEO".into());
         r.master = Some(4);
-        let reason = photo_from_row(r, &mut HashSet::new()).unwrap_err().reason;
+        let reason = photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
+            .unwrap_err()
+            .reason;
         assert!(reason.contains("virtual copy") && !reason.contains("video"));
     }
 
@@ -708,6 +783,6 @@ mod tests {
     fn base_name_with_video_suffix_is_not_a_video() {
         let mut r = row();
         r.file = Some(("clip.mp4".into(), "jpg".into()));
-        assert!(photo_from_row(r, &mut HashSet::new()).is_ok());
+        assert!(photo_from_row(r, &mut HashSet::new(), &mut HashSet::new()).is_ok());
     }
 }
