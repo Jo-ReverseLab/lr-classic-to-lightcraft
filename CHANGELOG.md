@@ -56,6 +56,13 @@ The project has not made a release yet.
 
 ### Changed
 
+- `--label-set auto` still recognises only the English and German standard
+  colour-label names. French and Spanish names are **not** added yet: they
+  are pending a citable Adobe source for each name (see
+  `docs/research/label-names.md`). Added a collision guard
+  (`no_standard_name_maps_to_two_colors`) so a future French or Spanish set
+  cannot silently clash with an existing name, and a `LabelSet::entries` /
+  `LabelSet::standard_sets` accessor for the check.
 - With `--label-set auto` (the default), the English and German standard
   colour-label names are recognised together: a name that equals one of
   them exactly maps to its colour, whatever the other labels are. Other
