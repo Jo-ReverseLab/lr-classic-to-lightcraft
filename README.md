@@ -194,14 +194,23 @@ lr2lc --map '/Users/example/Pictures=D:\Photos' catalog.lrcat
   and `/a/b/c`, but not `/a/bc`.
 - `/` and `\` are equivalent when matching. Case matters, except for a
   drive letter such as `C:`. A trailing separator makes no difference.
-- If several rules match, the longest `OLD` prefix wins.
+- If several rules match, the longest `OLD` prefix wins. Among rules of the
+  same length (for example `/a` and `/a/`), the first one given wins.
 - The rest of the path uses the separator style of `NEW`: `\` if `NEW`
   contains `\` or starts with a drive letter, `/` otherwise.
+- The rest must not climb out of `NEW` via `..`. A `..` that would pop to the
+  parent of `NEW` or above is refused: the element keeps its original path and
+  is reported with the `path_mapping_escaped` code, never silently rewritten
+  to a location outside `NEW`.
+- If two photos land on the same path after mapping, the later one is reported
+  with the `path_mapping_collision` code and is not converted, so nothing is
+  merged silently.
 - The value is split at the first `=`. An empty `OLD` and an empty or
   blank `NEW` are rejected.
 
 Matching works on the text only and never touches the file system, so it
-behaves the same on every platform.
+behaves the same on every platform. Names are not Unicode-normalized: a
+composed and a decomposed accent stay two different paths.
 
 ### `--label-set SET`
 

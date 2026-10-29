@@ -6,8 +6,8 @@ use crate::labels::{self, LabelCounts, LabelMode};
 use anyhow::{Context, Result, bail};
 use lr_reader::{Catalog, KeywordData, checksum, drop_missing_originals};
 use model::{
-    Collection, CollectionKind, Flag, Folder, Keyword, PathMappings, Photo, QuickCollection,
-    Rating, Report, SkipCode, SmartCollection, Stack,
+    Collection, CollectionKind, Flag, Folder, Keyword, MappedPath, PathMappings, Photo,
+    QuickCollection, Rating, Report, SkipCode, SmartCollection, Stack,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -265,20 +265,59 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         let photo_data = catalog.photo_data(&mut photos)?;
         let mapped_folders: Vec<Folder> = found_folders
             .into_iter()
-            .map(|f| Folder::new(mappings.map(&f.path)))
+            .filter_map(|f| match mappings.classify(&f.path) {
+                MappedPath::Mapped(p) | MappedPath::Unchanged(p) => Some(Folder::new(p)),
+                MappedPath::Escaped(_) => {
+                    folders.skip(
+                        SkipCode::PathMappingEscaped,
+                        "folder: path mapping would climb out of the new prefix",
+                    );
+                    None
+                }
+            })
             .collect();
         for _ in &mapped_folders {
             folders.converted();
         }
-        let mapped_photos = photo_data
-            .photos
-            .into_iter()
-            .map(|mut p| {
-                p.path = mappings.map(&p.path);
-                p
-            })
-            .collect();
-        let mut kept_photos = drop_missing_originals(mapped_photos, &mut photos);
+        // Map each photo, refusing mappings that would climb out of the new
+        // prefix via `..` (reported, path left unchanged and photo dropped).
+        let mut mapped_photos: Vec<Photo> = Vec::with_capacity(photo_data.photos.len());
+        for mut p in photo_data.photos {
+            p.path = match mappings.classify(&p.path) {
+                MappedPath::Mapped(new) => new,
+                MappedPath::Unchanged(orig) => orig,
+                MappedPath::Escaped(_) => {
+                    photos.skip(
+                        SkipCode::PathMappingEscaped,
+                        format!(
+                            "photo {}: path mapping would climb out of the new prefix",
+                            p.lightroom_id
+                        ),
+                    );
+                    continue;
+                }
+            };
+            mapped_photos.push(p);
+        }
+        // Two photos landing on the same path after mapping would be a silent
+        // merge: keep the first, report each later one.
+        let paths: Vec<&Path> = mapped_photos.iter().map(|p| p.path.as_path()).collect();
+        let collisions = mappings.collisions(&paths);
+        let mut kept_before_originals: Vec<Photo> = Vec::with_capacity(mapped_photos.len());
+        for (i, p) in mapped_photos.drain(..).enumerate() {
+            if collisions.binary_search(&i).is_ok() {
+                photos.skip(
+                    SkipCode::PathMappingCollision,
+                    format!(
+                        "photo {}: path mapping collides with an earlier photo",
+                        p.lightroom_id
+                    ),
+                );
+            } else {
+                kept_before_originals.push(p);
+            }
+        }
+        let mut kept_photos = drop_missing_originals(kept_before_originals, &mut photos);
         let labels = labels::apply(&mut kept_photos, &photo_data.color_labels, label_mode);
         for _ in &kept_photos {
             photos.converted();

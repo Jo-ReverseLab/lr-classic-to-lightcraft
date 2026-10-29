@@ -72,6 +72,13 @@ pub enum SkipCode {
     AppliedNotSaved,
     ImportFailed,
     Rejected,
+    // Dry run: path mapping.
+    /// A path mapping would climb out of the new prefix via `..`; the path is
+    /// left unchanged and the element is not converted.
+    PathMappingEscaped,
+    /// Two photos resolve to the same path after mapping; the later one is not
+    /// converted to avoid a silent merge.
+    PathMappingCollision,
     /// A skip recorded without a specific code. Not used by the reader or
     /// the writer; kept for callers of [`crate::Report::skipped`].
     Unspecified,
@@ -79,7 +86,7 @@ pub enum SkipCode {
 
 impl SkipCode {
     /// Every code, in declaration order.
-    pub const ALL: [SkipCode; 55] = [
+    pub const ALL: [SkipCode; 57] = [
         SkipCode::NoRootFolder,
         SkipCode::RootFolderNotFound,
         SkipCode::RootFolderNoPath,
@@ -134,6 +141,8 @@ impl SkipCode {
         SkipCode::AppliedNotSaved,
         SkipCode::ImportFailed,
         SkipCode::Rejected,
+        SkipCode::PathMappingEscaped,
+        SkipCode::PathMappingCollision,
         SkipCode::Unspecified,
     ];
 
@@ -194,6 +203,8 @@ impl SkipCode {
             SkipCode::AppliedNotSaved => "applied_not_saved",
             SkipCode::ImportFailed => "import_failed",
             SkipCode::Rejected => "rejected",
+            SkipCode::PathMappingEscaped => "path_mapping_escaped",
+            SkipCode::PathMappingCollision => "path_mapping_collision",
             SkipCode::Unspecified => "unspecified",
         }
     }

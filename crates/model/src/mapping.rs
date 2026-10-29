@@ -15,11 +15,33 @@
 //! - The rest of the path is appended to the new prefix with the new
 //!   prefix's separator style: `\` if the new prefix contains `\` or starts
 //!   with a drive letter, `/` otherwise. Nothing else is normalized.
+//! - The rest must not climb out of the new prefix via `..`. If it would,
+//!   the mapping is refused ([`PathMappings::classify`] returns
+//!   [`MappedPath::Escaped`]) so no path is ever silently rewritten to a
+//!   location outside the new prefix.
 //!
 //! Paths that are not valid UTF-8 never match.
 
 use crate::ModelError;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+/// The outcome of mapping one path, with enough detail to report problems.
+///
+/// [`PathMappings::classify`] returns this; [`PathMappings::apply`] and
+/// [`PathMappings::map`] collapse it to the safe default (a mapped path, or
+/// the original unchanged).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MappedPath {
+    /// No rule matched; the path is returned unchanged.
+    Unchanged(PathBuf),
+    /// A rule matched and the path was rewritten.
+    Mapped(PathBuf),
+    /// A rule matched but the remaining components would climb out of the new
+    /// prefix via `..`. The original path is returned unchanged and the caller
+    /// must report it; nothing is silently rewritten outside the new prefix.
+    Escaped(PathBuf),
+}
 
 /// One rule that maps an old path prefix to a new one.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,29 +164,97 @@ impl PathMappings {
 
     /// Maps `path` with the best matching rule.
     ///
-    /// Returns `None` if no rule matches or `path` is not valid UTF-8.
+    /// Returns `None` if no rule matches, `path` is not valid UTF-8, or the
+    /// mapping would climb out of the new prefix via `..` (use
+    /// [`classify`](Self::classify) to tell those apart). In all `None` cases
+    /// [`map`](Self::map) leaves the path unchanged.
     pub fn apply(&self, path: &Path) -> Option<PathBuf> {
-        let path = path.to_str()?;
+        match self.classify(path) {
+            MappedPath::Mapped(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Classifies `path` into [`MappedPath`]: unchanged, mapped, or escaped
+    /// (the rest would climb out of the new prefix via `..`).
+    pub fn classify(&self, path: &Path) -> MappedPath {
+        let path_str = match path.to_str() {
+            Some(s) => s,
+            None => return MappedPath::Unchanged(path.to_path_buf()),
+        };
         let mut best: Option<(usize, &PathMapping, Vec<&str>)> = None;
         for rule in &self.rules {
-            if let Some((len, rest)) = rule.matches(path)
+            if let Some((len, rest)) = rule.matches(path_str)
                 && best.as_ref().is_none_or(|(b, _, _)| len > *b)
             {
                 best = Some((len, rule, rest));
             }
         }
-        best.map(|(_, rule, rest)| PathBuf::from(rule.join(&rest)))
+        match best {
+            None => MappedPath::Unchanged(path.to_path_buf()),
+            Some((_, rule, rest)) => {
+                if escapes_prefix(rule.to(), &rest) {
+                    MappedPath::Escaped(path.to_path_buf())
+                } else {
+                    MappedPath::Mapped(PathBuf::from(rule.join(&rest)))
+                }
+            }
+        }
     }
 
     /// Like [`apply`](Self::apply), but returns `path` unchanged if no rule
-    /// matches.
+    /// matches or the mapping would escape.
     pub fn map(&self, path: &Path) -> PathBuf {
         self.apply(path).unwrap_or_else(|| path.to_path_buf())
+    }
+
+    /// Returns the indices of paths in `paths` that, after mapping, collide
+    /// with an earlier path. Escaped and unchanged paths count by their
+    /// effective (unchanged) path. The result is ascending, so a binary
+    /// search tells whether index `i` is a collision. Used to report silent
+    /// merges instead of letting two photos land on the same path.
+    pub fn collisions(&self, paths: &[&Path]) -> Vec<usize> {
+        let mut seen: HashSet<PathBuf> = HashSet::new();
+        let mut dup = Vec::new();
+        for (i, p) in paths.iter().enumerate() {
+            let effective = self.map(p);
+            if !seen.insert(effective) {
+                dup.push(i);
+            }
+        }
+        dup
     }
 }
 
 fn is_separator(c: char) -> bool {
     c == '/' || c == '\\'
+}
+
+/// Number of real components in `s`: non-empty parts that are not `.`.
+fn component_depth(s: &str) -> usize {
+    s.split(is_separator)
+        .filter(|p| !p.is_empty() && *p != ".")
+        .count()
+}
+
+/// True if appending `rest` to the new prefix `to` would climb above `to`
+/// via `..`. `..` may cancel a component added within the rest (or descend
+/// back to `to`), but the first `..` that would pop to `to`'s parent or above
+/// is an escape and is refused.
+fn escapes_prefix(to: &str, rest: &[&str]) -> bool {
+    let root_depth = component_depth(to);
+    let mut depth = root_depth;
+    for part in rest {
+        if *part == ".." {
+            if depth <= root_depth {
+                return true;
+            }
+            depth -= 1;
+        } else if !part.is_empty() && *part != "." {
+            depth += 1;
+        }
+    }
+    false
 }
 
 /// True for a bare drive like `C:`.
