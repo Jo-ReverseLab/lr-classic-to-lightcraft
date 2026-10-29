@@ -352,16 +352,22 @@ fn resolve_keywords(
                     SkipCode::ParentSkipped,
                     format!("keyword {}: parent keyword {p} is skipped", current.id),
                 )),
-                Ok(mut path) => ids
-                    .remove(&current.id)
-                    .expect("every row except the root has an id result")
-                    .and_then(|global_id| {
+                Ok(mut path) => match ids.remove(&current.id) {
+                    Some(id_result) => id_result.and_then(|global_id| {
                         let name = own_name(current)?;
                         path.push(name);
                         Keyword::new(path)
                             .map(|k| k.with_global_id(global_id))
                             .map_err(|_| name_empty(current.id))
                     }),
+                    // Defensive: global_ids covers every non-root row, so this
+                    // branch is not reached by normal input. If the invariant
+                    // ever breaks, the keyword is skipped instead of panicking.
+                    None => Err(Skipped::new(
+                        SkipCode::KeywordUnresolved,
+                        format!("keyword {}: could not resolve its global id", current.id),
+                    )),
+                },
             };
             parent = match &result {
                 Ok(k) => Ok(k.path().to_vec()),
@@ -373,7 +379,21 @@ fn resolve_keywords(
 
     rows.iter()
         .filter(|r| Some(r.id) != root)
-        .map(|r| (r.id, done.remove(&r.id).expect("every row is resolved")))
+        .map(|r| {
+            (
+                r.id,
+                done.remove(&r.id).unwrap_or_else(|| {
+                    // Defensive: the loop above inserts every non-root row
+                    // into `done`, so this is not reached by normal input. If
+                    // the invariant ever breaks, the keyword is skipped with a
+                    // reason instead of panicking.
+                    Skipped::new(
+                        SkipCode::KeywordUnresolved,
+                        format!("keyword {}: was not resolved", r.id),
+                    )
+                }),
+            )
+        })
         .collect()
 }
 
@@ -707,6 +727,38 @@ mod tests {
                 "keyword 4: parent keyword 4 is skipped",
                 "keyword 5: parent keyword 2 is skipped",
             ]
+        );
+    }
+
+    #[test]
+    fn every_non_root_row_is_resolved_or_skipped() {
+        // The defensive `KeywordUnresolved` skips in `resolve_keywords`
+        // exist so a broken internal invariant is reported instead of
+        // panicking. This pins the invariant they guard: every non-root row
+        // produces exactly one entry (Ok or Err), in row order, so the
+        // defensive branch is not reached by normal input. A missing parent
+        // and a two-node cycle are both handled as skips, not panics.
+        let rows = [
+            row(1, None, None),
+            row(2, Some("A"), Some(1)),
+            row(3, Some("B"), Some(2)),
+            row(4, Some("C"), Some(9)),
+            row(5, Some("D"), Some(6)),
+            row(6, Some("E"), Some(5)),
+        ];
+        let resolved = resolve_keywords(&rows, Some(1));
+        assert_eq!(resolved.len(), rows.len() - 1);
+        assert_eq!(
+            resolved.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            vec![2, 3, 4, 5, 6]
+        );
+        for (_, r) in &resolved {
+            assert!(r.is_ok() || r.is_err(), "no entry is absent");
+        }
+        assert!(
+            reasons(&resolved)
+                .iter()
+                .all(|r| !r.contains("could not resolve") && !r.contains("was not resolved"))
         );
     }
 

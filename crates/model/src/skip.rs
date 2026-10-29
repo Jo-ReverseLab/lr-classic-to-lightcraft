@@ -60,6 +60,11 @@ pub enum SkipCode {
     AssignmentKeywordSkipped,
     KeywordSkipped,
     KeywordUnknown,
+    /// A keyword whose resolution hit a broken internal invariant (its
+    /// global-id result or its resolution entry was missing). Emitted only
+    /// as a defensive skip so a broken invariant is reported instead of
+    /// aborting the run; not reachable through normal catalog input.
+    KeywordUnresolved,
     // Writer.
     KeywordChanged,
     PathNotUtf8,
@@ -79,7 +84,7 @@ pub enum SkipCode {
 
 impl SkipCode {
     /// Every code, in declaration order.
-    pub const ALL: [SkipCode; 55] = [
+    pub const ALL: [SkipCode; 56] = [
         SkipCode::NoRootFolder,
         SkipCode::RootFolderNotFound,
         SkipCode::RootFolderNoPath,
@@ -123,6 +128,7 @@ impl SkipCode {
         SkipCode::AssignmentKeywordSkipped,
         SkipCode::KeywordSkipped,
         SkipCode::KeywordUnknown,
+        SkipCode::KeywordUnresolved,
         SkipCode::KeywordChanged,
         SkipCode::PathNotUtf8,
         SkipCode::NoGlobalId,
@@ -183,6 +189,7 @@ impl SkipCode {
             SkipCode::AssignmentKeywordSkipped => "assignment_keyword_skipped",
             SkipCode::KeywordSkipped => "keyword_skipped",
             SkipCode::KeywordUnknown => "keyword_unknown",
+            SkipCode::KeywordUnresolved => "keyword_unresolved",
             SkipCode::KeywordChanged => "keyword_changed",
             SkipCode::PathNotUtf8 => "path_not_utf8",
             SkipCode::NoGlobalId => "no_global_id",
