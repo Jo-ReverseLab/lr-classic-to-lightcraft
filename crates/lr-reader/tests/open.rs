@@ -28,6 +28,30 @@ fn opens_small_fixture_and_reports_version() {
     assert_eq!(catalog.version(), "1500000");
 }
 
+// `Adobe_DBVersion` is stored as text by Lightroom, but the reader accepts
+// the same logical value `1500000` stored as a real number or a blob (see
+// `catalog.rs` where each `rusqlite::types::Value` arm is handled). These
+// tests pin that the generator variants and the reader agree.
+#[test]
+fn opens_when_dbversion_is_stored_as_real() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = small_fixture(dir.path());
+    lrcat_fixtures::set_dbversion_type(&path, lrcat_fixtures::DbVersionType::Real)
+        .expect("rewrite version as real");
+    let catalog = Catalog::open(&path).expect("open with real version");
+    assert_eq!(catalog.version(), "1500000");
+}
+
+#[test]
+fn opens_when_dbversion_is_stored_as_blob() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = small_fixture(dir.path());
+    lrcat_fixtures::set_dbversion_type(&path, lrcat_fixtures::DbVersionType::Blob)
+        .expect("rewrite version as blob");
+    let catalog = Catalog::open(&path).expect("open with blob version");
+    assert_eq!(catalog.version(), "1500000");
+}
+
 #[test]
 fn rejects_unsupported_version() {
     let dir = tempfile::tempdir().unwrap();

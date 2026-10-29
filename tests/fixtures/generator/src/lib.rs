@@ -753,6 +753,45 @@ fn add_variables(c: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// The storage type the `Adobe_DBVersion` value is written as by
+/// [`set_dbversion_type`]. Lightroom stores it as text, but a catalog built
+/// by another tool (or copied through a driver that re-typed the column) may
+/// store the same logical value `1500000` as a real number or a blob. The
+/// reader accepts all three; these variants let the generator exercise that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DbVersionType {
+    /// `value` stored as SQLite `TEXT` (the Lightroom layout).
+    Text,
+    /// `value` stored as SQLite `REAL`, e.g. `1500000.0`.
+    Real,
+    /// `value` stored as SQLite `BLOB`, e.g. the bytes `b"1500000"`.
+    Blob,
+}
+
+/// Rewrites the `Adobe_DBVersion` value so it is stored with the given
+/// SQLite storage type, while keeping the logical value `1500000`. The
+/// `type` column text is left as the generator wrote it (it is not read by
+/// the reader). Use after one of the `write_*_catalog` functions.
+pub fn set_dbversion_type(path: &Path, kind: DbVersionType) -> Result<()> {
+    let c = Connection::open(path)?;
+    let changed = match kind {
+        DbVersionType::Text => c.execute(
+            "UPDATE Adobe_variablesTable SET value = '1500000' WHERE name = 'Adobe_DBVersion'",
+            [],
+        )?,
+        DbVersionType::Real => c.execute(
+            "UPDATE Adobe_variablesTable SET value = ?1 WHERE name = 'Adobe_DBVersion'",
+            params![1500000.0_f64],
+        )?,
+        DbVersionType::Blob => c.execute(
+            "UPDATE Adobe_variablesTable SET value = ?1 WHERE name = 'Adobe_DBVersion'",
+            params![b"1500000".to_vec()],
+        )?,
+    };
+    assert_eq!(changed, 1, "Adobe_DBVersion row missing");
+    Ok(())
+}
+
 /// Keyword table of the small fixture: (id, name, parent id).
 const KEYWORDS: [(i64, Option<&str>, i64); 12] = [
     (2, Some("Travel"), 1),

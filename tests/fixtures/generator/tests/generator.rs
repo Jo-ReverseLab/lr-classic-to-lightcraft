@@ -5,6 +5,53 @@ fn open(path: &std::path::Path) -> Connection {
     Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap()
 }
 
+fn typeof_dbversion(c: &Connection) -> String {
+    c.query_row(
+        "SELECT typeof(value) FROM Adobe_variablesTable WHERE name = 'Adobe_DBVersion'",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+#[test]
+fn dbversion_type_can_be_changed_to_real_and_blob() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("small.lrcat");
+    write_small_catalog(&path).unwrap();
+
+    // The generator writes the version as text by default.
+    let c = open(&path);
+    assert_eq!(typeof_dbversion(&c), "text");
+    drop(c);
+
+    lrcat_fixtures::set_dbversion_type(&path, lrcat_fixtures::DbVersionType::Real).unwrap();
+    let c = open(&path);
+    assert_eq!(typeof_dbversion(&c), "real");
+    // The logical value is still 1500000.
+    let v: f64 = c
+        .query_row(
+            "SELECT value FROM Adobe_variablesTable WHERE name = 'Adobe_DBVersion'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(v, 1500000.0);
+    drop(c);
+
+    lrcat_fixtures::set_dbversion_type(&path, lrcat_fixtures::DbVersionType::Blob).unwrap();
+    let c = open(&path);
+    assert_eq!(typeof_dbversion(&c), "blob");
+    let v: Vec<u8> = c
+        .query_row(
+            "SELECT value FROM Adobe_variablesTable WHERE name = 'Adobe_DBVersion'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(v, b"1500000");
+}
+
 fn count(c: &Connection, sql: &str) -> i64 {
     c.query_row(sql, [], |r| r.get(0)).unwrap()
 }
