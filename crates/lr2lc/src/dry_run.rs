@@ -189,45 +189,6 @@ impl KeywordAttributes {
     }
 }
 
-/// Decides which smart collections can be written (see
-/// [`lc_writer::smart::convertible`]) and books them in the collections
-/// report: a convertible one counts as converted instead of skipped, the
-/// reason of any other one names why it is not converted (the first
-/// criterion without an exact equivalent, or its parent). Every collection
-/// reason starts with `collection <id>:`. Smart collections without
-/// readable rules keep the reader's reason.
-///
-/// Returns the smart collections to write and the Lightroom ids of all
-/// other smart collections (`data.smart_ids`), readable rules or not.
-fn convert_smart(data: &mut lr_reader::CollectionData) -> (Vec<SmartCollection>, Vec<i64>) {
-    let mut out: Vec<SmartCollection> = Vec::new();
-    for s in &data.smart_collections {
-        let prefix = format!("collection {}:", s.lightroom_id);
-        match lc_writer::smart::convertible(s, &data.collections) {
-            Ok(_) => {
-                // The reader books every smart collection as skipped, so this
-                // always finds its entry. Should it ever find none, the
-                // collection is not written and its id falls into the
-                // untranslatable ids below, the safe side.
-                if data.report.convert_skipped(&prefix) > 0 {
-                    out.push(s.clone());
-                }
-            }
-            Err((code, why)) => {
-                let reason = format!("{prefix} smart collection is not converted ({why})");
-                data.report.replace_skipped(&prefix, code, &reason);
-            }
-        }
-    }
-    let untranslatable = data
-        .smart_ids
-        .iter()
-        .copied()
-        .filter(|id| !out.iter().any(|s| s.lightroom_id == *id))
-        .collect();
-    (out, untranslatable)
-}
-
 /// Runs the dry run on the catalog at `path`.
 ///
 /// Fails if the catalog cannot be opened or read. A changed checksum is not
@@ -289,7 +250,17 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         let keyword_attributes = KeywordAttributes::count(&data);
         // Members naming skipped photos are skipped as well.
         let mut collection_data = catalog.collection_data(&kept_photos)?;
-        let (smart, smart_untranslatable_ids) = convert_smart(&mut collection_data);
+        // The reader already produced the final verdict for every smart
+        // collection (converted or skipped with a reason); the caller no
+        // longer rewrites the report by reason text. The convertible ones go
+        // to the writer; the rest are reported as untranslatable ids.
+        let smart = collection_data.convertible_smart.clone();
+        let smart_untranslatable_ids: Vec<i64> = collection_data
+            .smart_ids
+            .iter()
+            .copied()
+            .filter(|id| !smart.iter().any(|s| s.lightroom_id == *id))
+            .collect();
         let stack_data = catalog.stack_data(&kept_photos)?;
         let mut keyword_synonyms = data.synonym_report;
         for keyword in &data.keywords {
@@ -421,53 +392,49 @@ mod tests {
     use lr_reader::VIDEO_SKIP_REASON;
 
     #[test]
-    fn convertible_smart_collections_move_to_converted() {
-        use model::{SmartCombine, SmartRule, SmartRules, SmartValue};
-        let rules = |criterion: &str| SmartRules {
-            combine: SmartCombine::Intersect,
-            rules: vec![SmartRule {
-                criterion: criterion.into(),
-                operation: ">=".into(),
-                value: Some(SmartValue::Number(3.0)),
-                value2: None,
-                units: None,
-            }],
-        };
-        let smart = |id, criterion| SmartCollection {
-            lightroom_id: id,
-            name: "n".into(),
-            parent: None,
-            rules: rules(criterion),
-        };
-        let mut data = lr_reader::CollectionData {
-            smart_collections: vec![smart(1, "rating"), smart(10, "pick")],
-            smart_ids: [1, 10, 100].into(),
-            ..Default::default()
-        };
-        for id in [1, 10, 100] {
-            data.report.read();
-            data.report
-                .skipped(format!("collection {id}: smart collection x"));
-        }
-        let (out, untranslatable) = convert_smart(&mut data);
-        assert_eq!(out, vec![smart(1, "rating")]);
-        // 100 has unreadable rules: still not written, still listed.
-        assert_eq!(untranslatable, vec![10, 100]);
-        assert_eq!(data.report.converted_count(), 1);
+    fn reader_produces_the_smart_verdict() {
+        // The reader sets the final verdict for every smart collection at read
+        // time: the one translatable collection (101, rating >= 3, top level)
+        // is converted and in `convertible_smart`; the rest are skipped with a
+        // reason that names the criterion (not the old "first criterion"
+        // phrase). The caller never rewrites the report by reason text.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("smart.lrcat");
+        lrcat_fixtures::write_smart_catalog(&path).unwrap();
+        let catalog = Catalog::open(&path).unwrap();
+        let photos = catalog.photos(&mut Report::new()).unwrap();
+        let data = catalog.collection_data(&photos).unwrap();
+        assert_eq!(
+            data.convertible_smart
+                .iter()
+                .map(|s| s.lightroom_id)
+                .collect::<Vec<_>>(),
+            vec![101]
+        );
         assert!(data.report.is_balanced());
-        let reasons: Vec<&str> = data
+        let has_skip = |id: i64| {
+            data.report
+                .skipped_items()
+                .iter()
+                .any(|s| s.reason.starts_with(&format!("collection {id}:")))
+        };
+        assert!(!has_skip(101), "101 is converted, not skipped");
+        let r102 = data
             .report
             .skipped_items()
             .iter()
-            .map(|s| s.reason.as_str())
-            .collect();
-        assert_eq!(
-            reasons,
-            [
-                "collection 10: smart collection is not converted (criterion \"pick\" has no \
-                 exact LightCraft equivalent)",
-                "collection 100: smart collection x",
-            ]
+            .find(|s| s.reason.starts_with("collection 102:"))
+            .expect("102 is skipped");
+        assert!(
+            r102.reason
+                .contains("criterion \"pick\" has no exact LightCraft equivalent"),
+            "{}",
+            r102.reason
+        );
+        assert!(
+            !r102.reason.contains("first criterion"),
+            "the old phrase is gone: {}",
+            r102.reason
         );
     }
 

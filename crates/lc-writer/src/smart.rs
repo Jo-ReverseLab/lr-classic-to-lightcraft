@@ -64,9 +64,11 @@ pub fn translate_coded(rules: &model::SmartRules) -> Result<Value, (SkipCode, St
     Ok(json!({"ruleSet": {"match": mode, "rules": translated}}))
 }
 
-/// One rule, or `None` if it has no exact equivalent.
+/// One rule, or `None` if it has no exact equivalent. The gate is
+/// [`SmartRule::translatable`] (shared with the reader's verdict), so the
+/// writer and the reader agree on which rules convert.
 fn translate_rule(rule: &SmartRule) -> Option<Value> {
-    if rule.criterion != "rating" || rule.value2.is_some() || rule.units.is_some() {
+    if !rule.translatable() {
         return None;
     }
     let op = match rule.operation.as_str() {

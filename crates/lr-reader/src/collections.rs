@@ -49,6 +49,12 @@ pub struct CollectionData {
     /// `report` all the same; whether one can be converted is decided by
     /// the writer side.
     pub smart_collections: Vec<SmartCollection>,
+    /// Smart collections the reader decided are convertible (translatable
+    /// rules and a converted-folder parent, or top level), ascending by id.
+    /// The reader books each as converted; every other id in `smart_ids` is
+    /// skipped with a reason. The verdict comes from the reader, so the
+    /// caller never rewrites the report by reason text.
+    pub convertible_smart: Vec<SmartCollection>,
     /// Ids of every smart collection row (`creationId` smart_collection,
     /// system flag not set), whether its rules are readable or not and
     /// whether its name is valid. Never a plain album or set. Independent
@@ -130,6 +136,13 @@ impl Catalog {
                 });
                 continue;
             }
+            // Smart collections are booked after the plain ones: their final
+            // verdict (translatable rules and a converted-folder parent) needs
+            // the converted collections, which are only complete once the loop
+            // ends. Only the read is counted here.
+            if data.smart_ids.contains(&id) {
+                continue;
+            }
             match (&row.own, &status[&id]) {
                 (Ok((kind, name)), Ok(())) => {
                     data.report.converted();
@@ -148,6 +161,26 @@ impl Catalog {
                 (_, Err(skip)) => data.report.push_skipped(skip.clone()),
                 (Err(_), Ok(())) => unreachable!("own skips are part of the status"),
             }
+        }
+        // Book every smart collection with its final verdict. Those with
+        // readable rules and a valid name get the rule verdict (and a
+        // converted-folder parent check); the rest keep the reason set where
+        // they arose (unreadable rules, or the first criterion).
+        for s in &data.smart_collections {
+            match smart_verdict(s, &data.collections) {
+                Ok(()) => {
+                    data.report.converted();
+                    data.convertible_smart.push(s.clone());
+                }
+                Err(skipped) => data.report.push_skipped(skipped),
+            }
+        }
+        for &id in &data.smart_ids {
+            if data.smart_collections.iter().any(|s| s.lightroom_id == id) {
+                continue;
+            }
+            data.report
+                .push_skipped(smart_reason(id, data.smart.get(&id)));
         }
         let converted: HashSet<i64> = photos.iter().map(|p| p.lightroom_id).collect();
         let mut seen: HashSet<(i64, i64)> = HashSet::new();
@@ -366,6 +399,39 @@ fn smart_rules(contents: Option<&[Option<String>]>) -> Option<SmartRules> {
         [Some(text)] => parse_smart_rules(text).ok(),
         _ => None,
     }
+}
+
+/// The reader's final verdict for a smart collection with readable rules and
+/// a valid name: `Ok(())` if every rule translates and its parent is a
+/// converted collection set (or it is top level), or the skip entry saying
+/// why it is not converted. The reason text matches what the caller used to
+/// rewrite by prefix; the code is set here, where the reason arises, never
+/// derived from the text.
+fn smart_verdict(s: &SmartCollection, collections: &[Collection]) -> Result<(), Skipped> {
+    if let Err((code, detail)) = s.rules.verdict() {
+        return Err(Skipped::new(
+            code,
+            format!(
+                "collection {}: smart collection is not converted ({detail})",
+                s.lightroom_id
+            ),
+        ));
+    }
+    if let Some(parent) = s.parent
+        && !collections
+            .iter()
+            .any(|c| c.lightroom_id == parent && c.kind == CollectionKind::Folder)
+    {
+        return Err(Skipped::new(
+            SkipCode::ParentNotSet,
+            format!(
+                "collection {}: smart collection is not converted (its parent collection \
+                 {parent} is not a converted collection set)",
+                s.lightroom_id
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// The skip reason of smart collection `id`. It names the first criterion

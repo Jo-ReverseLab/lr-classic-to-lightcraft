@@ -10,7 +10,8 @@
 //! - `value = true|false` and `value2 = true|false` are read as
 //!   `SmartValue::Bool`; the collection is then readable (it is in
 //!   `CollectionData::smart`) and its skip reason names the criterion
-//!   (`first criterion: <name>`), not "unreadable rules";
+//!   (`criterion "<name>" has no exact LightCraft equivalent`), not
+//!   "unreadable rules";
 //! - `value_units = true|false` keeps the type `Option<String>` and holds
 //!   the literal text `"true"` / `"false"`;
 //! - a table as value, value2 or value_units stays an error (unreadable
