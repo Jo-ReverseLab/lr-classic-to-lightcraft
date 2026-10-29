@@ -6,7 +6,7 @@
 //!   -> Result<ApplySummary, WriteError>`;
 //! - `ApplySummary { keywords_created, photos_imported, photos_existing,
 //!   updates, not_saved: usize, photos_skipped, photos_incomplete,
-//!   keywords_skipped: Vec<model::Skipped> }` (all pub). Every photo counts
+//!   keywords_not_created: Vec<model::Skipped> }` (all pub). Every photo counts
 //!   once: photos in `photos_skipped` were not written; `photos_incomplete`
 //!   (a subset of imported + existing) lost an update.
 //!
@@ -118,7 +118,11 @@ fn run(fake: &FakeLightCraft, env: &Env, input: &WriteInput) -> Result<ApplySumm
 fn assert_clean(s: &ApplySummary) {
     assert!(s.photos_skipped.is_empty(), "{:?}", s.photos_skipped);
     assert!(s.photos_incomplete.is_empty(), "{:?}", s.photos_incomplete);
-    assert!(s.keywords_skipped.is_empty(), "{:?}", s.keywords_skipped);
+    assert!(
+        s.keywords_not_created.is_empty(),
+        "{:?}",
+        s.keywords_not_created
+    );
 }
 
 fn texts(items: &[&str]) -> BTreeSet<String> {
@@ -608,7 +612,7 @@ fn error_reply_for_one_photo_skips_only_that_photo() {
         "{:?}",
         summary.photos_skipped
     );
-    assert!(summary.keywords_skipped.is_empty());
+    assert!(summary.keywords_not_created.is_empty());
     assert_eq!(
         4,
         summary.photos_imported + summary.photos_existing + summary.photos_skipped.len(),
@@ -658,9 +662,9 @@ fn error_reply_for_a_keyword_skips_that_keyword_and_the_run_goes_on() {
     let fake = FakeLightCraft::start(config);
     let summary = run(&fake, &env, &input()).unwrap();
     assert_eq!(summary.keywords_created, 0);
-    assert!(!summary.keywords_skipped.is_empty());
+    assert!(!summary.keywords_not_created.is_empty());
     assert!(summary.photos_skipped.is_empty());
-    for s in &summary.keywords_skipped {
+    for s in &summary.keywords_not_created {
         assert!(s.reason.contains("keyword.create"), "{}", s.reason);
         assert!(
             !s.reason.contains("Café") && !s.reason.contains("Rome"),

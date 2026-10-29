@@ -31,8 +31,8 @@ pub struct PlannedSectionJson {
     planned: PlannedJson,
     photos_skipped: Vec<SkipJson>,
     photos_skipped_by_code: ByCode,
-    keywords_skipped: Vec<SkipJson>,
-    keywords_skipped_by_code: ByCode,
+    keywords_not_created: Vec<SkipJson>,
+    keywords_not_created_by_code: ByCode,
     members_skipped: Vec<SkipJson>,
     members_skipped_by_code: ByCode,
     stacks_skipped: Vec<SkipJson>,
@@ -57,8 +57,8 @@ pub struct AppliedJson {
     photos_skipped_by_code: ByCode,
     photos_incomplete: Vec<SkipJson>,
     photos_incomplete_by_code: ByCode,
-    keywords_skipped: Vec<SkipJson>,
-    keywords_skipped_by_code: ByCode,
+    keywords_not_created: Vec<SkipJson>,
+    keywords_not_created_by_code: ByCode,
     folders_created: usize,
     albums_created: usize,
     collections_known: usize,
@@ -218,8 +218,8 @@ pub fn planned_json(plan: &Plan) -> WriterJson {
         planned: planned(plan),
         photos_skipped: reasons(plan.photo_skips()),
         photos_skipped_by_code: count_by_code(plan.photo_skips()),
-        keywords_skipped: reasons(plan.keyword_skips()),
-        keywords_skipped_by_code: count_by_code(plan.keyword_skips()),
+        keywords_not_created: reasons(plan.keyword_skips()),
+        keywords_not_created_by_code: count_by_code(plan.keyword_skips()),
         members_skipped: reasons(plan.member_skips()),
         members_skipped_by_code: count_by_code(plan.member_skips()),
         stacks_skipped: reasons(plan.stack_skips()),
@@ -246,8 +246,8 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         photos_skipped_by_code: count_by_code(&s.photos_skipped),
         photos_incomplete: reasons(&s.photos_incomplete),
         photos_incomplete_by_code: count_by_code(&s.photos_incomplete),
-        keywords_skipped: reasons(&s.keywords_skipped),
-        keywords_skipped_by_code: count_by_code(&s.keywords_skipped),
+        keywords_not_created: reasons(&s.keywords_not_created),
+        keywords_not_created_by_code: count_by_code(&s.keywords_not_created),
         folders_created: s.folders_created,
         albums_created: s.albums_created,
         collections_known: s.collections_known,
@@ -318,7 +318,11 @@ pub fn planned_summary(plan: &Plan) -> String {
         p.keywords, p.photos, p.updates, p.albums, p.members_added
     );
     skipped_lines(&mut out, "writer would skip photos", plan.photo_skips());
-    skipped_lines(&mut out, "writer would skip keywords", plan.keyword_skips());
+    skipped_lines(
+        &mut out,
+        "writer would not create keywords",
+        plan.keyword_skips(),
+    );
     skipped_lines(
         &mut out,
         "writer would skip album members",
@@ -385,11 +389,11 @@ pub fn applied_summary(s: &ApplySummary) -> String {
     );
     let _ = writeln!(
         out,
-        "not written: photos skipped {}, photos incomplete {}, keywords skipped {}, \
+        "not written: photos skipped {}, photos incomplete {}, keywords not created {}, \
          collections skipped {}, collections incomplete {}, album members skipped {}",
         s.photos_skipped.len(),
         s.photos_incomplete.len(),
-        s.keywords_skipped.len(),
+        s.keywords_not_created.len(),
         s.collections_skipped.len(),
         s.collections_incomplete.len(),
         s.members_skipped.len()
@@ -440,7 +444,7 @@ pub fn applied_summary(s: &ApplySummary) -> String {
     }
     skipped_lines(&mut out, "skipped photos", &s.photos_skipped);
     skipped_lines(&mut out, "incomplete photos", &s.photos_incomplete);
-    skipped_lines(&mut out, "skipped keywords", &s.keywords_skipped);
+    skipped_lines(&mut out, "keywords not created", &s.keywords_not_created);
     skipped_lines(&mut out, "skipped collections", &s.collections_skipped);
     skipped_lines(
         &mut out,
@@ -558,8 +562,8 @@ mod tests {
                         "smart_no_longer_translatable": 0},
                 "photos_skipped": [],
                 "photos_skipped_by_code": {},
-                "keywords_skipped": [],
-                "keywords_skipped_by_code": {},
+                "keywords_not_created": [],
+                "keywords_not_created_by_code": {},
                 "members_skipped": [],
                 "members_skipped_by_code": {},
                 "stacks_skipped": [],
@@ -588,7 +592,7 @@ mod tests {
         assert_eq!(v["not_saved"], 0);
         assert_eq!(v["photos_updated"], 0);
         assert_eq!(v["photos_unchanged"], 0);
-        assert!(v["keywords_skipped"].is_array());
+        assert!(v["keywords_not_created"].is_array());
         for key in [
             "folders_created",
             "albums_created",

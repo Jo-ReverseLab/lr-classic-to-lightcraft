@@ -12,7 +12,7 @@
 //!   `keywords`, `keyword_assignments`, `keyword_synonyms` (key `skipped`
 //!   inside the area object) and for every `writer` list ending in
 //!   `_skipped` or `_incomplete` (`photos_skipped`, `photos_incomplete`,
-//!   `keywords_skipped`, `members_skipped`, `collections_skipped`,
+//!   `keywords_not_created`, `members_skipped`, `collections_skipped`,
 //!   `collections_incomplete`, `stacks_skipped`, `stacks_incomplete`,
 //!   `quick_skipped`, `quick_incomplete`, `smart_skipped`).
 //! - Each area object gets `by_code`: an object `{code: count}` with one key
@@ -148,7 +148,7 @@ const AREAS: [(&str, &str); 9] = [
 const WRITER_LISTS: [&str; 11] = [
     "photos_skipped",
     "photos_incomplete",
-    "keywords_skipped",
+    "keywords_not_created",
     "members_skipped",
     "collections_skipped",
     "collections_incomplete",

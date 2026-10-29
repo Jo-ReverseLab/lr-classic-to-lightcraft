@@ -352,10 +352,14 @@ LightCraft N` follows.
 `photos`, `updates`, `photos_updated`, `photos_unchanged`, `folders`,
 `albums`, `members_added`, `members_removed`, `collections_known`,
 `collections_removed`, `stacks`, `stacks_known`,
-`stack_members_removed`), `photos_skipped`, `keywords_skipped`,
+`stack_members_removed`), `photos_skipped`, `keywords_not_created`,
 `members_skipped` and `stacks_skipped` (each a list of `{"reason": ...}`;
 `members_skipped` holds album members whose photo is not converted or has
-no global id).
+no global id). `keywords_not_created` is the writer-side set: keywords the
+run did not create (their parent failed, LightCraft rejected them, or their
+synonyms or attributes changed after creation). It is distinct from
+`keywords.skipped` in the reader area, which counts keywords skipped while
+reading the catalog.
 `planned.photos` counts the imports, `photos_updated` the photos from the
 mapping file with at least one update and `photos_unchanged` those that
 need no command. Every converted photo counts once:
@@ -466,7 +470,9 @@ the `writer` section:
 - `updates` (field updates applied) and `not_saved` (applied but not yet
   saved to disk by LightCraft);
 - `photos_skipped`, `photos_incomplete` (an update or the select before
-  it failed; the next run sends the updates again) and `keywords_skipped`, each with reasons;
+  it failed; the next run sends the updates again) and `keywords_not_created`
+  (keywords the run did not create; distinct from the reader's
+  `keywords.skipped`), each with reasons;
 - `folders_created`, `albums_created` and `collections_known` (already in
   the mapping file, no `album.create`), and `collections_existing` (missing
   from the mapping file but found in the library and taken over, see

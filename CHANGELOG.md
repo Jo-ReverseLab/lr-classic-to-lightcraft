@@ -56,6 +56,14 @@ The project has not made a release yet.
 
 ### Changed
 
+- Renamed the `writer.keywords_skipped` report field to
+  `writer.keywords_not_created` (and `keywords_skipped_by_code` to
+  `keywords_not_created_by_code`). The old name was misleading: it counts
+  keywords the writer did not create (parent failed, rejected, or attributes
+  changed after creation), a different set from the reader's
+  `keywords.skipped`, which counts keywords skipped while reading the catalog.
+  The readable summary lines follow the new wording. No release has shipped, so
+  no schema migration is needed.
 - With `--label-set auto` (the default), the English and German standard
   colour-label names are recognised together: a name that equals one of
   them exactly maps to its colour, whatever the other labels are. Other

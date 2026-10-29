@@ -11,7 +11,7 @@
 //!   otherwise it is empty. stdout gets one line
 //!   `writer: keywords to create K, photos to import P, updates U`;
 //!   report.json gets `writer.planned = {"keywords": K, "photos": P,
-//!   "updates": U}` and `writer.photos_skipped` and `writer.keywords_skipped`
+//!   "updates": U}` and `writer.photos_skipped` and `writer.keywords_not_created`
 //!   (each `[{"reason"}]`). Nothing is written
 //!   next to the library (no state file, no library folder);
 //! - `--script FILE` writes the plan as JSON lines, also in a dry run, with
@@ -19,7 +19,7 @@
 //! - `--apply` with `--library`: catalog read as in a dry run, then
 //!   pre-flight, then the writer. Exit 0; report.json has `dry_run: false`
 //!   and `writer = {keywords_created, photos_imported, photos_existing,
-//!   updates, not_saved, photos_skipped, photos_incomplete, keywords_skipped
+//!   updates, not_saved, photos_skipped, photos_incomplete, keywords_not_created
 //!   (each `[{"reason"}]`)}`; the strict balance holds (a photo counts once):
 //!   `photos.converted == photos_imported + photos_existing + (photos
 //!   skipped by the writer)`; no names in stdout or report.json;
@@ -289,7 +289,7 @@ fn dry_run_never_connects_and_prints_the_plan_numbers() {
     assert_eq!(report["dry_run"], true);
     // Every photo that is read and converted is planned or skipped.
     let skipped_photos = report["writer"]["photos_skipped"].as_array().unwrap().len() as u64;
-    assert!(report["writer"]["keywords_skipped"].is_array());
+    assert!(report["writer"]["keywords_not_created"].is_array());
     assert_eq!(
         report["photos"]["converted"].as_u64().unwrap(),
         photos + skipped_photos
@@ -537,7 +537,7 @@ fn apply_writes_through_the_port_and_reports_the_numbers() {
     for item in skipped
         .iter()
         .chain(w["photos_incomplete"].as_array().unwrap())
-        .chain(w["keywords_skipped"].as_array().unwrap())
+        .chain(w["keywords_not_created"].as_array().unwrap())
     {
         assert!(!item["reason"].as_str().unwrap().is_empty());
     }
