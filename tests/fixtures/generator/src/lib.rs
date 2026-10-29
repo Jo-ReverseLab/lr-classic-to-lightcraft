@@ -1121,6 +1121,123 @@ fn add_rights_edges(path: &Path, creators: bool) -> Result<()> {
     Ok(())
 }
 
+/// Combined IPTC edges for [`write_full_catalog_with_files`]: caption and
+/// copyright in one `AgLibraryIPTC` row per photo, plus the creator tables of
+/// [`rights_edge`]. The reader reads caption and copyright from the same row
+/// (the one with the smallest `id_local`, see `crates/lr-reader/src/photos.rs`),
+/// so the two independent fixtures [`caption_edge`] and [`rights_edge`] — which
+/// share the same photo ids — are merged here into one row each. The edge
+/// cases (umlaut, padding, empty, NULL, no row, duplicates, non-text) match the
+/// two fixtures; skipped photos 2 and 20 carry values that must not be counted.
+fn add_iptc_combined(path: &Path) -> Result<()> {
+    use caption_edge as cap;
+    use rights_edge as right;
+    use rusqlite::types::Value as V;
+    let text = |s: &str| V::Text(s.to_string());
+    let c = Connection::open(path)?;
+    c.execute_batch("BEGIN")?;
+    let put = |row: i64, image: i64, caption: V, copyright: V| {
+        c.execute(
+            "INSERT INTO AgLibraryIPTC (id_local, caption, copyright, image) VALUES (?1, ?2, ?3, ?4)",
+            params![row, caption, copyright, image],
+        )
+    };
+    // Photos without edge values get one NULL row.
+    put(1001, 1, V::Null, V::Null)?;
+    for id in 12..=19 {
+        put(1000 + id, id, V::Null, V::Null)?;
+    }
+    // Photo 4: umlaut caption and copyright (a video in the full catalog, so
+    // neither counts, but the row is realistic).
+    put(
+        1004,
+        cap::UMLAUT_ID,
+        text(cap::UMLAUT_TEXT),
+        text(right::UMLAUT_COPYRIGHT),
+    )?;
+    // Photo 5: padded caption and copyright (also a video here).
+    put(
+        1005,
+        cap::PADDED_ID,
+        text(cap::PADDED_TEXT),
+        text(right::PADDED_COPYRIGHT),
+    )?;
+    // Photo 6: empty caption and copyright.
+    put(1006, cap::EMPTY_ID, text(""), text(""))?;
+    // Photo 7: NULL caption and copyright.
+    put(1007, cap::NULL_ID, V::Null, V::Null)?;
+    // Photo 9: duplicate rows; the smallest id_local (100) wins for both.
+    put(101, cap::DUPLICATE_ID, text("second"), text("second"))?;
+    put(
+        100,
+        cap::DUPLICATE_ID,
+        text(cap::DUPLICATE_TEXT),
+        text(right::DUPLICATE_COPYRIGHT),
+    )?;
+    // Photo 10: NULL first for both.
+    put(200, cap::DUPLICATE_NULL_FIRST_ID, V::Null, V::Null)?;
+    put(
+        201,
+        cap::DUPLICATE_NULL_FIRST_ID,
+        text("later"),
+        text("later"),
+    )?;
+    // Photo 11: a non-text value for both.
+    put(1011, cap::NON_TEXT_ID, V::Integer(42), V::Integer(42))?;
+    // Skipped photos carry values that must never be counted.
+    put(
+        1002,
+        2,
+        text(cap::SKIPPED_TEXTS[0]),
+        text("skipped-missing-copyright"),
+    )?;
+    put(
+        1020,
+        20,
+        text(cap::SKIPPED_TEXTS[1]),
+        text("skipped-virtual-copyright"),
+    )?;
+    // Creator tables, mirroring add_rights_edges with creators = true.
+    c.execute_batch(
+        "CREATE TABLE AgInternedIptcCreator (id_local INTEGER PRIMARY KEY, searchIndex, value);
+         CREATE TABLE AgHarvestedIptcMetadata (id_local INTEGER PRIMARY KEY, image INTEGER, creatorRef INTEGER);",
+    )?;
+    let interned = |id: i64, v: V| {
+        c.execute(
+            "INSERT INTO AgInternedIptcCreator (id_local, value) VALUES (?1, ?2)",
+            params![id, v],
+        )
+    };
+    interned(501, text(right::FIRST_CREATOR))?;
+    interned(502, text("Second Creator"))?;
+    interned(503, text(right::UMLAUT_CREATOR))?;
+    interned(504, text(""))?;
+    interned(505, V::Integer(42))?;
+    interned(506, text("skipped-missing-creator"))?;
+    interned(507, text("skipped-virtual-creator"))?;
+    let harvest = |row: i64, image: i64, r: Option<i64>| {
+        c.execute(
+            "INSERT INTO AgHarvestedIptcMetadata (id_local, image, creatorRef) VALUES (?1, ?2, ?3)",
+            params![row, image, r],
+        )
+    };
+    harvest(1, right::UMLAUT_ID, Some(503))?;
+    harvest(2, right::PADDED_ID, None)?;
+    harvest(3, right::EMPTY_ID, Some(999))?;
+    harvest(301, right::TWO_HARVESTED_ID, Some(502))?;
+    harvest(300, right::TWO_HARVESTED_ID, Some(501))?;
+    harvest(400, right::DUPLICATE_ID, None)?;
+    harvest(401, right::DUPLICATE_ID, Some(501))?;
+    harvest(10, right::DUPLICATE_NULL_FIRST_ID, Some(504))?;
+    harvest(11, right::NON_TEXT_ID, Some(505))?;
+    harvest(12, 12, Some(501))?;
+    harvest(13, 13, Some(501))?;
+    harvest(102, 2, Some(506))?;
+    harvest(120, 20, Some(507))?;
+    c.execute_batch("COMMIT")?;
+    Ok(())
+}
+
 /// Number of keyword assignments (`AgLibraryKeywordImage` rows) of `photo`
 /// in the catalog at `path`. Opened read-only.
 pub fn assignments_to_photo(path: &Path, photo: i64) -> Result<i64> {
@@ -2437,4 +2554,56 @@ fn add_title_blobs(path: &Path) -> Result<()> {
     own(20, V::Blob(vec![9]))?;
     c.execute_batch("COMMIT")?;
     Ok(())
+}
+
+/// The full feature catalog: the small fixture with every supported edge
+/// applied, so a single catalog exercises folders, photos (incl. videos,
+/// missing files and a virtual copy), keywords with hierarchy/synonyms and
+/// attributes, ratings, flags, color labels (label set `En`), collections and
+/// collection sets, smart collections (translatable and not), stacks, the quick
+/// collection, titles, captions, copyright and creator.
+///
+/// Composition order matters: the keyword, flag and label adders rebuild
+/// `Adobe_images` but copy every row with `SELECT *`, so earlier edges survive.
+/// The combined IPTC adder ([`add_iptc_combined`]) replaces the separate
+/// caption/rights adders because the reader reads caption and copyright from
+/// the same `AgLibraryIPTC` row. `add_video_edges` runs before stacks (stacks
+/// need the video rows). `add_collection_edges` drops and recreates the
+/// collection tables, so the quick-collection adjustment (collection 14 is the
+/// quick collection, 15 is removed) runs after it. `add_smart_edges` creates
+/// `AgLibraryCollectionContent` and inserts smart collections 101.. plus a
+/// content row for the plain collection 4. Titles are written last. Placeholder
+/// originals are created for every file except the missing ones.
+///
+/// Returns `dir/full.lrcat`.
+pub fn write_full_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let (mac, win) = prepare_root_dirs(dir)?;
+    let catalog = dir.join("full.lrcat");
+    write_small(&catalog, &mac, &win)?;
+    add_keyword_edges(&catalog)?;
+    add_flag_edges(&catalog)?;
+    add_label_edges(&catalog, label_edge::Fixture::En)?;
+    add_iptc_combined(&catalog)?;
+    add_video_edges(&catalog)?;
+    add_stack_edges(&catalog)?;
+    add_collection_edges(&catalog)?;
+    // The quick collection is collection 14; collection 15 is removed. This
+    // mirrors write_quick_catalog_with_files but runs in the full catalog.
+    {
+        let c = Connection::open(&catalog)?;
+        c.execute_batch(
+            "DELETE FROM AgLibraryCollectionImage WHERE collection IN (14, 15); \
+             DELETE FROM AgLibraryCollection WHERE id_local = 15;",
+        )?;
+        for (photo, pos) in quick_edge::ROWS {
+            c.execute(
+                "INSERT INTO AgLibraryCollectionImage (collection, image, pick, positionInCollection) VALUES (14, ?1, 0, ?2)",
+                params![photo, pos],
+            )?;
+        }
+    }
+    add_smart_edges(&catalog)?;
+    add_title_blobs(&catalog)?;
+    create_original_files(&catalog)?;
+    Ok(catalog)
 }
