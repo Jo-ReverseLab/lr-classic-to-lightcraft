@@ -16,6 +16,9 @@ pub enum SkipCode {
     RootFolderNotFound,
     RootFolderNoPath,
     // Reader: photos.
+    /// A virtual copy whose master was not converted (reader), or whose master
+    /// has no LightCraft id yet when the copy is to be created (writer). Emitted
+    /// by both the reader and the writer; never created blindly.
     VirtualCopy,
     Video,
     Missing,
