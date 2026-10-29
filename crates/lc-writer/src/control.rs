@@ -109,6 +109,7 @@ struct Connection {
 /// Client for the LightCraft control port on `127.0.0.1`.
 pub struct ControlClient {
     port: u16,
+    timeout: Duration,
     connection: Option<Connection>,
     next_id: u64,
 }
@@ -116,9 +117,18 @@ pub struct ControlClient {
 impl ControlClient {
     /// Connect to the control port on `127.0.0.1:port`.
     pub fn connect(port: u16) -> Result<ControlClient, WriteError> {
-        let connection = open(port)?;
+        Self::connect_with_timeout(port, IO_TIMEOUT)
+    }
+
+    /// Connect with a custom read/write timeout. Production code uses
+    /// [`ControlClient::connect`] (the fixed 75 s [`IO_TIMEOUT`]); tests use
+    /// this with a short timeout so a stalled server fails the test instead
+    /// of hanging for 75 seconds.
+    pub fn connect_with_timeout(port: u16, timeout: Duration) -> Result<ControlClient, WriteError> {
+        let connection = open(port, timeout)?;
         Ok(ControlClient {
             port,
+            timeout,
             connection: Some(connection),
             next_id: 1,
         })
@@ -150,7 +160,7 @@ impl ControlClient {
         let command = name;
         let mut connection = match self.connection.take() {
             Some(c) => c,
-            None => open(self.port)?,
+            None => open(self.port, self.timeout)?,
         };
         let id = self.next_id;
         self.next_id += 1;
@@ -190,13 +200,13 @@ impl ControlClient {
     }
 }
 
-fn open(port: u16) -> Result<Connection, WriteError> {
+fn open(port: u16, timeout: Duration) -> Result<Connection, WriteError> {
     let connect_error = |source| WriteError::Connect { port, source };
     let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT).map_err(connect_error)?;
     stream
-        .set_read_timeout(Some(IO_TIMEOUT))
-        .and_then(|()| stream.set_write_timeout(Some(IO_TIMEOUT)))
+        .set_read_timeout(Some(timeout))
+        .and_then(|()| stream.set_write_timeout(Some(timeout)))
         .map_err(connect_error)?;
     let writer = stream.try_clone().map_err(connect_error)?;
     Ok(Connection {
