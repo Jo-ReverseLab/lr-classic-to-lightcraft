@@ -151,3 +151,45 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::args::RunOptions;
+    use crate::labels::LabelChoice;
+    use model::PathMappings;
+    use std::path::PathBuf;
+
+    fn options_with(report: Option<PathBuf>, script: Option<PathBuf>) -> RunOptions {
+        RunOptions {
+            catalog: PathBuf::from("cat.lrcat"),
+            mappings: PathMappings::default(),
+            report,
+            apply: false,
+            labels: LabelChoice::Auto,
+            library: None,
+            port: crate::args::DEFAULT_PORT,
+            allow_xmp: false,
+            script,
+        }
+    }
+
+    #[test]
+    fn report_and_script_pointing_at_the_same_file_is_rejected() {
+        let same = PathBuf::from("out.json");
+        let err = check_targets(&options_with(Some(same.clone()), Some(same))).unwrap_err();
+        assert!(
+            err.contains("--report and --script name the same file"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn report_and_script_pointing_at_different_files_are_accepted() {
+        let opts = options_with(
+            Some(PathBuf::from("r.json")),
+            Some(PathBuf::from("s.jsonl")),
+        );
+        assert!(check_targets(&opts).is_ok());
+    }
+}

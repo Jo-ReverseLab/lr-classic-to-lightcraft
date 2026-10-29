@@ -47,6 +47,12 @@ CI runs formatting, lint and tests on Linux, macOS and Windows.
 
 Each option is described below.
 
+Every option except `--map` may be given at most once. Repeating one of
+`--library`, `--script`, `--report`, `--port` or `--label-set` ends with
+exit code 2 before anything is read. `--report` and `--script` must not
+name the same file either; if they do, lr2lc stops with exit code 2 so the
+two outputs cannot overwrite each other.
+
 ## Usage
 
 ```sh
@@ -167,6 +173,14 @@ others are skipped with `duplicate global id` (a skipped photo does not
 claim its global id). A skipped keyword takes the keywords below it along.
 Global ids are used internally only and never appear in the output or in
 the report.
+
+Folders are the exception: a folder is identified by its absolute path
+(the root folder's `absolutePath` followed by `pathFromRoot`), not by a
+global id. Folders are read fresh every run and are not kept in the mapping
+file. A folder moved or renamed in Lightroom therefore simply appears under
+its new path in the next report; the old path is gone and nothing is
+reconciled or reported about it. (Photos inside keep their global id, so a
+moved folder does not make lr2lc re-import its photos.)
 
 Keywords are only assigned to photos that are converted, so assignments to
 skipped photos are skipped too. Synonyms are converted together with their
@@ -608,7 +622,7 @@ counts the smart collections converted as smart albums.
 | --- | --- |
 | 0 | Success (also for `--help` and `--version`) |
 | 1 | The run failed: catalog cannot be opened or read, unsupported version, required table or column missing, pending `-wal`/`-journal` changes, mapping file damaged, report or script cannot be written, catalog changed during the run, or with `--apply`: no connection to LightCraft, a pre-flight check failed (wrong or temporary library, library problem, XMP auto-write) or the connection was lost |
-| 2 | Invalid command line (unknown option, missing value, invalid `--map`, `--label-set` or `--port`, `--apply` without `--library`, refused `--report` or `--script` file); nothing is read or written |
+| 2 | Invalid command line (unknown option, missing value, invalid `--map`, `--label-set` or `--port`, `--apply` without `--library`, an option given more than once, `--report` and `--script` naming the same file, refused `--report` or `--script` file); nothing is read or written |
 
 ## License
 

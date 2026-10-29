@@ -30,7 +30,10 @@ Options:
   --apply          Actually write the LightCraft library through the
                    running app (default: dry run); needs --library
   -h, --help       Print this help
-  -V, --version    Print the version";
+  -V, --version    Print the version
+
+Every option except --map may be given at most once; repeating one ends
+with exit code 2. --report and --script must not name the same file.";
 
 /// What the user asked for.
 #[derive(Debug, PartialEq)]
@@ -299,6 +302,28 @@ mod tests {
     fn help_and_version_win() {
         assert_eq!(parse(&["cat.lrcat", "-h"]), Ok(Command::Help));
         assert_eq!(parse(&["-V"]), Ok(Command::Version));
+    }
+
+    #[test]
+    fn single_valued_options_rejected_when_repeated() {
+        // --map is repeatable; every other value option may appear once.
+        for args in [
+            &["cat.lrcat", "--library", "a", "--library", "b"][..],
+            &["cat.lrcat", "--script", "s.jsonl", "--script", "t.jsonl"][..],
+            &["cat.lrcat", "--report", "r.json", "--report", "r2.json"][..],
+            &["cat.lrcat", "--port", "1", "--port", "2"][..],
+            &["cat.lrcat", "--label-set", "en", "--label-set", "de"][..],
+        ] {
+            assert!(parse(args).is_err(), "expected an error for {args:?}");
+        }
+        // --map stays repeatable.
+        assert!(
+            run(&["cat.lrcat", "--map", "/a=/b", "--map", "/c=/d"])
+                .mappings
+                .rules()
+                .len()
+                == 2
+        );
     }
 
     #[test]
