@@ -10,7 +10,22 @@ Line numbers below come from a survey of an earlier state. Check them before rel
 The research notes in `docs/research/` describe LightCraft's commands and the open questions;
 statements there marked as assumptions are not facts.
 
-Order: top to bottom. Status of each task is **open** unless stated.
+Status of each task is **open** unless stated.
+
+**Order of work** (not the order of the numbers; tasks T13 to T23 were added later):
+
+1. T01, T02
+2. T13 (shared test support; do it before any other task that touches the fake server)
+3. T03, T04, T05, T06
+4. T14, T15 (two owner decisions that are now made)
+5. T07, T08, T09
+6. T16, T17, T18, T19, T20, T21 (large; each is independent of the others)
+7. T10, T11
+8. T22, T23, T12 (documents only)
+
+Stacking: a task that says "Base: branch of Tnn" is branched from that task's branch.
+Everything else is branched from the current `origin/main`. If a base branch is not merged
+yet when you start, say so in the report and keep going.
 
 ---
 
@@ -68,6 +83,8 @@ no other behaviour change.
 ---
 
 ## T03 Virtual copies  (branch `glm/t03-virtual-copies`)
+
+Base: branch of T13.
 
 **Goal.** Virtual copies are currently skipped with the reason code `virtual_copy`. Implement them
 as follows:
@@ -182,6 +199,10 @@ Tests only (fix real defects in a separate commit, noted in the report).
 - most options may appear only once; repeating them ends with exit code 2 (`crates/lr2lc/src/args.rs`).
 Add tests that pin both behaviours if they are missing.
 
+Also document, in README, that folder identity is the folder **path** (not a global id, unlike photos and
+keywords) and what that means after a folder is moved or renamed in Lightroom (it is seen as a new folder;
+check the code and describe what really happens, with a test if none exists).
+
 Also add the missing doc comments on `LivePhoto`, `LiveAlbum` and `LiveState` in
 `crates/lc-writer/src/live.rs` (set of values of `flag`, what a read error does: the whole run aborts).
 
@@ -191,7 +212,8 @@ Also add the missing doc comments on `LivePhoto`, `LiveAlbum` and `LiveState` in
 
 ## T10 Three-way reconciliation, part b  (branch `glm/t10-reconcile-decisions`)
 
-Large. Start only after T01 to T09 are reported. Read `docs/research/reconciliation.md` completely first;
+Large. Start only after T01 to T09 and T13 to T21 are reported (it builds on the shared test support,
+the single `AppliedNotSaved` rule and the reader-side smart verdict). Read `docs/research/reconciliation.md` completely first;
 its section on the planner contains line references to `plan.rs` that you must **re-check** before use.
 
 **Decision rule (decided by the owner).** For a photo that already exists in LightCraft:
@@ -247,15 +269,262 @@ listed in a final section.
 
 ---
 
+## T13 Shared test support for the fake LightCraft server  (branch `glm/t13-test-support`)
+
+**Decided by the owner:** yes, a shared test-support crate, as a new **workspace member** that uses no
+third-party crate.
+
+**Goal.** The fake control-port server exists twice: `crates/lc-writer/tests/support/` (two files,
+`fake_lightcraft.rs` and `fake_port.rs`) and `crates/lr2lc/tests/support/fake_lightcraft.rs`
+(the survey found the two `fake_lightcraft.rs` byte-identical; re-check). Move it into one crate
+(suggested name `lc-test-support`, directory `crates/lc-test-support`, `publish = false`), used only as a
+`[dev-dependencies]` path dependency by `lc-writer` and `lr2lc`.
+
+**Rules.**
+- No new external crate. `Cargo.lock` may only gain the new path package.
+- Behaviour of every existing test stays the same. Do the move in small commits: add the crate and use it
+  from one test file, then switch the rest, then delete the copies.
+- The new crate carries `MIT OR Apache-2.0` like the others and a short `//!` doc comment.
+- The crate must build on Linux, macOS and Windows (no platform-specific code).
+
+**Acceptance.** All existing tests pass unchanged in meaning; no duplicate of the fake server is left;
+`cargo test --workspace`, `fmt`, `clippy --all-targets -D warnings` clean; CHANGELOG not needed (internal).
+
+---
+
+## T14 One rule for "saved in memory but not written to disk"  (branch `glm/t14-applied-not-saved`)
+
+Base: branch of T13.
+
+**Decided by the owner (on the lead's recommendation):** when LightCraft answers that a change was
+applied but not saved (`AppliedNotSaved`), lr2lc does **not** record it as done in the mapping file.
+It re-plans it, so the next run sends it again.
+
+**Goal.** Make field updates (stars, flag, label, title, caption, copyright, creator) and `keyword.create`
+follow the same rule as `album.createSmart` already does (`crates/lc-writer/src/apply.rs`, around lines 589
+to 598, 986 to 1002, 1104 to 1116 and 1278 to 1305; re-check the numbers).
+
+**Why this is safe.** Field updates are idempotent, and a keyword is looked up with `keyword.list` before
+it is created. The only step that can produce a duplicate is `album.createSmart`; the report must say so
+in that case (by id, no names).
+
+**Steps.** Tests first against the fake server: an `AppliedNotSaved` answer for each kind of step leaves
+the mapping file without that entry, the report lists the step as not saved, and the next run sends it
+again. Then the change. Update the doc comments that describe the old rule and the README section on
+re-runs.
+
+**Acceptance.** One rule, documented in one place; tests for every step kind; second run behaves as above;
+numbers still add up.
+
+---
+
+## T15 The reader decides the smart-collection verdict  (branch `glm/t15-smart-verdict`)
+
+**Decided by the owner:** yes.
+
+**Goal.** `crates/lr2lc/src/dry_run.rs` (around lines 205 to 219) rewrites report entries by matching the
+prefix `"collection <id>:"` through `Report::convert_skipped` and `Report::replace_skipped`
+(`crates/model/src/lib.rs`). That contradicts the rule in `crates/model/src/skip.rs` (a code is set where
+the reason arises, never derived from the text). Let the reader produce the final verdict for each smart
+collection (translatable or not, with the reason code), so the CLI never edits the report by reason text.
+Then remove `convert_skipped` and `replace_skipped` if nothing else uses them.
+
+**Rules.** The report output (keys, codes, numbers) must stay **identical** for every existing test
+unless a test shows the old output was wrong (then say so in the report). The layering stays
+reader → model → writer; the reader must not depend on the writer.
+
+**Acceptance.** No reason-text matching remains (grep and show it); existing smart-collection tests pass;
+a test that the verdict comes from the reader; read = converted + skipped still holds.
+
+---
+
+## T16 Hostile catalogs: no panic, numbers add up  (branch `glm/t16-hostile-catalogs`)
+
+Tests first. Product code only to fix a defect a test proves (separate commit, noted in the report).
+
+**Goal.** Extend the fixture generator (`tests/fixtures/generator`) with a way to make deliberately
+damaged catalogs, and write reader and CLI tests that run each one and assert: no panic, no hang, a clear
+error or a skip with a reason code, and read = converted + skipped. Cases (each its own test):
+
+- NULL where a value is expected (names, paths, ids, ratings, flags, labels) in every table the reader uses;
+- an id that points to a row that does not exist (folder, root folder, keyword parent, collection parent,
+  image of a collection, stack member);
+- cycles: keyword parent chain, collection-set chain, stack that contains itself;
+- duplicate global ids; two rows with the same path; an empty name; names with very long text,
+  embedded NUL, a lone surrogate-like byte sequence stored as a blob in a text column;
+- numbers out of range: rating below 0 or above 5, negative ids, huge ids, a pick value other than -1, 0, 1;
+- a catalog with all tables present but empty; a catalog with an unknown extra table;
+- a missing optional table or column (older or newer layout than the supported one).
+
+**Rules.** Everything is generated, never taken from a real catalog. The generator's new options have
+tests of their own. Test directories and file names must be valid on Windows.
+
+**Acceptance.** All cases pass or are reported as defects with a minimal failing test; a table in the
+report that lists each case and the observed behaviour (error, skip code, or accepted).
+
+---
+
+## T17 Path mapping test matrix  (branch `glm/t17-path-mapping`)
+
+**Goal.** `--map OLD=NEW` (see `crates/lr2lc/src/args.rs` and where the mapping is applied) is a core
+feature of "runs everywhere". Pin its behaviour with tests and fix real defects in separate commits.
+
+Cases: prefix boundary (`/a/b` must not rewrite `/a/bc/x`); trailing separators on either side; several
+`--map` options and which wins (longest prefix? first? decide by reading the code, then test and
+document the actual rule); Windows drive letters and UNC paths (`C:\data\x`, `\\server\share\x`) in the
+catalog while running on Linux; mixed separators; case differences on Windows-style paths; non-ASCII names
+(composed and decomposed, no normalisation: they stay different); empty NEW; relative paths; `..`
+segments (the mapping must not climb out of the new prefix silently: report it); a mapping that makes two
+photos land on the same path (reported, nothing merged silently).
+
+**Rules.** The pure mapping function must be testable without a file system. Do not touch originals; the
+tool must never check existence by modifying anything. Paths in tests are neutral (`C:\data\...`).
+
+**Acceptance.** A table-driven test file; README documents the exact rule in a short section; defects
+fixed with tests.
+
+---
+
+## T18 Writer tests: stacks, quick collection, albums  (branch `glm/t18-writer-album-stack-tests`)
+
+Tests only against the fake server (defects fixed in separate commits and noted).
+
+Read `docs/research/lightcraft-albums.md` first. Cases:
+
+- **Quick collection:** `album.toggleTarget` removes **all** photos if all are already in. The writer must
+  read the members first and send only the missing ones. Test: all in, none in, some in, empty collection,
+  a photo that vanished from LightCraft, a repeated run.
+- **Stacks:** top photo and order are taken over, collapsed state is only counted. Test: a stack of one,
+  a stack whose member is missing in LightCraft, two stacks that share a photo (reported, nothing
+  half-written), a stack already present in LightCraft, a second run.
+- **Albums and album folders:** nested folders several levels deep (and the unknown depth limit of
+  `albums.list`: test that a deeper tree than the fake server returns is detected and reported, not
+  silently cut), same-named albums in one folder (names unchanged, duplicates only counted), a member
+  that is not in the library, an empty album, a second run, an album that the user renamed in LightCraft.
+- A command that fails in the middle of a album: what is recorded in the mapping file, what the next
+  run does (never blind repeat).
+
+**Acceptance.** Every case has a test or a note in the report on why a fake server cannot show it; the
+report states which cases found a defect.
+
+---
+
+## T19 End-to-end and golden-report tests  (branch `glm/t19-end-to-end`)
+
+Tests only (defects fixed in separate commits and noted).
+
+**Goal.**
+1. One generated catalog that uses **every** supported feature (folders, photos, keywords with hierarchy,
+   synonyms, attributes, ratings, flags, labels, collections, collection sets, smart collections both
+   translatable and not, stacks, quick collection, titles, captions, copyright, creator, a video, a
+   missing file, a virtual copy once T03 exists). Run the whole tool: dry run, then `--apply` against the
+   fake server, then `--apply` again. Assert: the second run changes nothing in the fake server's state;
+   the catalog checksum is the same before and after all three runs; read = converted + skipped for
+   every counter group; the dry-run numbers equal the numbers of the first apply run.
+2. **Golden files** for `report.json` (and the readable summary): a stored expected output for that one
+   catalog, compared in a test. The test must print a readable diff on failure and must be easy to
+   re-generate (document the one command). Golden files contain only generated data.
+3. A **report format document** `docs/report-format.md`: every key of `report.json`, its type, when it
+   appears, and the guarantees (numbers add up; no values from a catalog, only names of fields and ids).
+   Do not add or rename keys here; if you find an inconsistency, list it under "Questions".
+
+**Acceptance.** All of the above; the golden test fails if a key is renamed; works on Windows (line endings
+and path separators in golden files are handled, say how).
+
+---
+
+## T20 Performance and complexity guard  (branch `glm/t20-performance`)
+
+**Goal.** The generator can produce a large catalog (`write_large_catalog` in
+`tests/fixtures/generator/src/lib.rs`). Measure the reader, the planner and the whole dry run with
+catalogs of 10 000, 100 000 and 500 000 photos (with keywords and collections in proportion; extend the
+generator if needed, deterministic seed). Find and remove accidental quadratic behaviour (a `Vec`
+searched inside a loop, repeated string building, repeated `clone` of big collections, one SQL query per
+photo instead of one per table, an unbounded memory copy of all photos).
+
+**Rules.**
+- Report numbers (time, peak memory if you can measure it, number of SQL statements) in the task report
+  in a table. If your workspace cannot run `cargo`, say so and instead list the suspected hot spots with
+  file and line plus the reasoning; do not invent measurements.
+- A change must not change any output. Prove it with the existing tests plus one test that compares the
+  report of a medium catalog before and after.
+- Performance tests must not run in the normal `cargo test` (mark them `#[ignore]` with a clear reason
+  and document the one command that runs them). A small version (about 2 000 photos) may run normally
+  with a generous time limit that cannot fail on a slow CI runner.
+- The live writer: count how many control-port requests a run needs per photo, and list which could be
+  batched. Do not change the batching in this task (design decision); write the findings down.
+
+**Acceptance.** Measurements or reasoned hot-spot list; at least the clear wins fixed in small commits;
+no change in output; the guard test exists and is documented.
+
+---
+
+## T21 Audit: lossy casts, panics, indexing  (branch `glm/t21-audit-casts-panics`)
+
+**Goal.** T05 covers `.expect` in the reader's keywords. Do the same audit for the whole workspace:
+
+- every `unwrap`, `expect`, `panic!`, `unreachable!`, `todo!`, array or slice index and range slice
+  (`[a..b]`) on data that comes from a catalog, from a LightCraft answer or from the command line;
+- every `as` cast between integer types (the survey counted about six `as u8/u16/u32/i32/usize`), and
+  arithmetic that could overflow on a big or hostile value;
+- every `String::from_utf8_lossy`, `to_string_lossy` and similar that silently changes data (a name must
+  stay byte for byte, with no Unicode normalisation).
+
+For each finding: fix it (test first) or list it in `tasks/reports/t21-audit-casts-panics.md` with a
+one-line justification why it is safe. Test code is out of scope.
+
+**Acceptance.** A table of all findings by file and line with the decision; no panic left on external
+data; fixes have tests; `fmt` and `clippy` clean.
+
+---
+
+## T22 Triage of the assumptions in the research notes  (branch `glm/t22-assumption-triage`)
+
+Documents only, no Rust code.
+
+**Goal.** `docs/research/` contains about 59 statements marked as assumptions (for example the depth limit
+of `albums.list`). Produce `docs/research/assumptions.md`: one row per assumption with the file and line,
+the statement, why it matters for the tool, what would make it a fact (a source to cite, a read of the
+code in this repository, or a live check against the app), the **risk if wrong** (wrong data, lost data,
+only a worse message) and a priority.
+
+Then derive a **live-check checklist**: the smallest list of commands, in order, that an owner with a
+running app and a throw-away library can run to settle the high-priority rows, each with the exact
+expected answer shape and what to record (numbers and field names only, never user content).
+
+**Rules.** Never turn an assumption into a fact without a citation. If you can cite a public source for a
+row, add the URL and the retrieval date and mark it **sourced**.
+
+**Acceptance.** Every assumption is listed once; the checklist is runnable as written; a short section
+"decisions for the owner" at the end.
+
+---
+
+## T23 CI proposal (document only)  (branch `glm/t23-ci-proposal`)
+
+Documents only. You must **not** change anything under `.github/`.
+
+**Goal.** Write `docs/ci-proposal.md`: what the CI should additionally check and what it would cost.
+Candidates: `--locked` builds, the minimum supported Rust version, `cargo audit` or `cargo deny` (note
+that these are extra tools, which need the owner's approval), a coverage report, the performance guard
+from T20 on a schedule instead of on every push, link and prose checks on README and CHANGELOG, a check
+that the `tasks/` directory is gone before a release, a check for personal paths and names in the diff,
+and a job that builds the three systems with a cache. For each: benefit, run time, cost in Actions
+minutes (macOS minutes count at a high multiplier on private repositories: use the numbers that
+`PLAN.md` gives, mark guesses as guesses), risk, and the exact change you would make to the workflow
+file, written as a snippet in the document, not as a change.
+
+**Acceptance.** Ranked list with a recommendation; open decisions for the owner at the end.
+
+---
+
 ## Not yours (blocked-by-owner)
 
 Do not start these. Leave them alone, even if you see an easy fix:
 
-- The two handling rules for "saved in memory but not written to disk" (`AppliedNotSaved`) currently
-  differ between field updates and smart albums: owner decision pending.
-- Moving the reader's smart-collection verdict so the report text is no longer rewritten
-  (`Report::replace_skipped`): design decision pending.
-- Folder identity by path instead of global id: decision pending.
-- A shared test-support crate for the duplicated fake server: architecture decision pending.
+- Folder identity: the owner decided to **keep** identity by path, no change. (Task T09 documents it.)
 - Anything in `.github/`, CI settings, release, license files, repository settings.
 - Wider catalog-version support.
+- Develop settings code (Phase 6). T12 is research only.
+- Changing how many control-port requests are batched (T20 only reports).
+- Any new dependency, even a "small" one. Write the question into the report.
