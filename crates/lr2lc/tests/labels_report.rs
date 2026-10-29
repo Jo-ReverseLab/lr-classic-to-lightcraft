@@ -183,7 +183,6 @@ const ALL_STD_NAMES: [&str; 10] = [
 // --- auto -------------------------------------------------------------
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn auto_maps_english_names_only() {
     let (_d, cat) = fixture(Fixture::En);
     let (text, v, _) = ok(&cat, &[]);
@@ -193,7 +192,6 @@ fn auto_maps_english_names_only() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn auto_maps_german_names_only_with_nfc_gruen() {
     let (_d, cat) = fixture(Fixture::De);
     let (text, v, _) = ok(&cat, &[]);
@@ -203,7 +201,6 @@ fn auto_maps_german_names_only_with_nfc_gruen() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn auto_maps_german_and_english_names_together() {
     // 4 Red, 5 Rot, 6 Green, 7 Blau, 8 Purple, 9 Gelb.
     let (_d, cat) = fixture(Fixture::Mixed);
@@ -214,7 +211,6 @@ fn auto_maps_german_and_english_names_together() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn auto_reports_custom_names_next_to_standard_ones() {
     // 4 Rot, 5 Red, 6 custom, 7 Gelb, 8 Purple, 9 Lila.
     let (_d, cat) = fixture(Fixture::MixedCustom);
@@ -225,7 +221,6 @@ fn auto_reports_custom_names_next_to_standard_ones() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn auto_with_only_custom_names_maps_nothing_and_reports_each() {
     let (_d, cat) = fixture(Fixture::OnlyCustom);
     let (text, v, _) = ok(&cat, &[]);
@@ -235,7 +230,6 @@ fn auto_with_only_custom_names_maps_nothing_and_reports_each() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn auto_compares_exactly_in_english_and_custom_mix() {
     // 4 NFD Grün, 5 "rot", 6 "Red ", 7 custom stay custom. 8 "Green" and
     // 9 "Red" map.
@@ -247,7 +241,6 @@ fn auto_compares_exactly_in_english_and_custom_mix() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn auto_compares_exactly_in_german_names() {
     // 4 NFD Grün, 5 "rot", 6 "Gelb ", 8 "LILA" stay custom. 7 Blau and
     // 9 Rot map.
@@ -258,7 +251,6 @@ fn auto_compares_exactly_in_german_names() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn auto_without_labels_maps_nothing_and_has_no_recommendation() {
     let (_d, cat) = fixture(Fixture::Empty);
     let (text, v, _) = ok(&cat, &[]);
@@ -268,7 +260,6 @@ fn auto_without_labels_maps_nothing_and_has_no_recommendation() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn explicit_auto_equals_the_default() {
     let (_d, cat) = fixture(Fixture::Mixed);
     let a = ok(&cat, &[]);
@@ -277,7 +268,6 @@ fn explicit_auto_equals_the_default() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn auto_ignores_labels_of_skipped_photos_in_matched_sets() {
     // Skipped photos 2 and 20 carry German names in this fixture; the
     // converted ones are German too, so "en" must not be listed.
@@ -287,7 +277,6 @@ fn auto_ignores_labels_of_skipped_photos_in_matched_sets() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn small_catalog_without_label_columns_values_has_zero_labels() {
     let dir = tempfile::tempdir().unwrap();
     let cat = lrcat_fixtures::write_small_catalog_with_files(dir.path()).unwrap();
@@ -304,7 +293,6 @@ fn small_catalog_without_label_columns_values_has_zero_labels() {
 // --- explicit set -----------------------------------------------------
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn explicit_en_on_en_catalog() {
     let (_d, cat) = fixture(Fixture::En);
     let (text, v, _) = ok(&cat, &["--label-set", "en"]);
@@ -312,7 +300,6 @@ fn explicit_en_on_en_catalog() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn explicit_de_on_de_catalog() {
     let (_d, cat) = fixture(Fixture::De);
     let (text, v, _) = ok(&cat, &["--label-set", "de"]);
@@ -320,7 +307,6 @@ fn explicit_de_on_de_catalog() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn wrong_explicit_set_makes_every_label_custom_but_keeps_photos() {
     let (_d, cat) = fixture(Fixture::En);
     let (text, v, _) = ok(&cat, &["--label-set", "de"]);
@@ -331,7 +317,6 @@ fn wrong_explicit_set_makes_every_label_custom_but_keeps_photos() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn explicit_en_on_mixed_catalog_maps_only_english_names() {
     // Photos 4 Red, 6 Green, 8 Purple match; 5 Rot, 7 Blau, 9 Gelb are custom.
     let (_d, cat) = fixture(Fixture::Mixed);
@@ -341,7 +326,6 @@ fn explicit_en_on_mixed_catalog_maps_only_english_names() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn explicit_de_on_mixed_catalog_maps_only_german_names() {
     // Photos 5 Rot, 7 Blau, 9 Gelb match; 4, 6, 8 are custom.
     let (_d, cat) = fixture(Fixture::Mixed);
@@ -351,7 +335,6 @@ fn explicit_de_on_mixed_catalog_maps_only_german_names() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn exact_matching_in_the_english_set() {
     // 4 NFD Grün, 5 "rot", 6 "Red " and 7 custom do not match. 8 "Green"
     // and 9 "Red" do.
@@ -362,7 +345,6 @@ fn exact_matching_in_the_english_set() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn nfd_gruen_does_not_match_the_german_set() {
     let (_d, cat) = fixture(Fixture::Odd);
     let (text, v, _) = ok(&cat, &["--label-set", "de"]);
@@ -373,7 +355,6 @@ fn nfd_gruen_does_not_match_the_german_set() {
 // --- strict sets stay strict --------------------------------------------
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn explicit_en_stays_strict_with_mixed_and_custom_names() {
     // 4 Rot, 5 Red, 6 custom, 7 Gelb, 8 Purple, 9 Lila: only Red, Purple.
     let (_d, cat) = fixture(Fixture::MixedCustom);
@@ -383,7 +364,6 @@ fn explicit_en_stays_strict_with_mixed_and_custom_names() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn explicit_de_stays_strict_with_mixed_and_custom_names() {
     // Only Rot, Gelb, Lila map.
     let (_d, cat) = fixture(Fixture::MixedCustom);
@@ -393,7 +373,6 @@ fn explicit_de_stays_strict_with_mixed_and_custom_names() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn matched_sets_is_empty_for_a_file_set() {
     let (d, cat) = fixture(Fixture::En);
     let file = write_set(d.path(), &json!({"Red": "red"}));
@@ -404,7 +383,6 @@ fn matched_sets_is_empty_for_a_file_set() {
 // --- file -------------------------------------------------------------
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn file_set_maps_odd_names_exactly() {
     let (d, cat) = fixture(Fixture::Odd);
     let file = write_set(
@@ -424,7 +402,6 @@ fn file_set_maps_odd_names_exactly() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn file_set_replaces_the_built_in_meaning_of_names() {
     let (d, cat) = fixture(Fixture::En);
     let file = write_set(d.path(), &json!({"Red": "blue"}));
@@ -435,7 +412,6 @@ fn file_set_replaces_the_built_in_meaning_of_names() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn empty_object_file_is_valid_and_makes_everything_custom() {
     let (d, cat) = fixture(Fixture::De);
     let file = write_set(d.path(), &json!({}));
@@ -444,7 +420,6 @@ fn empty_object_file_is_valid_and_makes_everything_custom() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn file_set_works_for_a_german_catalog() {
     let (d, cat) = fixture(Fixture::De);
     let file = write_set(
@@ -601,11 +576,13 @@ fn custom_labels_do_not_change_the_photo_balance() {
         .collect();
     ids.sort();
     // Only the virtual copy and the two missing originals; the labels of
-    // photos 2 and 20 are not counted and never listed as custom.
+    // photos 2 and 20 are not counted and never listed as custom. Under the
+    // combined `auto` set, photos 8 ("Green") and 9 ("Red") of `Odd` map, so
+    // only 4, 5, 6 and 7 are custom.
     assert_eq!(ids, ["photo 2", "photo 20", "photo 3"]);
-    assert_eq!(custom_ids(&v), label_edge::LABELLED_IDS);
+    assert_eq!(custom_ids(&v), [4, 5, 6, 7]);
     let c = p["labels"]["custom"].as_i64().unwrap();
-    assert_eq!(c, 6);
+    assert_eq!(c, 4);
     assert_eq!(
         p["read"].as_i64().unwrap(),
         p["converted"].as_i64().unwrap() + skipped.len() as i64
@@ -613,7 +590,6 @@ fn custom_labels_do_not_change_the_photo_balance() {
 }
 
 #[test]
-#[ignore = "waiting for P5-4h"]
 fn labels_of_skipped_photos_do_not_influence_auto() {
     // Fixture En has "Red" on photo 2 and "Green" on virtual copy 20; they
     // are skipped and must be ignored either way: 2 red / 1 green.
