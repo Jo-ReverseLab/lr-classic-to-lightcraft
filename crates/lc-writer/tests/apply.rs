@@ -24,7 +24,11 @@
 //!   `PhotoFields::imported_default()` and the state file is saved; after
 //!   all updates of the photo it is recorded with the full `snapshot`;
 //! - every update carries `ids: [<LightCraft id>]`;
-//! - `Outcome::AppliedNotSaved` counts as success (and in `not_saved`);
+//! - `Outcome::AppliedNotSaved` is not recorded: an update leaves the photo
+//!   incomplete (listed in `photos_incomplete`, counted in `not_saved`) and
+//!   the next run sends it again; a `keyword.create` leaves the keyword
+//!   unrecorded (listed in `keywords_skipped`, counted in `not_saved`) and the
+//!   next run creates it again;
 //! - `WriteError::Command` skips only the affected photo/keyword, with a
 //!   reason that names the command and no catalog text;
 //! - `ConnectionLost` and `Protocol` abort at once; nothing is repeated; the
@@ -40,7 +44,7 @@ use lc_writer::apply::{ApplySummary, apply};
 use lc_writer::control::{ControlClient, WriteError};
 use lc_writer::plan::WriteInput;
 use lc_writer::state::{PhotoFields, State, snapshot};
-use model::{ColorLabel, Keyword, Photo, Rating};
+use model::{ColorLabel, Keyword, Photo, Rating, SkipCode};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -708,22 +712,102 @@ fn failed_import_skips_the_photo_and_its_later_steps() {
 }
 
 #[test]
-fn not_saved_replies_count_as_success() {
+fn not_saved_updates_are_not_recorded_and_rerun_resends() {
     let env = env();
     let mut config = Config::new(&env.library);
+    // Every update replies AppliedNotSaved.
     config.not_saved_updates = true;
     let fake = FakeLightCraft::start(config);
     let summary = run(&fake, &env, &input()).unwrap();
-    assert_eq!(summary.updates, 5);
-    assert_eq!(summary.not_saved, 5);
-    assert_clean(&summary);
-    let state = State::load(&env.state_file).unwrap();
-    let inp = input();
-    let kws = inp.photo_keywords[&1].clone();
-    assert_eq!(
-        state.photo("g1").unwrap().fields,
-        snapshot(&inp.photos[0], &kws)
+
+    // No update was applied-and-saved, so none counts as a finished update.
+    assert_eq!(summary.updates, 0);
+    // Each photo that had an update is incomplete: g1, g3, g4 (g2 is import-only).
+    assert_eq!(summary.not_saved, 3);
+    assert_eq!(summary.photos_incomplete.len(), 3);
+    assert!(
+        summary
+            .photos_incomplete
+            .iter()
+            .all(|s| s.code == SkipCode::AppliedNotSaved),
+        "{:?}",
+        summary.photos_incomplete
     );
+
+    // The fields were NOT recorded: every photo keeps its import-default
+    // fields (the rating/label updates were not saved, so the snapshot was
+    // not written).
+    let state = State::load(&env.state_file).unwrap();
+    let g1 = state.photo("g1").unwrap();
+    assert_eq!(g1.fields, PhotoFields::imported_default());
+    let g3 = state.photo("g3").unwrap();
+    assert_eq!(g3.fields, PhotoFields::imported_default());
+    let g4 = state.photo("g4").unwrap();
+    assert_eq!(g4.fields, PhotoFields::imported_default());
+
+    // The next run sends the updates again: nothing was recorded as done, so
+    // the planner re-plans every field that differs from the import default.
+    let before = fake.commands().len();
+    let summary2 = run(&fake, &env, &input()).unwrap();
+    let cmds2 = &fake.commands()[before..];
+    assert!(
+        cmds2.iter().any(|(c, _)| c.starts_with("photo.")),
+        "the next run sends photo updates again: {:?}",
+        cmds2
+    );
+    // They are still not saved (the fake still replies AppliedNotSaved).
+    assert_eq!(summary2.updates, 0);
+    assert_eq!(summary2.not_saved, 3);
+}
+
+#[test]
+fn not_saved_keyword_create_is_not_recorded_and_rerun_resends() {
+    let env = env();
+    let mut config = Config::new(&env.library);
+    // Every keyword.create replies AppliedNotSaved and is not persisted, so
+    // the next run's keyword.list does not return it.
+    config.not_saved_keyword_creates = true;
+    let fake = FakeLightCraft::start(config);
+    let summary = run(&fake, &env, &input()).unwrap();
+
+    // No keyword was applied-and-saved.
+    assert_eq!(summary.keywords_created, 0);
+    // Travel and Café ☕ were applied but not saved; Travel|Rome was skipped
+    // because its parent Travel was not created (ParentFailed).
+    assert_eq!(summary.not_saved, 2);
+    assert_eq!(summary.keywords_skipped.len(), 3);
+    assert_eq!(
+        summary
+            .keywords_skipped
+            .iter()
+            .filter(|s| s.code == SkipCode::AppliedNotSaved)
+            .count(),
+        2
+    );
+    assert_eq!(
+        summary
+            .keywords_skipped
+            .iter()
+            .filter(|s| s.code == SkipCode::ParentFailed)
+            .count(),
+        1
+    );
+
+    // Nothing was recorded: the mapping file holds no keywords.
+    let state = State::load(&env.state_file).unwrap();
+    assert_eq!(state.keywords().count(), 0);
+
+    // The next run sends keyword.create again (nothing was recorded and the
+    // fake did not persist the unsaved keywords).
+    let before = fake.commands().len();
+    let summary2 = run(&fake, &env, &input()).unwrap();
+    let cmds2 = &fake.commands()[before..];
+    assert!(
+        cmds2.iter().any(|(c, _)| c == "keyword.create"),
+        "the next run sends keyword.create again: {:?}",
+        cmds2
+    );
+    assert_eq!(summary2.keywords_created, 0);
 }
 
 #[test]

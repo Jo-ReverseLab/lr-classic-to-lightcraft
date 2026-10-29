@@ -47,6 +47,12 @@
 //!   interrupted run loses nothing that was confirmed;
 //! - a photo is recorded right after its import with the fields of a fresh
 //!   import, and with all its fields once every update succeeded;
+//! - an update answered `AppliedNotSaved` is not recorded: the photo is
+//!   incomplete like a rejected update and the next run sends it again
+//!   (field updates are idempotent, so re-sending is safe);
+//! - a `keyword.create` answered `AppliedNotSaved` is not recorded and its
+//!   subtree is skipped: the next run looks the keyword up with
+//!   `keyword.list` before creating, so no duplicate is made;
 //! - a rejected select makes the photo incomplete like a rejected update;
 //!   a select is not counted in `updates`;
 //! - an error reply skips only the affected keyword or photo; a lost
@@ -1102,8 +1108,7 @@ impl Run<'_> {
             return Ok(());
         }
         match self.client.execute("keyword.create", params.clone()) {
-            Ok(outcome) => {
-                self.count_not_saved(&outcome);
+            Ok(Outcome::Applied(_)) => {
                 self.summary.keywords_created += 1;
                 let keyword = self.keywords.get(path).cloned().or_else(|| {
                     // Not reachable: the plan only creates wanted keywords.
@@ -1113,6 +1118,23 @@ impl Run<'_> {
                     self.state.record_keyword(&keyword);
                     self.state.save(self.state_file)?;
                 }
+                Ok(())
+            }
+            // Applied but not saved: do not record the keyword. The next run
+            // looks it up with `keyword.list` before creating, so no duplicate
+            // is made. The keyword is added to `failed_keywords` so its
+            // subtree is skipped too: nothing in the unsaved branch is
+            // recorded, and the next run re-plans the whole branch. Same rule
+            // as `album.createSmart` (see T14).
+            Ok(Outcome::AppliedNotSaved(_)) => {
+                self.summary.not_saved += 1;
+                self.failed_keywords.insert(path.to_string());
+                self.summary.keywords_skipped.push(Skipped::new(
+                    SkipCode::AppliedNotSaved,
+                    "keyword not created: `keyword.create` was applied but not saved; \
+                     the next run creates it again, check LightCraft for a duplicate"
+                        .to_string(),
+                ));
                 Ok(())
             }
             Err(WriteError::Command { command, .. }) => {
@@ -1261,9 +1283,24 @@ impl Run<'_> {
             self.count_updated();
         }
         match result {
-            Ok(outcome) => {
-                self.count_not_saved(&outcome);
+            Ok(Outcome::Applied(_)) => {
                 self.summary.updates += 1;
+                Ok(())
+            }
+            // Applied but not saved: do not record the field. The photo is
+            // marked incomplete so `finish_photo` does not snapshot its
+            // fields, and the next run sends the update again. Same rule as
+            // `album.createSmart` (see T14).
+            Ok(Outcome::AppliedNotSaved(_)) => {
+                self.summary.not_saved += 1;
+                self.summary.photos_incomplete.push(Skipped::new(
+                    SkipCode::AppliedNotSaved,
+                    format!(
+                        "photo {lightroom_id}: `{command}` was applied but not saved; \
+                         the photo is incomplete and is updated again by the next run"
+                    ),
+                ));
+                self.fail_current();
                 Ok(())
             }
             Err(WriteError::Command { command, .. }) => {

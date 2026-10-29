@@ -460,10 +460,12 @@ the `writer` section:
   duplicates on import);
 - `photos_updated` (known from the mapping file, at least one update sent)
   and `photos_unchanged` (known, no command needed);
-- `updates` (field updates applied) and `not_saved` (applied but not yet
-  saved to disk by LightCraft);
-- `photos_skipped`, `photos_incomplete` (an update or the select before
-  it failed; the next run sends the updates again) and `keywords_skipped`, each with reasons;
+- `updates` (field updates applied) and `not_saved` (a step LightCraft
+  applied but did not save to disk; the step is not recorded as done and the
+  next run sends it again);
+- `photos_skipped`, `photos_incomplete` (an update or the select before it
+  failed, or a step was applied but not saved; the next run sends the updates
+  again) and `keywords_skipped`, each with reasons;
 - `folders_created`, `albums_created` and `collections_known` (already in
   the mapping file, no `album.create`), and `collections_existing` (missing
   from the mapping file but found in the library and taken over, see
@@ -512,9 +514,12 @@ lr2lc remembers what it wrote in `<library folder name>.lr2lc.json` next to
 the library folder, e.g. `Photos.lightcraft.lr2lc.json`. It maps each
 photo's Lightroom global id to its LightCraft id and keeps the values last
 written. It is saved after every finished step, so an interrupted run loses
-nothing. A second run sends only what changed in Lightroom since then and
-creates no duplicates. If the file is lost, the next run finds the photos
-again as duplicates and the keywords in the library's keyword list.
+nothing. A step LightCraft applied but did not save (`AppliedNotSaved`) is
+not recorded: the next run sends it again (field updates are idempotent; a
+keyword is looked up with `keyword.list` before it is created, so no
+duplicate is made). A second run sends only what changed in Lightroom since
+then and creates no duplicates. If the file is lost, the next run finds the
+photos again as duplicates and the keywords in the library's keyword list.
 
 Collections are kept under `collections`, keyed by the Lightroom collection
 id: `{"lightcraft_id": ..., "kind": "album" | "folder", "name": ...,

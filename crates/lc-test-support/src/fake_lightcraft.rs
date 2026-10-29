@@ -220,6 +220,11 @@ pub struct Config {
     /// `album.create`, `album.createSmart` and `library.import` apply, then
     /// answer `saved in memory but not written to disk` (no id).
     pub not_saved_creates: bool,
+    /// `keyword.create` applies, then answers `saved in memory but not
+    /// written to disk`. The keyword is not added to the library, so the
+    /// next run's `keyword.list` does not return it and it is created again
+    /// (modelling an app that lost the unsaved keyword on restart).
+    pub not_saved_keyword_creates: bool,
     /// Photos the library has at start (read side: `catalog.query`
     /// summaries and `photo.inspect`).
     pub seed_photos: Vec<SeedPhoto>,
@@ -252,6 +257,7 @@ impl Config {
             albums_no_id: false,
             import_no_id: false,
             not_saved_creates: false,
+            not_saved_keyword_creates: false,
             seed_photos: Vec::new(),
             seed_members: Vec::new(),
             summary_broken: false,
@@ -674,6 +680,9 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                 Some(parent) => format!("{parent}|{name}"),
                 None => name.to_string(),
             };
+            if config.not_saved_keyword_creates {
+                return Err("saved in memory but not written to disk: disk full".into());
+            }
             if !lib.keywords.insert(path) {
                 return Err("keyword already exists".into());
             }
