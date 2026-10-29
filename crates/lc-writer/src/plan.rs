@@ -688,6 +688,12 @@ fn global_ids(input: &WriteInput) -> BTreeMap<i64, &str> {
 fn plan_stacks(input: &WriteInput, state: &State, out: &mut Plan) {
     let global_ids = global_ids(input);
     let by_id: BTreeMap<i64, &Stack> = input.stacks.iter().map(|s| (s.lightroom_id, s)).collect();
+    // A photo can be in only one stack. Stacks are planned in ascending
+    // Lightroom id order; the first stack to use a photo wins, and a later
+    // stack whose members overlap it is reported (`AlreadyInStack`) rather
+    // than half-written: grouping it would merge or steal the shared photo in
+    // LightCraft, leaving the earlier stack incomplete.
+    let mut used: BTreeSet<String> = BTreeSet::new();
     for s in by_id.values() {
         let mut gids: Vec<String> = Vec::new();
         for member in &s.members {
@@ -707,11 +713,24 @@ fn plan_stacks(input: &WriteInput, state: &State, out: &mut Plan) {
             ));
             continue;
         }
+        if let Some(shared) = gids.iter().find(|g| used.contains(*g)) {
+            out.stack_skips.push(Skipped::new(
+                SkipCode::AlreadyInStack,
+                format!(
+                    "stack {}: shares photo {} with an earlier stack; a photo can be in only one stack; not grouped",
+                    s.lightroom_id, shared
+                ),
+            ));
+            continue;
+        }
         let recorded: &[String] = state
             .stack(s.lightroom_id)
             .map(|e| e.members.as_slice())
             .unwrap_or_default();
         out.stack_members_removed += recorded.iter().filter(|g| !gids.contains(g)).count();
+        for g in &gids {
+            used.insert(g.clone());
+        }
         if state.stack(s.lightroom_id).is_some() && same_members(recorded, &gids) {
             out.stacks_known += 1;
         } else {

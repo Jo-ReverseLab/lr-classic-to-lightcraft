@@ -27,7 +27,7 @@
 use lc_writer::apply::{ApplySummary, apply};
 use lc_writer::control::{ControlClient, WriteError};
 use lc_writer::plan::WriteInput;
-use lc_writer::state::State;
+use lc_writer::state::{CollectionEntry, EntryKind, State};
 use model::{Collection, CollectionKind, Photo, Rating};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -568,4 +568,51 @@ fn recovered_collections_are_not_duplicated_by_a_third_lost_state() {
         assert_eq!(s.collections_existing, 5);
         assert_eq!(fake.albums(), albums);
     }
+}
+
+#[test]
+fn a_lightcraft_side_rename_is_not_detected() {
+    // The user renamed the album in LightCraft: the library has "Deep Renamed"
+    // at id 5001, but the mapping file still records the name "Deep" and the
+    // Lightroom collection is still "Deep". The writer trusts the recorded id:
+    // it sends no `album.create`, does not read `albums.list`, and adds the
+    // members to id 5001 by id. The LightCraft-side rename is NOT detected
+    // (`collections_renamed` counts only Lightroom-side renames); reconciling
+    // library-side renames is an open item of the safe re-sync.
+    use CollectionKind::Album;
+    let env = env();
+    let fake = with_seeds(&env, vec![SeedAlbum::album("Deep Renamed", None)]); // id 5001
+    {
+        let mut state = State::load(&env.state_file).unwrap();
+        state.record_collection(
+            1,
+            CollectionEntry {
+                lightcraft_id: json!(5001),
+                kind: EntryKind::Album,
+                name: "Deep".to_string(),
+                parent: None,
+                members: Vec::new(),
+                rules: None,
+            },
+        );
+        state.save(&env.state_file).unwrap();
+    }
+    let input = input_with(vec![collection(1, "Deep", Album, None, &[101])]);
+    let (s, commands) = ok(&fake, &env, &input);
+    assert_eq!(s.collections_known, 1);
+    assert_eq!(
+        (
+            s.collections_renamed,
+            s.collections_existing,
+            s.albums_created
+        ),
+        (0, 0, 0)
+    );
+    assert!(of(&commands, "album.create").is_empty(), "{commands:?}");
+    assert!(of(&commands, "albums.list").is_empty(), "{commands:?}");
+    // The members went to id 5001, which the app still calls "Deep Renamed".
+    assert_eq!(fake.album_members(5001), [1001]);
+    let album = fake.albums().iter().find(|a| a.id == 5001).unwrap();
+    assert_eq!(album.name, "Deep Renamed");
+    assert_eq!(state(&env)["collections"]["1"]["members"], json!(["g101"]));
 }

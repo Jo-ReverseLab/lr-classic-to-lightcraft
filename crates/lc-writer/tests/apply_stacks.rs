@@ -35,7 +35,7 @@ use lc_writer::apply::{ApplySummary, apply, apply_partial};
 use lc_writer::control::{ControlClient, WriteError};
 use lc_writer::plan::WriteInput;
 use lc_writer::state::State;
-use model::{Photo, Rating, Stack};
+use model::{Photo, Rating, SkipCode, Stack};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
@@ -528,4 +528,38 @@ fn the_selection_gate_makes_the_select_necessary() {
     let (s, commands) = ok(&fake, &env, &input_with(vec![stack(1, &[101, 102])]));
     assert_eq!(s.stacks_grouped, 1);
     assert_selected_before_groups(&commands);
+}
+
+#[test]
+fn two_stacks_sharing_a_photo_report_the_second_and_write_nothing_half() {
+    // A photo can be in only one stack. Two input stacks that share a photo
+    // (here 102) must not both be grouped: `stack.group` merges touched
+    // stacks, so grouping the second would steal the shared photo from the
+    // first and leave it half-written. The first stack wins; the later one is
+    // reported (`AlreadyInStack`) and not sent at all.
+    let env = env();
+    let fake = FakeLightCraft::start(Config::new(&env.library));
+    let (s, commands) = ok(
+        &fake,
+        &env,
+        &input_with(vec![stack(1, &[101, 102]), stack(2, &[102, 103])]),
+    );
+    assert_eq!((s.stacks_grouped, s.stacks_known), (1, 0));
+    assert_eq!(s.stacks_skipped.len(), 1);
+    assert_eq!(s.stacks_skipped[0].code, SkipCode::AlreadyInStack);
+    let reason = &s.stacks_skipped[0].reason;
+    assert!(
+        reason
+            .split(|c: char| !c.is_ascii_digit())
+            .any(|t| t == "2"),
+        "reason names stack 2: {reason}"
+    );
+    assert!(!reason.contains("jpg") && !reason.contains('/'), "{reason}");
+    // Only one group command, and it is for the first stack.
+    assert_eq!(of(&commands, "stack.group").len(), 1);
+    assert_eq!(of(&commands, "stack.group")[0]["top"], 1001);
+    // The shared photo stays in the first stack; no second stack was created.
+    assert_eq!(views(&fake), [vec![1001, 1002]]);
+    assert!(state(&env)["stacks"].get("1").is_some());
+    assert!(state(&env)["stacks"].get("2").is_none());
 }
