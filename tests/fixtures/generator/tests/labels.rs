@@ -25,6 +25,9 @@ fn every_fixture_stores_the_documented_labels() {
         Fixture::Mixed,
         Fixture::Odd,
         Fixture::Empty,
+        Fixture::MixedCustom,
+        Fixture::OnlyCustom,
+        Fixture::OddDe,
     ] {
         let dir = tempfile::tempdir().unwrap();
         let cat = write_label_catalog_with_files(dir.path(), f).unwrap();

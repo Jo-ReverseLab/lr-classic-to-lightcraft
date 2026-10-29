@@ -10,30 +10,32 @@
 //! Names are looked up byte for byte (case, spaces, Unicode form).
 //!
 //! Resolution:
-//! - `auto`: if every non-empty label of the converted photos belongs
-//!   exactly to the English set, or exactly to the German set, that set
-//!   applies (`label_set` "en" / "de"). Otherwise (mixed, custom names, no
-//!   labels) nothing is guessed: `label_set` is "none" and every non-empty
-//!   label is a custom label. Labels of skipped photos are not considered.
-//! - `en` / `de` / file: names not in that set are custom labels. The
-//!   `label_set` is "en", "de" or "file".
+//! - `auto`: the standard names of English and German count together
+//!   (Red/Rot, Yellow/Gelb, Green/Grün, Blue/Blau, Purple/Lila). A label
+//!   that equals one of them exactly maps to its colour, whatever the other
+//!   labels are. Every other non-empty label is a custom label of its own
+//!   photo. Nothing else is guessed. Labels of skipped photos are not
+//!   considered.
+//! - `en` / `de` / file: strict, unchanged: only names of that set map;
+//!   names not in it are custom labels. The `label_set` is "en", "de" or
+//!   "file".
 //! - A custom label never skips a photo: it is converted without a label.
 //!
 //! report.json, area `photos`: `labels` is an object with exactly these
 //! fields: integers `red`, `yellow`, `green`, `blue`, `purple`, `none`,
 //! `custom` (they count converted photos only; their sum is `converted`),
-//! string `label_set`, and `custom_reasons`, an array of objects
-//! `{"reason": "photo <id>: custom label not in label set"}`, ascending by
-//! id, one per custom photo, no names. `none` counts empty and NULL labels.
-//! `photos.skipped` is not changed by custom labels.
+//! string `label_set` ("auto" under auto, otherwise "en", "de" or "file"),
+//! array `matched_sets` (under auto: the sets whose standard names were
+//! matched at least once, in the order "en", "de"; empty otherwise; only set
+//! designations, never catalog values), and `custom_reasons`, an array of
+//! objects `{"reason": "photo <id>: custom label not in label set"}`,
+//! ascending by id, one per custom photo, no names. `none` counts empty and
+//! NULL labels. `photos.skipped` is not changed by custom labels.
 //!
 //! stdout: always exactly one line
 //! `labels: red R, yellow Y, green G, blue B, purple P, none N, custom C, set S`
-//! (S = en, de, file or none). If `--label-set` is auto, the set is "none"
-//! and there is at least one custom label, one more line mentioning
-//! `--label-set` recommends choosing a set. In all other cases (also with an
-//! explicit set) the recommendation line is absent; a catalog without labels
-//! gets no recommendation.
+//! (S = auto, en, de or file). There is no recommendation line any more
+//! (the line mentioning `--label-set` is absent in every case).
 //!
 //! Label text never appears in stdout, stderr or report.json.
 //!
@@ -44,6 +46,9 @@
 //! Always: dry run (nothing written, catalog byte-identical), photo balance
 //! unchanged (read 20, would convert 17, skipped 3), second run identical,
 //! `catalog_unchanged` true.
+//!
+//! The tests marked `waiting for P5-4h` describe the behaviour of the
+//! combined `auto` set and its report field.
 
 use lrcat_fixtures::label_edge::{self, Fixture};
 use lrcat_fixtures::write_label_catalog_with_files;
@@ -105,6 +110,10 @@ fn write_set(dir: &Path, value: &Value) -> PathBuf {
 type Counts = [i64; 7];
 
 fn check(v: &Value, text: &str, counts: Counts, set: &str) {
+    check_with(v, text, counts, set, &[]);
+}
+
+fn check_with(v: &Value, text: &str, counts: Counts, set: &str, matched: &[&str]) {
     let l = &v["photos"]["labels"];
     let keys = ["red", "yellow", "green", "blue", "purple", "none", "custom"];
     for (k, want) in keys.iter().zip(counts) {
@@ -113,9 +122,10 @@ fn check(v: &Value, text: &str, counts: Counts, set: &str) {
     assert_eq!(l["label_set"], set);
     assert_eq!(
         l.as_object().unwrap().len(),
-        9,
-        "fields: 7 counters, label_set, custom_reasons: {l}"
+        10,
+        "fields: 7 counters, label_set, matched_sets, custom_reasons: {l}"
     );
+    assert_eq!(l["matched_sets"], json!(matched), "matched_sets: {l}");
     assert_eq!(counts.iter().sum::<i64>(), label_edge::CONVERTED);
     assert_eq!(v["photos"]["converted"], label_edge::CONVERTED);
     let want = format!(
@@ -173,61 +183,111 @@ const ALL_STD_NAMES: [&str; 10] = [
 // --- auto -------------------------------------------------------------
 
 #[test]
-fn auto_detects_the_english_set() {
+#[ignore = "waiting for P5-4h"]
+fn auto_maps_english_names_only() {
     let (_d, cat) = fixture(Fixture::En);
     let (text, v, _) = ok(&cat, &[]);
-    check(&v, &text, EN, "en");
+    check_with(&v, &text, EN, "auto", &["en"]);
     assert!(custom_ids(&v).is_empty());
     assert!(!has_recommendation(&text), "{text}");
 }
 
 #[test]
-fn auto_detects_the_german_set_with_nfc_gruen() {
+#[ignore = "waiting for P5-4h"]
+fn auto_maps_german_names_only_with_nfc_gruen() {
     let (_d, cat) = fixture(Fixture::De);
     let (text, v, _) = ok(&cat, &[]);
-    check(&v, &text, EN, "de");
+    check_with(&v, &text, EN, "auto", &["de"]);
     assert!(custom_ids(&v).is_empty());
     assert!(!has_recommendation(&text), "{text}");
 }
 
 #[test]
-fn auto_on_mixed_sets_guesses_nothing_and_recommends() {
+#[ignore = "waiting for P5-4h"]
+fn auto_maps_german_and_english_names_together() {
+    // 4 Red, 5 Rot, 6 Green, 7 Blau, 8 Purple, 9 Gelb.
     let (_d, cat) = fixture(Fixture::Mixed);
     let (text, v, _) = ok(&cat, &[]);
-    check(&v, &text, [0, 0, 0, 0, 0, 11, 6], "none");
-    assert_eq!(custom_ids(&v), label_edge::LABELLED_IDS);
-    assert!(has_recommendation(&text), "{text}");
-}
-
-#[test]
-fn auto_on_odd_names_guesses_nothing_and_recommends() {
-    // NFD "Grün", "rot", "Red " and a custom name: no set fits exactly, even
-    // though "Green" and "Red" alone would match the English set.
-    let (_d, cat) = fixture(Fixture::Odd);
-    let (text, v, _) = ok(&cat, &[]);
-    check(&v, &text, [0, 0, 0, 0, 0, 11, 6], "none");
-    assert_eq!(custom_ids(&v), label_edge::LABELLED_IDS);
-    assert!(has_recommendation(&text), "{text}");
-}
-
-#[test]
-fn auto_without_labels_has_set_none_and_no_recommendation() {
-    let (_d, cat) = fixture(Fixture::Empty);
-    let (text, v, _) = ok(&cat, &[]);
-    check(&v, &text, [0, 0, 0, 0, 0, 17, 0], "none");
+    check_with(&v, &text, EN, "auto", &["en", "de"]);
     assert!(custom_ids(&v).is_empty());
     assert!(!has_recommendation(&text), "{text}");
 }
 
 #[test]
+#[ignore = "waiting for P5-4h"]
+fn auto_reports_custom_names_next_to_standard_ones() {
+    // 4 Rot, 5 Red, 6 custom, 7 Gelb, 8 Purple, 9 Lila.
+    let (_d, cat) = fixture(Fixture::MixedCustom);
+    let (text, v, _) = ok(&cat, &[]);
+    check_with(&v, &text, [2, 1, 0, 0, 2, 11, 1], "auto", &["en", "de"]);
+    assert_eq!(custom_ids(&v), [6]);
+    assert!(!has_recommendation(&text), "{text}");
+}
+
+#[test]
+#[ignore = "waiting for P5-4h"]
+fn auto_with_only_custom_names_maps_nothing_and_reports_each() {
+    let (_d, cat) = fixture(Fixture::OnlyCustom);
+    let (text, v, _) = ok(&cat, &[]);
+    check_with(&v, &text, [0, 0, 0, 0, 0, 11, 6], "auto", &[]);
+    assert_eq!(custom_ids(&v), label_edge::LABELLED_IDS);
+    assert!(!has_recommendation(&text), "{text}");
+}
+
+#[test]
+#[ignore = "waiting for P5-4h"]
+fn auto_compares_exactly_in_english_and_custom_mix() {
+    // 4 NFD Grün, 5 "rot", 6 "Red ", 7 custom stay custom. 8 "Green" and
+    // 9 "Red" map.
+    let (_d, cat) = fixture(Fixture::Odd);
+    let (text, v, _) = ok(&cat, &[]);
+    check_with(&v, &text, [1, 0, 1, 0, 0, 11, 4], "auto", &["en"]);
+    assert_eq!(custom_ids(&v), [4, 5, 6, 7]);
+    assert!(!has_recommendation(&text), "{text}");
+}
+
+#[test]
+#[ignore = "waiting for P5-4h"]
+fn auto_compares_exactly_in_german_names() {
+    // 4 NFD Grün, 5 "rot", 6 "Gelb ", 8 "LILA" stay custom. 7 Blau and
+    // 9 Rot map.
+    let (_d, cat) = fixture(Fixture::OddDe);
+    let (text, v, _) = ok(&cat, &[]);
+    check_with(&v, &text, [1, 0, 0, 1, 0, 11, 4], "auto", &["de"]);
+    assert_eq!(custom_ids(&v), [4, 5, 6, 8]);
+}
+
+#[test]
+#[ignore = "waiting for P5-4h"]
+fn auto_without_labels_maps_nothing_and_has_no_recommendation() {
+    let (_d, cat) = fixture(Fixture::Empty);
+    let (text, v, _) = ok(&cat, &[]);
+    check_with(&v, &text, [0, 0, 0, 0, 0, 17, 0], "auto", &[]);
+    assert!(custom_ids(&v).is_empty());
+    assert!(!has_recommendation(&text), "{text}");
+}
+
+#[test]
+#[ignore = "waiting for P5-4h"]
 fn explicit_auto_equals_the_default() {
-    let (_d, cat) = fixture(Fixture::De);
+    let (_d, cat) = fixture(Fixture::Mixed);
     let a = ok(&cat, &[]);
     let b = ok(&cat, &["--label-set", "auto"]);
     assert_eq!(a, b);
 }
 
 #[test]
+#[ignore = "waiting for P5-4h"]
+fn auto_ignores_labels_of_skipped_photos_in_matched_sets() {
+    // Skipped photos 2 and 20 carry German names in this fixture; the
+    // converted ones are German too, so "en" must not be listed.
+    let (_d, cat) = fixture(Fixture::OddDe);
+    let (_, v, _) = ok(&cat, &[]);
+    assert_eq!(v["photos"]["labels"]["matched_sets"], json!(["de"]));
+}
+
+#[test]
+#[ignore = "waiting for P5-4h"]
 fn small_catalog_without_label_columns_values_has_zero_labels() {
     let dir = tempfile::tempdir().unwrap();
     let cat = lrcat_fixtures::write_small_catalog_with_files(dir.path()).unwrap();
@@ -235,7 +295,8 @@ fn small_catalog_without_label_columns_values_has_zero_labels() {
     let converted = v["photos"]["converted"].as_i64().unwrap();
     assert_eq!(v["photos"]["labels"]["none"], converted);
     assert_eq!(v["photos"]["labels"]["custom"], 0);
-    assert_eq!(v["photos"]["labels"]["label_set"], "none");
+    assert_eq!(v["photos"]["labels"]["label_set"], "auto");
+    assert_eq!(v["photos"]["labels"]["matched_sets"], json!([]));
     assert!(!has_recommendation(&text));
     assert!(text.lines().any(|l| l.starts_with("labels:")));
 }
@@ -243,6 +304,7 @@ fn small_catalog_without_label_columns_values_has_zero_labels() {
 // --- explicit set -----------------------------------------------------
 
 #[test]
+#[ignore = "waiting for P5-4h"]
 fn explicit_en_on_en_catalog() {
     let (_d, cat) = fixture(Fixture::En);
     let (text, v, _) = ok(&cat, &["--label-set", "en"]);
@@ -250,6 +312,7 @@ fn explicit_en_on_en_catalog() {
 }
 
 #[test]
+#[ignore = "waiting for P5-4h"]
 fn explicit_de_on_de_catalog() {
     let (_d, cat) = fixture(Fixture::De);
     let (text, v, _) = ok(&cat, &["--label-set", "de"]);
@@ -257,6 +320,7 @@ fn explicit_de_on_de_catalog() {
 }
 
 #[test]
+#[ignore = "waiting for P5-4h"]
 fn wrong_explicit_set_makes_every_label_custom_but_keeps_photos() {
     let (_d, cat) = fixture(Fixture::En);
     let (text, v, _) = ok(&cat, &["--label-set", "de"]);
@@ -267,6 +331,7 @@ fn wrong_explicit_set_makes_every_label_custom_but_keeps_photos() {
 }
 
 #[test]
+#[ignore = "waiting for P5-4h"]
 fn explicit_en_on_mixed_catalog_maps_only_english_names() {
     // Photos 4 Red, 6 Green, 8 Purple match; 5 Rot, 7 Blau, 9 Gelb are custom.
     let (_d, cat) = fixture(Fixture::Mixed);
@@ -276,6 +341,7 @@ fn explicit_en_on_mixed_catalog_maps_only_english_names() {
 }
 
 #[test]
+#[ignore = "waiting for P5-4h"]
 fn explicit_de_on_mixed_catalog_maps_only_german_names() {
     // Photos 5 Rot, 7 Blau, 9 Gelb match; 4, 6, 8 are custom.
     let (_d, cat) = fixture(Fixture::Mixed);
@@ -285,6 +351,7 @@ fn explicit_de_on_mixed_catalog_maps_only_german_names() {
 }
 
 #[test]
+#[ignore = "waiting for P5-4h"]
 fn exact_matching_in_the_english_set() {
     // 4 NFD Grün, 5 "rot", 6 "Red " and 7 custom do not match. 8 "Green"
     // and 9 "Red" do.
@@ -295,6 +362,7 @@ fn exact_matching_in_the_english_set() {
 }
 
 #[test]
+#[ignore = "waiting for P5-4h"]
 fn nfd_gruen_does_not_match_the_german_set() {
     let (_d, cat) = fixture(Fixture::Odd);
     let (text, v, _) = ok(&cat, &["--label-set", "de"]);
@@ -302,9 +370,41 @@ fn nfd_gruen_does_not_match_the_german_set() {
     assert_eq!(custom_ids(&v), label_edge::LABELLED_IDS);
 }
 
+// --- strict sets stay strict --------------------------------------------
+
+#[test]
+#[ignore = "waiting for P5-4h"]
+fn explicit_en_stays_strict_with_mixed_and_custom_names() {
+    // 4 Rot, 5 Red, 6 custom, 7 Gelb, 8 Purple, 9 Lila: only Red, Purple.
+    let (_d, cat) = fixture(Fixture::MixedCustom);
+    let (text, v, _) = ok(&cat, &["--label-set", "en"]);
+    check(&v, &text, [1, 0, 0, 0, 1, 11, 4], "en");
+    assert_eq!(custom_ids(&v), [4, 6, 7, 9]);
+}
+
+#[test]
+#[ignore = "waiting for P5-4h"]
+fn explicit_de_stays_strict_with_mixed_and_custom_names() {
+    // Only Rot, Gelb, Lila map.
+    let (_d, cat) = fixture(Fixture::MixedCustom);
+    let (text, v, _) = ok(&cat, &["--label-set", "de"]);
+    check(&v, &text, [1, 1, 0, 0, 1, 11, 3], "de");
+    assert_eq!(custom_ids(&v), [5, 6, 8]);
+}
+
+#[test]
+#[ignore = "waiting for P5-4h"]
+fn matched_sets_is_empty_for_a_file_set() {
+    let (d, cat) = fixture(Fixture::En);
+    let file = write_set(d.path(), &json!({"Red": "red"}));
+    let (_, v, _) = ok(&cat, &["--label-set", file.to_str().unwrap()]);
+    assert_eq!(v["photos"]["labels"]["matched_sets"], json!([]));
+}
+
 // --- file -------------------------------------------------------------
 
 #[test]
+#[ignore = "waiting for P5-4h"]
 fn file_set_maps_odd_names_exactly() {
     let (d, cat) = fixture(Fixture::Odd);
     let file = write_set(
@@ -324,6 +424,7 @@ fn file_set_maps_odd_names_exactly() {
 }
 
 #[test]
+#[ignore = "waiting for P5-4h"]
 fn file_set_replaces_the_built_in_meaning_of_names() {
     let (d, cat) = fixture(Fixture::En);
     let file = write_set(d.path(), &json!({"Red": "blue"}));
@@ -334,6 +435,7 @@ fn file_set_replaces_the_built_in_meaning_of_names() {
 }
 
 #[test]
+#[ignore = "waiting for P5-4h"]
 fn empty_object_file_is_valid_and_makes_everything_custom() {
     let (d, cat) = fixture(Fixture::De);
     let file = write_set(d.path(), &json!({}));
@@ -342,6 +444,7 @@ fn empty_object_file_is_valid_and_makes_everything_custom() {
 }
 
 #[test]
+#[ignore = "waiting for P5-4h"]
 fn file_set_works_for_a_german_catalog() {
     let (d, cat) = fixture(Fixture::De);
     let file = write_set(
@@ -510,14 +613,15 @@ fn custom_labels_do_not_change_the_photo_balance() {
 }
 
 #[test]
+#[ignore = "waiting for P5-4h"]
 fn labels_of_skipped_photos_do_not_influence_auto() {
     // Fixture En has "Red" on photo 2 and "Green" on virtual copy 20; they
-    // are skipped and must be ignored either way. The counts above already
-    // show 2 red / 1 green. Check the totals stay the same on the German set.
+    // are skipped and must be ignored either way: 2 red / 1 green.
     for (f, set) in [(Fixture::En, "en"), (Fixture::De, "de")] {
         let (_d, cat) = fixture(f);
         let (_, v, _) = ok(&cat, &[]);
-        assert_eq!(v["photos"]["labels"]["label_set"], set);
+        assert_eq!(v["photos"]["labels"]["label_set"], "auto");
+        assert_eq!(v["photos"]["labels"]["matched_sets"], json!([set]));
         assert_eq!(v["photos"]["labels"]["red"], 2);
         assert_eq!(v["photos"]["labels"]["green"], 1);
     }

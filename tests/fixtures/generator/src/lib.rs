@@ -228,6 +228,16 @@ pub mod label_edge {
         Odd,
         /// No labels at all (empty strings; photo 10 NULL).
         Empty,
+        /// Both standard sets plus a custom name. Photos 4..=9: Rot, Red,
+        /// `Zyx-Label-Custom`, Gelb, Purple, Lila.
+        MixedCustom,
+        /// Custom names only. Photos 4..=9: six invented names, none of them
+        /// a standard name.
+        OnlyCustom,
+        /// German names that differ from the standard ones in one detail.
+        /// Photos 4..=9: `Grün` in NFD, `rot`, `Gelb ` (trailing space),
+        /// Blau, `LILA`, Rot.
+        OddDe,
     }
 
     /// Converted photos (17 = 20 rows - virtual copy - 2 missing originals).
@@ -255,12 +265,22 @@ pub mod label_edge {
             Fixture::De => ["Rot", "Gelb", "Gr\u{fc}n", "Blau", "Lila", "Rot"],
             Fixture::Mixed => ["Red", "Rot", "Green", "Blau", "Purple", "Gelb"],
             Fixture::Odd => ["Gru\u{308}n", "rot", "Red ", CUSTOM_NAME, "Green", "Red"],
+            Fixture::MixedCustom => ["Rot", "Red", CUSTOM_NAME, "Gelb", "Purple", "Lila"],
+            Fixture::OnlyCustom => [
+                CUSTOM_NAME,
+                "Alpha-Custom",
+                "Beta-Custom",
+                "Gamma-Custom",
+                "Delta-Custom",
+                "Epsilon-Custom",
+            ],
+            Fixture::OddDe => ["Gru\u{308}n", "rot", "Gelb ", "Blau", "LILA", "Rot"],
             Fixture::Empty => return Vec::new(),
         };
         let mut v: Vec<(i64, &'static str)> = LABELLED_IDS.into_iter().zip(six).collect();
         // Skipped photos: missing original (2) and virtual copy (20).
         let skipped: [&'static str; 2] = match f {
-            Fixture::En | Fixture::Mixed | Fixture::Odd => ["Red", "Green"],
+            Fixture::En | Fixture::Mixed | Fixture::Odd | Fixture::MixedCustom => ["Red", "Green"],
             _ => ["Rot", "Gr\u{fc}n"],
         };
         v.push((2, skipped[0]));
