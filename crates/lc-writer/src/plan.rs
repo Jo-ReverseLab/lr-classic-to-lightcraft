@@ -68,6 +68,33 @@ pub struct Conflict {
     pub field: String,
 }
 
+/// A recorded photo that is no longer in the Lightroom model. Only the
+/// photo's Lightroom id is carried, never a path or a file name; nothing is
+/// deleted in LightCraft.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct RemovedPhoto {
+    /// The photo's id in the Lightroom catalog.
+    pub photo: i64,
+}
+
+/// A recorded photo whose original moved while its global id stayed. Only
+/// the photo's Lightroom id is carried, never a path or a file name; the
+/// photo is not imported again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct MovedPhoto {
+    /// The photo's id in the Lightroom catalog.
+    pub photo: i64,
+}
+
+/// A recorded keyword whose path text changed while its global id stayed.
+/// Only the keyword's Lightroom id is carried, never a name; nothing is
+/// created or renamed in LightCraft.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct RenamedKeyword {
+    /// The keyword's id in the Lightroom catalog.
+    pub keyword: i64,
+}
+
 /// Everything the writer is asked to put into the library.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WriteInput {
@@ -240,6 +267,19 @@ pub struct Plan {
     /// a conflicting field keeps its last imported value and the next run
     /// reports the conflict again.
     recorded: BTreeMap<String, PhotoFields>,
+    /// Recorded photos that are no longer in the Lightroom model, ascending
+    /// by Lightroom id. Nothing is deleted in LightCraft.
+    removed_photos: Vec<RemovedPhoto>,
+    /// Recorded photos whose original moved, ascending by Lightroom id. They
+    /// are not imported again.
+    moved_photos: Vec<MovedPhoto>,
+    /// Recorded keywords whose path text changed but whose global id stayed,
+    /// ascending by Lightroom id. Nothing is created or renamed in
+    /// LightCraft.
+    renamed_keywords: Vec<RenamedKeyword>,
+    /// Global ids of the recorded photos missing from the input; they are
+    /// taken out of the albums the mapping file records.
+    removed_gids: BTreeSet<String>,
 }
 
 impl Plan {
@@ -257,6 +297,28 @@ impl Plan {
     /// sends `removeKeywords`.
     pub fn keywords_removed(&self) -> usize {
         self.keywords_removed
+    }
+
+    /// Recorded photos that are no longer in the Lightroom model, ascending
+    /// by Lightroom id. They are only reported (and taken out of the albums
+    /// the mapping file records); nothing is deleted in LightCraft.
+    pub fn removed_photos(&self) -> &[RemovedPhoto] {
+        &self.removed_photos
+    }
+
+    /// Recorded photos whose original moved while their global id stayed,
+    /// ascending by Lightroom id. They are only reported, never imported
+    /// again.
+    pub fn moved_photos(&self) -> &[MovedPhoto] {
+        &self.moved_photos
+    }
+
+    /// Recorded keywords whose path text changed while their global id
+    /// stayed, ascending by Lightroom id (a renamed ancestor also changes
+    /// the path text of its descendants). They are only reported; nothing is
+    /// created or renamed in LightCraft.
+    pub fn renamed_keywords(&self) -> &[RenamedKeyword] {
+        &self.renamed_keywords
     }
 
     /// The field values to record in the mapping file for the known photos
@@ -535,9 +597,12 @@ pub fn select_params(id: &Value) -> Value {
 /// created again.
 pub fn plan(input: &WriteInput, state: &State, library_keywords: &BTreeSet<String>) -> Plan {
     let mut out = Plan::default();
-    plan_keywords(input, state, library_keywords, &mut out);
+    let (renamed, renamed_report) = renamed_keywords(input, state);
+    out.renamed_keywords = renamed_report;
+    plan_keywords(input, state, library_keywords, &renamed, &mut out);
     out.keyword_skips = out.skipped.len();
-    plan_photos(input, state, &mut out);
+    plan_photos(input, state, &renamed, &mut out);
+    plan_removed_and_moved(input, state, &mut out);
     plan_stacks(input, state, &mut out);
     plan_collections(input, state, &mut out);
     plan_quick(input, state, &mut out);
@@ -551,6 +616,7 @@ pub fn plan(input: &WriteInput, state: &State, library_keywords: &BTreeSet<Strin
 /// change the outcome (rule: `lr == last` means nothing is written), so an
 /// apply run can skip the read and a second run sends no extra commands.
 pub(crate) fn needs_live(input: &WriteInput, state: &State) -> bool {
+    let (renamed, _) = renamed_keywords(input, state);
     input.photos.iter().any(|photo| {
         let Some(global_id) = photo.global_id.as_deref() else {
             return false;
@@ -563,7 +629,7 @@ pub(crate) fn needs_live(input: &WriteInput, state: &State) -> bool {
             .get(&photo.lightroom_id)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        let new = snapshot(photo, keywords);
+        let new = snapshot_with_renames(photo, keywords, &renamed);
         let old = &entry.fields;
         new.rating != old.rating
             || new.flag != old.flag
@@ -651,13 +717,9 @@ struct Wanted {
     explicit: bool,
 }
 
-fn plan_keywords(
-    input: &WriteInput,
-    state: &State,
-    library_keywords: &BTreeSet<String>,
-    out: &mut Plan,
-) {
-    // Ordered by path parts, so a parent always comes before its children.
+/// Every keyword the input needs, with its missing ancestors, ordered by
+/// path parts so a parent always comes before its children.
+fn wanted_keywords(input: &WriteInput) -> BTreeMap<Vec<String>, Wanted> {
     let mut wanted: BTreeMap<Vec<String>, Wanted> = BTreeMap::new();
     let explicit = input
         .keywords
@@ -679,8 +741,60 @@ fn plan_keywords(
             explicit: false,
         });
     }
+    wanted
+}
 
-    for w in wanted.values() {
+/// Finds recorded keywords whose global id is the same but whose path text
+/// changed (renamed in Lightroom). Returns the new path text → recorded path
+/// text map and the report entries. A renamed ancestor also changes the
+/// path text of its descendants, so those are reported too. Keyword names
+/// never leave this function.
+fn renamed_keywords(
+    input: &WriteInput,
+    state: &State,
+) -> (BTreeMap<String, String>, Vec<RenamedKeyword>) {
+    let recorded: BTreeMap<&str, (&str, Option<i64>)> = state
+        .keywords()
+        .filter_map(|(path, entry)| {
+            entry
+                .global_id
+                .as_deref()
+                .map(|gid| (gid, (path, entry.lightroom_id)))
+        })
+        .collect();
+    let mut paths = BTreeMap::new();
+    let mut report = Vec::new();
+    for w in wanted_keywords(input).values() {
+        let Some(gid) = w.keyword.global_id.as_deref() else {
+            continue;
+        };
+        let text = keyword_text(&w.keyword);
+        if state.keyword(&text).is_some() {
+            continue;
+        }
+        let Some((old_path, id)) = recorded.get(gid) else {
+            continue;
+        };
+        if *old_path != text {
+            paths.insert(text, (*old_path).to_string());
+            if let Some(id) = id {
+                report.push(RenamedKeyword { keyword: *id });
+            }
+        }
+    }
+    report.sort_by_key(|r| r.keyword);
+    report.dedup_by_key(|r| r.keyword);
+    (paths, report)
+}
+
+fn plan_keywords(
+    input: &WriteInput,
+    state: &State,
+    library_keywords: &BTreeSet<String>,
+    renamed: &BTreeMap<String, String>,
+    out: &mut Plan,
+) {
+    for w in wanted_keywords(input).values() {
         let text = keyword_text(&w.keyword);
         if let Some(entry) = state.keyword(&text) {
             if w.explicit && !entry.same_attributes(&w.keyword) {
@@ -691,6 +805,11 @@ fn plan_keywords(
                         .to_string(),
                 ));
             }
+            continue;
+        }
+        // Renamed in Lightroom: the new name is never created, and it is
+        // never added to a photo (see `snapshot_with_renames`).
+        if renamed.contains_key(&text) {
             continue;
         }
         if library_keywords.contains(&text) {
@@ -716,7 +835,12 @@ fn create_keyword_params(k: &Keyword) -> Value {
     })
 }
 
-fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
+fn plan_photos(
+    input: &WriteInput,
+    state: &State,
+    renamed: &BTreeMap<String, String>,
+    out: &mut Plan,
+) {
     let mut by_gid: BTreeMap<&str, &Photo> = BTreeMap::new();
     for p in &input.photos {
         match p.global_id.as_deref() {
@@ -761,7 +885,7 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
             .get(&p.lightroom_id)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        let new = snapshot(p, keywords);
+        let new = snapshot_with_renames(p, keywords, renamed);
         let known = state.photo(gid).is_some();
         let old = match state.photo(gid) {
             Some(entry) => entry.fields.clone(),
@@ -851,6 +975,61 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
     // Deterministic report order: by photo, then by the fixed field order.
     out.conflicts
         .sort_by_key(|c| (c.photo, field_order(&c.field)));
+}
+
+/// The field values of a photo with its keyword paths rewritten to the
+/// recorded path of a keyword renamed in Lightroom. A rename then looks like
+/// no membership change at all: the new name is never added and the old one
+/// is not counted as removed.
+fn snapshot_with_renames(
+    photo: &Photo,
+    keywords: &[Keyword],
+    renamed: &BTreeMap<String, String>,
+) -> PhotoFields {
+    let mut fields = snapshot(photo, keywords);
+    if !renamed.is_empty() {
+        for keyword in &mut fields.keywords {
+            if let Some(old) = renamed.get(keyword) {
+                *keyword = old.clone();
+            }
+        }
+        fields.keywords.sort();
+        fields.keywords.dedup();
+    }
+    fields
+}
+
+/// Finds recorded photos that are no longer in the input and recorded photos
+/// whose original moved. Only Lightroom ids are reported, never paths.
+fn plan_removed_and_moved(input: &WriteInput, state: &State, out: &mut Plan) {
+    let mut present: BTreeMap<&str, &Photo> = BTreeMap::new();
+    for photo in &input.photos {
+        if let Some(gid) = photo.global_id.as_deref() {
+            present.entry(gid).or_insert(photo);
+        }
+    }
+    for (global_id, entry) in state.photos() {
+        match present.get(global_id) {
+            None => {
+                out.removed_gids.insert(global_id.to_string());
+                out.removed_photos.push(RemovedPhoto {
+                    photo: entry.lightroom_id,
+                });
+            }
+            Some(photo) => {
+                if let (Some(recorded), Some(current)) =
+                    (entry.path.as_deref(), photo.path.to_str())
+                    && recorded != current
+                {
+                    out.moved_photos.push(MovedPhoto {
+                        photo: entry.lightroom_id,
+                    });
+                }
+            }
+        }
+    }
+    out.removed_photos.sort_by_key(|r| r.photo);
+    out.moved_photos.sort_by_key(|m| m.photo);
 }
 
 /// The position of a field name in the fixed conflict order.
@@ -1041,6 +1220,25 @@ fn plan_collections(input: &WriteInput, state: &State, out: &mut Plan) {
         if !remove.is_empty() {
             out.steps.push(Step::RemoveMembers {
                 collection_id: c.lightroom_id,
+                gids: remove,
+            });
+        }
+    }
+    // Recorded albums whose collection is gone from Lightroom are kept, but
+    // a photo removed in Lightroom still leaves them when lr2lc had added it.
+    for (id, entry) in state.collections() {
+        if by_id.contains_key(&id) || entry.kind != EntryKind::Album {
+            continue;
+        }
+        let remove: Vec<String> = entry
+            .members
+            .iter()
+            .filter(|g| out.removed_gids.contains(*g))
+            .cloned()
+            .collect();
+        if !remove.is_empty() {
+            out.steps.push(Step::RemoveMembers {
+                collection_id: id,
                 gids: remove,
             });
         }

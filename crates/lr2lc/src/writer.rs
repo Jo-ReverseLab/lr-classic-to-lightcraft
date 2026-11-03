@@ -6,7 +6,7 @@ use crate::output::group_reasons;
 use anyhow::{Context, Result};
 use lc_writer::apply::{Aborted, ApplySummary, apply_partial};
 use lc_writer::control::{ControlClient, WriteError, preflight};
-use lc_writer::plan::{Conflict, Plan, Step, WriteInput};
+use lc_writer::plan::{Conflict, MovedPhoto, Plan, RemovedPhoto, RenamedKeyword, Step, WriteInput};
 use lc_writer::state::{State, state_path};
 use model::Skipped;
 use model::skip::count_by_code;
@@ -61,6 +61,18 @@ pub struct AppliedJson {
     /// Keyword memberships that left the photo in Lightroom; kept in
     /// LightCraft and only counted.
     keywords_removed: usize,
+    /// Recorded photos no longer in the Lightroom model; only their ids.
+    /// Nothing was deleted in LightCraft.
+    photos_removed: usize,
+    removed_photos: Vec<RemovedPhoto>,
+    /// Recorded photos whose original moved; only their ids. Not imported
+    /// again.
+    photos_moved: usize,
+    moved_photos: Vec<MovedPhoto>,
+    /// Recorded keywords renamed in Lightroom; only their ids. Not created
+    /// or renamed in LightCraft.
+    keywords_renamed: usize,
+    renamed_keywords: Vec<RenamedKeyword>,
     photos_skipped: Vec<SkipJson>,
     photos_skipped_by_code: ByCode,
     photos_incomplete: Vec<SkipJson>,
@@ -256,6 +268,12 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         conflicts: s.conflicts.clone(),
         conflicts_count: s.conflicts.len(),
         keywords_removed: s.keywords_removed,
+        photos_removed: s.photos_removed,
+        removed_photos: s.removed_photos.clone(),
+        photos_moved: s.photos_moved,
+        moved_photos: s.moved_photos.clone(),
+        keywords_renamed: s.keywords_renamed,
+        renamed_keywords: s.renamed_keywords.clone(),
         photos_skipped: reasons(&s.photos_skipped),
         photos_skipped_by_code: count_by_code(&s.photos_skipped),
         photos_incomplete: reasons(&s.photos_incomplete),
@@ -416,6 +434,12 @@ pub fn applied_summary(s: &ApplySummary) -> String {
         out,
         "keywords removed in Lightroom and kept in LightCraft: {}",
         s.keywords_removed
+    );
+    let _ = writeln!(
+        out,
+        "changed in Lightroom, kept in LightCraft: photos removed {}, \
+         keywords renamed {}, files moved {}",
+        s.photos_removed, s.keywords_renamed, s.photos_moved
     );
     if !s.conflicts.is_empty() {
         let _ = writeln!(

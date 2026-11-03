@@ -220,6 +220,9 @@ pub struct Keyword {
     /// `id_global`), kept byte for byte. Internal identity only, never
     /// reported.
     pub global_id: Option<String>,
+    /// The keyword's id in the Lightroom catalog (`AgLibraryKeyword.id_local`).
+    /// Reports name a renamed keyword by this id, never by its name.
+    pub lightroom_id: Option<i64>,
 }
 
 impl Keyword {
@@ -246,12 +249,19 @@ impl Keyword {
             export_synonyms: true,
             person: false,
             global_id: None,
+            lightroom_id: None,
         }
     }
 
     /// Returns the keyword with its global id set.
     pub fn with_global_id(mut self, global_id: impl Into<String>) -> Self {
         self.global_id = Some(global_id.into());
+        self
+    }
+
+    /// Returns the keyword with its Lightroom id set.
+    pub fn with_lightroom_id(mut self, lightroom_id: i64) -> Self {
+        self.lightroom_id = Some(lightroom_id);
         self
     }
 

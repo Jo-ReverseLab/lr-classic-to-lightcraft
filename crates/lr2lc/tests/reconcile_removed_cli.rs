@@ -149,7 +149,6 @@ fn lightcraft_id(state: &Value, area: &str, key: &str) -> i64 {
 // --- 1) a photo removed in Lightroom ---
 
 #[test]
-#[ignore = "waiting for T11 implementation"]
 fn removed_photo_is_reported_and_only_taken_out_of_own_albums() {
     let s = Setup::new();
     let fake = FakeLightCraft::start(Config::new(&s.library));
@@ -258,7 +257,6 @@ fn removed_photo_is_reported_and_only_taken_out_of_own_albums() {
 // --- 2) a keyword renamed in Lightroom ---
 
 #[test]
-#[ignore = "waiting for T11 implementation"]
 fn renamed_keyword_is_reported_and_neither_created_nor_renamed() {
     let s = Setup::new();
     let fake = FakeLightCraft::start(Config::new(&s.library));
@@ -301,7 +299,6 @@ fn renamed_keyword_is_reported_and_neither_created_nor_renamed() {
 // --- 3) a file moved in Lightroom ---
 
 #[test]
-#[ignore = "waiting for T11 implementation"]
 fn moved_file_is_reported_and_not_imported_again() {
     let s = Setup::new();
     let fake = FakeLightCraft::start(Config::new(&s.library));

@@ -137,6 +137,7 @@ impl Catalog {
             keyword_report.read();
             match result {
                 Ok(mut keyword) => {
+                    keyword.lightroom_id = Some(id);
                     keyword.synonyms = synonyms.remove(&id).unwrap_or_default();
                     let attrs = attributes[&id];
                     attrs.apply(&mut keyword);

@@ -80,8 +80,9 @@ use crate::albums::{Decision, Existing, Node, parse_album_list};
 use crate::control::{ControlClient, Outcome, WriteError};
 use crate::live::read_live;
 use crate::plan::{
-    Conflict, Step, WriteInput, group_params, import_params, members_select_params, needs_live,
-    plan, same_members, select_params, smart_skip_reason,
+    Conflict, MovedPhoto, RemovedPhoto, RenamedKeyword, Step, WriteInput, group_params,
+    import_params, members_select_params, needs_live, plan, same_members, select_params,
+    smart_skip_reason,
 };
 use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, keyword_text, snapshot};
 use model::{Collection, CollectionKind, Keyword, Photo, SkipCode, Skipped, SmartCollection};
@@ -203,6 +204,22 @@ pub struct ApplySummary {
     /// Keyword memberships that left their photo in Lightroom since the last
     /// import. They stay in LightCraft and are only counted.
     pub keywords_removed: usize,
+    /// Recorded photos no longer in the Lightroom model, ascending by
+    /// Lightroom id. Nothing was deleted in LightCraft.
+    pub removed_photos: Vec<RemovedPhoto>,
+    /// Recorded photos whose original moved in Lightroom, ascending by
+    /// Lightroom id. They were not imported again.
+    pub moved_photos: Vec<MovedPhoto>,
+    /// Recorded keywords renamed in Lightroom (same global id, new path
+    /// text), ascending by Lightroom id. Nothing was created or renamed in
+    /// LightCraft.
+    pub renamed_keywords: Vec<RenamedKeyword>,
+    /// `removed_photos.len()`, for the report.
+    pub photos_removed: usize,
+    /// `moved_photos.len()`, for the report.
+    pub photos_moved: usize,
+    /// `renamed_keywords.len()`, for the report.
+    pub keywords_renamed: usize,
 }
 
 /// A run that stopped: the error and what was done up to it.
@@ -292,6 +309,12 @@ pub fn apply_partial(
             smart_skipped: plan.smart_skips().to_vec(),
             conflicts: plan.conflicts().to_vec(),
             keywords_removed: plan.keywords_removed(),
+            removed_photos: plan.removed_photos().to_vec(),
+            photos_removed: plan.removed_photos().len(),
+            moved_photos: plan.moved_photos().to_vec(),
+            photos_moved: plan.moved_photos().len(),
+            renamed_keywords: plan.renamed_keywords().to_vec(),
+            keywords_renamed: plan.renamed_keywords().len(),
             ..ApplySummary::default()
         },
         recorded: plan.recorded_fields_map(),
@@ -1241,11 +1264,11 @@ impl Run<'_> {
             Ok(Outcome::Applied(result)) => match import_id(&result, &sent_path) {
                 ImportResult::Imported(id) => {
                     self.summary.photos_imported += 1;
-                    self.record_import(global_id, photo.lightroom_id, id)?;
+                    self.record_import(global_id, photo.lightroom_id, id, path)?;
                 }
                 ImportResult::Existing(id) => {
                     self.summary.photos_existing += 1;
-                    self.record_import(global_id, photo.lightroom_id, id)?;
+                    self.record_import(global_id, photo.lightroom_id, id, path)?;
                 }
                 ImportResult::Failed => {
                     skip(
@@ -1294,9 +1317,11 @@ impl Run<'_> {
         global_id: &str,
         lightroom_id: i64,
         id: Value,
+        path: &Path,
     ) -> Result<(), WriteError> {
         self.state
             .record(global_id, lightroom_id, id, PhotoFields::imported_default());
+        self.state.remember_path(global_id, path);
         self.state.save(self.state_file)?;
         Ok(())
     }
@@ -1353,6 +1378,7 @@ impl Run<'_> {
                         master_global_id,
                         PhotoFields::imported_default(),
                     );
+                    self.state.remember_path(global_id, &photo.path);
                     self.state.save(self.state_file)?;
                 }
                 None => {
@@ -1487,10 +1513,18 @@ impl Run<'_> {
             self.failed_photos.insert(current.global_id);
             return Ok(());
         }
-        let (Some(photo), Some(entry)) = (
-            self.photos.get(current.global_id.as_str()).copied(),
-            self.state.photo(&current.global_id),
-        ) else {
+        let Some(photo) = self.photos.get(current.global_id.as_str()).copied() else {
+            return Err(WriteError::Internal {
+                detail: format!(
+                    "finish_photo: photo {} is missing from the plan or the mapping file",
+                    current.global_id
+                ),
+            });
+        };
+        // Backfill the original's path for entries from an older mapping
+        // file. An existing path is never replaced (see [`State::remember_path`]).
+        let path_added = self.state.remember_path(&current.global_id, &photo.path);
+        let Some(entry) = self.state.photo(&current.global_id) else {
             return Err(WriteError::Internal {
                 detail: format!(
                     "finish_photo: photo {} is missing from the plan or the mapping file",
@@ -1512,7 +1546,7 @@ impl Run<'_> {
             .get(&current.global_id)
             .cloned()
             .unwrap_or_else(|| snapshot(photo, keywords));
-        if entry.fields == fields && entry.lightroom_id == photo.lightroom_id {
+        if entry.fields == fields && entry.lightroom_id == photo.lightroom_id && !path_added {
             return Ok(());
         }
         let id = entry.lightcraft_id.clone();
@@ -1535,13 +1569,14 @@ impl Run<'_> {
             if self.failed_photos.contains(global_id) {
                 continue;
             }
-            let (Some(photo), Some(entry)) = (
-                self.photos.get(global_id.as_str()).copied(),
-                self.state.photo(global_id),
-            ) else {
+            let Some(photo) = self.photos.get(global_id.as_str()).copied() else {
                 continue;
             };
-            if entry.fields == *fields && entry.lightroom_id == photo.lightroom_id {
+            let path_added = self.state.remember_path(global_id, &photo.path);
+            let Some(entry) = self.state.photo(global_id) else {
+                continue;
+            };
+            if entry.fields == *fields && entry.lightroom_id == photo.lightroom_id && !path_added {
                 continue;
             }
             let id = entry.lightcraft_id.clone();

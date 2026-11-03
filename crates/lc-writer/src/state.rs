@@ -91,6 +91,11 @@ pub struct PhotoEntry {
     pub lightcraft_id: Value,
     /// The field values last written.
     pub fields: PhotoFields,
+    /// The absolute path of the original as last imported. It is the base
+    /// of the move comparison and is never replaced afterwards, so a moved
+    /// file is reported again on every later run. Missing in older files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     /// The master photo's global id if this entry is a virtual copy, or
     /// `None` for a master. A copy is created once with `photo.virtualCopy`
     /// from the master's LightCraft id and afterwards behaves like a normal
@@ -105,6 +110,11 @@ pub struct PhotoEntry {
 pub struct KeywordEntry {
     /// Lightroom's global id of the keyword, if known (provenance).
     pub global_id: Option<String>,
+    /// The keyword's id in the Lightroom catalog, if known. A renamed
+    /// keyword is reported by this id, never by a name. Missing in older
+    /// files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lightroom_id: Option<i64>,
     /// Synonyms in source order.
     pub synonyms: Vec<String>,
     /// Written into exported photos.
@@ -122,6 +132,7 @@ impl KeywordEntry {
     pub fn of(keyword: &Keyword) -> KeywordEntry {
         KeywordEntry {
             global_id: keyword.global_id.clone(),
+            lightroom_id: keyword.lightroom_id,
             synonyms: keyword.synonyms.clone(),
             include_on_export: keyword.include_on_export,
             export_containing: keyword.export_containing,
@@ -304,16 +315,37 @@ impl State {
         fields: PhotoFields,
     ) {
         let global_id = global_id.into();
-        let copy_of = self.photos.get(&global_id).and_then(|e| e.copy_of.clone());
+        let (copy_of, path) = self
+            .photos
+            .get(&global_id)
+            .map_or((None, None), |e| (e.copy_of.clone(), e.path.clone()));
         self.photos.insert(
             global_id,
             PhotoEntry {
                 lightroom_id,
                 lightcraft_id,
                 fields,
+                path,
                 copy_of,
             },
         );
+    }
+
+    /// Remembers the absolute path of a photo's original if none is
+    /// recorded yet. An already recorded path is never replaced: it is the
+    /// base of the move comparison, so a later move is reported again.
+    /// Returns whether the entry changed.
+    pub fn remember_path(&mut self, global_id: &str, path: &Path) -> bool {
+        let Some(text) = path.to_str() else {
+            return false;
+        };
+        match self.photos.get_mut(global_id) {
+            Some(entry) if entry.path.is_none() => {
+                entry.path = Some(text.to_string());
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Records a virtual copy right after it was created with
@@ -333,6 +365,7 @@ impl State {
                 lightroom_id,
                 lightcraft_id,
                 fields,
+                path: None,
                 copy_of: Some(master_global_id.into()),
             },
         );
