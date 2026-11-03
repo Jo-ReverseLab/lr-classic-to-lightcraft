@@ -302,3 +302,144 @@ fn keyword_edge_catalog_has_documented_counts() {
         1
     );
 }
+
+// --- Proportional performance catalogs (task T20) -------------------------
+
+use lrcat_fixtures::{
+    CatalogShape, performance, write_performance_catalog, write_proportional_catalog_with_files,
+};
+
+#[test]
+fn proportional_shape_is_fixed_and_documented() {
+    // One folder per 20 photos, one keyword per 10, one collection per 500.
+    assert_eq!(
+        CatalogShape::proportional(2_000),
+        CatalogShape {
+            photos: 2_000,
+            folders: 100,
+            keywords: 200,
+            collections: 4,
+        }
+    );
+    assert_eq!(
+        CatalogShape::proportional(10_000),
+        CatalogShape {
+            photos: 10_000,
+            folders: 500,
+            keywords: 1_000,
+            collections: 20,
+        }
+    );
+    assert_eq!(
+        CatalogShape::proportional(100_000),
+        CatalogShape {
+            photos: 100_000,
+            folders: 5_000,
+            keywords: 10_000,
+            collections: 200,
+        }
+    );
+    // Caps take effect above 200 000 / 500 000 photos.
+    let largest = CatalogShape::proportional(500_000);
+    assert_eq!(largest.photos, 500_000);
+    assert_eq!(largest.folders, performance::MAX_FOLDERS);
+    assert_eq!(largest.keywords, performance::MAX_KEYWORDS);
+    assert_eq!(largest.collections, performance::MAX_COLLECTIONS);
+    // Never zero, even for a tiny catalog.
+    assert_eq!(
+        CatalogShape::proportional(0),
+        CatalogShape {
+            photos: 1,
+            folders: 1,
+            keywords: 1,
+            collections: 1,
+        }
+    );
+}
+
+#[test]
+fn performance_catalog_has_exact_row_counts() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("performance.lrcat");
+    let shape = CatalogShape {
+        photos: 250,
+        folders: 12,
+        keywords: 25,
+        collections: 20,
+    };
+    write_performance_catalog(&path, shape).unwrap();
+    let c = open(&path);
+    assert_eq!(count(&c, "SELECT COUNT(*) FROM Adobe_images"), 250);
+    assert_eq!(count(&c, "SELECT COUNT(*) FROM AgLibraryFile"), 250);
+    assert_eq!(count(&c, "SELECT COUNT(*) FROM AgLibraryFolder"), 12);
+    assert_eq!(
+        count(&c, "SELECT COUNT(*) FROM AgLibraryRootFolder"),
+        1,
+        "one root folder"
+    );
+    assert_eq!(
+        count(
+            &c,
+            "SELECT COUNT(*) FROM AgLibraryKeyword WHERE id_local <> 1"
+        ),
+        25
+    );
+    assert_eq!(
+        count(&c, "SELECT COUNT(*) FROM AgLibraryKeywordImage"),
+        250,
+        "one assignment per photo"
+    );
+    assert_eq!(count(&c, "SELECT COUNT(*) FROM AgLibraryCollection"), 20);
+    // Every tenth photo (starting at 1) is in a plain album: 25 of 250. The
+    // set, the smart collection and the Quick Collection receive no members.
+    assert_eq!(
+        count(&c, "SELECT COUNT(*) FROM AgLibraryCollectionImage"),
+        25
+    );
+    assert_eq!(
+        count(
+            &c,
+            "SELECT COUNT(*) FROM AgLibraryCollectionImage ci \
+             JOIN AgLibraryCollection c ON c.id_local = ci.collection \
+             WHERE c.creationId = 'com.adobe.ag.library.collection'"
+        ),
+        25
+    );
+}
+
+#[test]
+fn performance_catalog_is_deterministic() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a.lrcat");
+    let b = dir.path().join("b.lrcat");
+    let shape = CatalogShape::proportional(300);
+    write_performance_catalog(&a, shape).unwrap();
+    write_performance_catalog(&b, shape).unwrap();
+    assert_eq!(std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap());
+}
+
+#[test]
+fn proportional_catalog_with_files_writes_every_original() {
+    let dir = tempfile::tempdir().unwrap();
+    let catalog = write_proportional_catalog_with_files(dir.path(), 60).unwrap();
+    assert_eq!(catalog.file_name().unwrap(), "performance.lrcat");
+    let pictures = dir.path().join(performance::PICTURES_DIR);
+    let mut files = Vec::new();
+    let mut todo = vec![pictures];
+    while let Some(d) = todo.pop() {
+        for entry in std::fs::read_dir(&d).unwrap() {
+            let p = entry.unwrap().path();
+            if p.is_dir() {
+                todo.push(p);
+            } else {
+                files.push(p);
+            }
+        }
+    }
+    assert_eq!(files.len(), 60, "one placeholder per photo");
+    assert!(
+        files
+            .iter()
+            .all(|p| std::fs::metadata(p).unwrap().is_file())
+    );
+}

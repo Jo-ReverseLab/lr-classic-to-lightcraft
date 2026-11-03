@@ -769,16 +769,36 @@ fn add_collections(
     images: &[(i64, i64)],
 ) -> Result<()> {
     for &(id, creation, name, parent, system) in collections {
-        let genealogy = match parent {
-            Some(p) => format!("/{p}/{id}"),
-            None => format!("/{id}"),
-        };
         let count = images.iter().filter(|(c, _)| *c == id).count() as i64;
-        c.execute(
-            "INSERT INTO AgLibraryCollection (id_local, creationId, genealogy, imageCount, name, parent, systemOnly) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![id, creation, genealogy, count, name, parent, system],
-        )?;
+        add_collection_row(c, id, creation, name, parent, system, count)?;
     }
+    add_collection_images(c, images)?;
+    Ok(())
+}
+
+/// Inserts one `AgLibraryCollection` row with the given `imageCount`.
+fn add_collection_row(
+    c: &Connection,
+    id: i64,
+    creation: &str,
+    name: &str,
+    parent: Option<i64>,
+    system: i64,
+    image_count: i64,
+) -> Result<()> {
+    let genealogy = match parent {
+        Some(p) => format!("/{p}/{id}"),
+        None => format!("/{id}"),
+    };
+    c.execute(
+        "INSERT INTO AgLibraryCollection (id_local, creationId, genealogy, imageCount, name, parent, systemOnly) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![id, creation, genealogy, image_count, name, parent, system],
+    )?;
+    Ok(())
+}
+
+/// Inserts `(collection, image)` membership rows.
+fn add_collection_images(c: &Connection, images: &[(i64, i64)]) -> Result<()> {
     for (pos, (coll, image)) in images.iter().enumerate() {
         c.execute(
             "INSERT INTO AgLibraryCollectionImage (collection, image, pick, positionInCollection) VALUES (?1, ?2, 0, ?3)",
@@ -2049,8 +2069,19 @@ fn prepare_root_dirs(dir: &Path) -> Result<(String, String)> {
     ))
 }
 
-/// Creates a placeholder file for every original except the missing ones.
+/// Creates a placeholder file for every original except the missing ones of
+/// the small fixture (`small::MISSING_FILE_IDS`).
 fn create_original_files(catalog: &Path) -> Result<()> {
+    create_original_files_except(catalog, &small::MISSING_FILE_IDS)
+}
+
+/// Creates a placeholder file for every original.
+fn create_all_original_files(catalog: &Path) -> Result<()> {
+    create_original_files_except(catalog, &[])
+}
+
+/// Creates a placeholder file for every original not in `missing_file_ids`.
+fn create_original_files_except(catalog: &Path, missing_file_ids: &[i64]) -> Result<()> {
     let c = Connection::open_with_flags(catalog, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let mut st = c.prepare(
         "SELECT f.id_local, r.absolutePath, d.pathFromRoot, f.idx_filename FROM AgLibraryFile f \
@@ -2072,7 +2103,7 @@ fn create_original_files(catalog: &Path) -> Result<()> {
             p.push(part);
         }
         std::fs::create_dir_all(&p).map_err(io_err)?;
-        if !small::MISSING_FILE_IDS.contains(&id) {
+        if !missing_file_ids.contains(&id) {
             std::fs::write(p.join(name), b"placeholder\n").map_err(io_err)?;
         }
     }
@@ -2447,6 +2478,184 @@ pub fn write_large_catalog(path: &Path, images: usize) -> Result<()> {
         &large_images,
     )?;
     c.execute_batch("COMMIT")?;
+    Ok(())
+}
+
+/// Proportions of the performance catalogs written by
+/// [`write_performance_catalog`] and
+/// [`write_performance_catalog_with_files`].
+///
+/// The proportions are fixed constants, so every test that asks for the same
+/// photo count gets exactly the same catalog shape.
+pub mod performance {
+    /// One folder per this many photos (at least one folder).
+    pub const PHOTOS_PER_FOLDER: usize = 20;
+    /// One keyword per this many photos (at least one keyword).
+    pub const PHOTOS_PER_KEYWORD: usize = 10;
+    /// One collection per this many photos (at least one collection).
+    pub const PHOTOS_PER_COLLECTION: usize = 500;
+    /// Upper bounds that keep the largest catalog bounded. They only take
+    /// effect above 200 000, 500 000 and 500 000 photos.
+    pub const MAX_FOLDERS: usize = 10_000;
+    pub const MAX_KEYWORDS: usize = 50_000;
+    pub const MAX_COLLECTIONS: usize = 1_000;
+    /// Every tenth photo is put into a plain album. With several albums the
+    /// photos are spread over them round-robin.
+    pub const MEMBER_EVERY: usize = 10;
+    /// File name of the catalog written into a directory.
+    pub const CATALOG_FILE: &str = "performance.lrcat";
+    /// Sub-directory below `dir` that holds the placeholder originals.
+    pub const PICTURES_DIR: &str = "pictures";
+}
+
+/// Shape of a generated performance catalog.
+///
+/// `photos` originals in `folders` folders, `keywords` visible keyword rows
+/// (plus the hidden root row) and `collections` collection rows. The first
+/// collection is a set, the second an album inside it, the third an
+/// unreadable smart collection and the fourth the Quick Collection; every
+/// further collection is a top-level album.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CatalogShape {
+    pub photos: usize,
+    pub folders: usize,
+    pub keywords: usize,
+    pub collections: usize,
+}
+
+impl CatalogShape {
+    /// One folder per [`performance::PHOTOS_PER_FOLDER`] photos, one keyword
+    /// per [`performance::PHOTOS_PER_KEYWORD`] photos and one collection per
+    /// [`performance::PHOTOS_PER_COLLECTION`] photos, each at least one and
+    /// capped by the `MAX_*` constants.
+    pub fn proportional(photos: usize) -> Self {
+        let photos = photos.max(1);
+        CatalogShape {
+            photos,
+            folders: (photos / performance::PHOTOS_PER_FOLDER).clamp(1, performance::MAX_FOLDERS),
+            keywords: (photos / performance::PHOTOS_PER_KEYWORD)
+                .clamp(1, performance::MAX_KEYWORDS),
+            collections: (photos / performance::PHOTOS_PER_COLLECTION)
+                .clamp(1, performance::MAX_COLLECTIONS),
+        }
+    }
+}
+
+/// Writes a performance catalog of the given shape with the neutral macOS
+/// path `/Users/example/Pictures/` as its root folder (no originals on disk).
+///
+/// Output is deterministic: the same shape gives a byte-identical catalog.
+/// Use [`write_performance_catalog_with_files`] when a dry run should convert
+/// the photos instead of skipping them as missing.
+pub fn write_performance_catalog(path: &Path, shape: CatalogShape) -> Result<()> {
+    write_performance_catalog_at(path, shape, "/Users/example/Pictures/")
+}
+
+/// Writes a performance catalog as `dir/performance.lrcat` and returns that
+/// path. The root folder points at `dir/pictures/`, and every original gets a
+/// tiny placeholder file (not a real image), so a dry run converts all photos.
+///
+/// The catalog bytes embed the absolute `dir` path and are therefore only
+/// identical for the same directory; the row contents are deterministic.
+pub fn write_performance_catalog_with_files(dir: &Path, shape: CatalogShape) -> Result<PathBuf> {
+    std::fs::create_dir_all(dir).map_err(io_err)?;
+    let root = root_below(dir, performance::PICTURES_DIR);
+    let catalog = dir.join(performance::CATALOG_FILE);
+    write_performance_catalog_at(&catalog, shape, &root)?;
+    create_all_original_files(&catalog)?;
+    Ok(catalog)
+}
+
+/// [`write_performance_catalog_with_files`] with the proportional shape of
+/// [`CatalogShape::proportional`]: the convenience entry point for the
+/// performance tests, which only care about the photo count.
+pub fn write_proportional_catalog_with_files(dir: &Path, photos: usize) -> Result<PathBuf> {
+    write_performance_catalog_with_files(dir, CatalogShape::proportional(photos))
+}
+
+fn write_performance_catalog_at(path: &Path, shape: CatalogShape, root: &str) -> Result<()> {
+    let c = create(path)?;
+    c.execute_batch("BEGIN")?;
+    add_variables(&c)?;
+    add_root_folder(&c, 1, root, "Pictures")?;
+    let folders = shape.folders.max(1) as i64;
+    for f in 1..=folders {
+        add_folder(&c, f, None, &format!("folder{f:05}/"), 1)?;
+    }
+    add_keyword(&c, 1, None, 0, "/1")?;
+    let keywords = shape.keywords.max(1) as i64;
+    for k in 2..=keywords + 1 {
+        let parent = if k > 2 && k % 3 == 0 { k - 1 } else { 1 };
+        add_keyword(&c, k, Some(&format!("kw{k}")), parent, &format!("/1/{k}"))?;
+    }
+    // Fixed linear congruential generator (the same constants as
+    // `write_large_catalog`): ratings and keyword assignments are repeatable.
+    let mut state: u64 = 1;
+    for id in 1..=shape.photos as i64 {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let rating = match (state >> 33) % 7 {
+            6 => None,
+            r => Some(r as i64),
+        };
+        let folder = id % folders + 1;
+        add_photo(&c, id, &format!("IMG_{id:07}"), folder, rating, None, id)?;
+        let tag = ((state >> 40) as i64) % keywords + 2;
+        c.execute(
+            "INSERT INTO AgLibraryKeywordImage (image, tag) VALUES (?1, ?2)",
+            params![id, tag],
+        )?;
+    }
+    add_performance_collections(&c, shape)?;
+    c.execute_batch("COMMIT")?;
+    Ok(())
+}
+
+/// Adds the collection rows and members of a performance catalog.
+fn add_performance_collections(c: &Connection, shape: CatalogShape) -> Result<()> {
+    const GROUP: &str = "com.adobe.ag.library.group";
+    const ALBUM: &str = "com.adobe.ag.library.collection";
+    const SMART: &str = "com.adobe.ag.library.smart_collection";
+    const QUICK: &str = "com.adobe.ag.library.quick_collection";
+
+    let total = shape.collections.max(1) as i64;
+    // Plain albums are id 2 (inside the set) and every id from 5 on.
+    let plain: Vec<i64> = (1..=total).filter(|id| *id == 2 || *id >= 5).collect();
+    let members: Vec<(i64, i64)> = if plain.is_empty() {
+        Vec::new()
+    } else {
+        (1..=shape.photos as i64)
+            .step_by(performance::MEMBER_EVERY)
+            .map(|photo| {
+                let slot = (photo as usize / performance::MEMBER_EVERY) % plain.len();
+                (plain[slot], photo)
+            })
+            .collect()
+    };
+    let mut image_count = vec![0_i64; total as usize + 1];
+    for &(collection, _) in &members {
+        image_count[collection as usize] += 1;
+    }
+    for id in 1..=total {
+        let (creation, name, parent, system) = match id {
+            1 => (GROUP, "Set Performance".to_string(), None, 0),
+            2 => (ALBUM, "Coll Performance".to_string(), Some(1), 0),
+            3 => (SMART, "Smart Performance".to_string(), None, 0),
+            4 => (QUICK, "Sys Performance".to_string(), None, 1),
+            _ => (ALBUM, format!("Coll Performance {id}"), None, 0),
+        };
+        add_collection_row(
+            c,
+            id,
+            creation,
+            &name,
+            parent,
+            system,
+            image_count[id as usize],
+        )?;
+    }
+    add_collection_images(c, &members)?;
     Ok(())
 }
 
