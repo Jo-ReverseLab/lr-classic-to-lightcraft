@@ -4,7 +4,7 @@ Status: done — every finding is either fixed test-first on this branch or
 justified as safe. No panic remains on catalog, LightCraft or command-line
 data.
 Branch: `agent/t21-audit`
-Base: `agent/t20-performance` (`3edac05`, "Record the T20 performance measurements")
+Base: `agent/t23-ci-proposal` (`b5f440d`, "Correct CI cost arithmetic and audit job status"; contains the T20, T22 and T23 work). The fixes were written on top of `agent/t20-performance` (`3edac05`) and rebased onto T23 before the final run.
 
 ## Goal
 
@@ -117,7 +117,9 @@ change data and are not findings.
 
 ## Verification
 
-All commands run from the task worktree with a cold target directory:
+All commands run from the task worktree with a cold target directory. The
+branch was rebased onto `agent/t23-ci-proposal` and all three commands were
+re-run green on the rebased tree:
 
 - `cargo fmt --all` — clean.
 - `cargo clippy --workspace --all-targets -- -D warnings` — clean.
