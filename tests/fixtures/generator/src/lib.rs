@@ -2316,6 +2316,74 @@ pub fn set_keyword_global_id(path: &Path, id: i64, global: &str) -> Result<()> {
     Ok(())
 }
 
+/// Removes photo `id` from the catalog, as if the user had deleted it in
+/// Lightroom: its image row and every row that points at it go. The file row
+/// stays; the reader only looks at files through `Adobe_images`, so an
+/// orphaned file row is invisible.
+pub fn remove_photo(path: &Path, id: i64) -> Result<()> {
+    let c = Connection::open(path)?;
+    c.execute_batch("BEGIN")?;
+    for sql in [
+        "DELETE FROM AgLibraryKeywordImage WHERE image = ?1",
+        "DELETE FROM AgLibraryCollectionImage WHERE image = ?1",
+        "DELETE FROM Adobe_AdditionalMetadata WHERE image = ?1",
+        "DELETE FROM Adobe_imageProperties WHERE image = ?1",
+        "DELETE FROM Adobe_images WHERE id_local = ?1",
+    ] {
+        c.execute(sql, params![id])?;
+    }
+    c.execute_batch("COMMIT")?;
+    Ok(())
+}
+
+/// Renames keyword `id` in place, keeping its `id_global`, as if the user had
+/// renamed it in Lightroom.
+pub fn rename_keyword(path: &Path, id: i64, name: &str) -> Result<()> {
+    let c = Connection::open(path)?;
+    let changed = c.execute(
+        "UPDATE AgLibraryKeyword SET name = ?2, lc_name = ?3 WHERE id_local = ?1",
+        params![id, name, name.to_lowercase()],
+    )?;
+    assert_eq!(changed, 1, "no keyword {id} to rename");
+    Ok(())
+}
+
+/// Moves the original file of photo `id` into another folder of the same
+/// catalog (the file name stays), as if the user had moved it in Lightroom.
+/// `id_global` is unchanged. The caller creates the file at its new place
+/// when the reader must see it.
+pub fn move_photo_file(path: &Path, id: i64, folder: i64) -> Result<()> {
+    let c = Connection::open(path)?;
+    let changed = c.execute(
+        "UPDATE AgLibraryFile SET folder = ?2 \
+         WHERE id_local = (SELECT rootFile FROM Adobe_images WHERE id_local = ?1)",
+        params![id, folder],
+    )?;
+    assert_eq!(changed, 1, "no file row for photo {id} to move");
+    Ok(())
+}
+
+/// The absolute path of photo `id`'s original as the catalog resolves it.
+pub fn photo_file_path(path: &Path, id: i64) -> Result<PathBuf> {
+    let c = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let (root, rel, name): (String, String, String) = c.query_row(
+        "SELECT r.absolutePath, d.pathFromRoot, f.idx_filename \
+         FROM Adobe_images i \
+         JOIN AgLibraryFile f ON f.id_local = i.rootFile \
+         JOIN AgLibraryFolder d ON d.id_local = f.folder \
+         JOIN AgLibraryRootFolder r ON r.id_local = d.rootFolder \
+         WHERE i.id_local = ?1",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    let mut p = PathBuf::from(root);
+    for part in rel.split('/').filter(|x| !x.is_empty()) {
+        p.push(part);
+    }
+    p.push(name);
+    Ok(p)
+}
+
 /// Writes a large catalog with exactly `images` photos for load tests.
 pub fn write_large_catalog(path: &Path, images: usize) -> Result<()> {
     let c = create(path)?;
