@@ -11,9 +11,9 @@
 //! photos.converted - photos_skipped.len()`, where known photos are those in
 //! the mapping file, and `planned.photos_unchanged <= known`.
 //!
-//! The tests change one field of a known photo by editing the rating in the
-//! mapping file (`photos.<global id>.fields.rating`), so the next run finds a
-//! difference.
+//! The tests change one field of a known photo in the catalog (the rating of
+//! a recorded photo), so the next run finds a genuine Lightroom difference:
+//! the mapping file and LightCraft keep the old value.
 //!
 
 use lrcat_fixtures::write_keyword_edge_catalog_with_files;
@@ -106,14 +106,20 @@ impl Setup {
         self.state()["photos"].as_object().unwrap().len() as u64
     }
 
-    /// Changes the rating of one recorded photo (a difference to the catalog).
+    /// Changes the rating of one recorded photo in the catalog: Lightroom
+    /// changed, LightCraft and the mapping file still have the old value.
     fn change_one_rating(&self) {
-        let mut state = self.state();
-        let photos = state["photos"].as_object_mut().unwrap();
-        let entry = photos.values_mut().next().expect("a recorded photo");
+        let state = self.state();
+        let photos = state["photos"].as_object().unwrap();
+        let entry = photos.values().next().expect("a recorded photo");
+        let lightroom_id = entry["lightroom_id"].as_i64().unwrap();
         let rating = entry["fields"]["rating"].as_u64().unwrap();
-        entry["fields"]["rating"] = Value::from((rating + 1) % 6);
-        fs::write(self.state_file(), serde_json::to_string(&state).unwrap()).unwrap();
+        lrcat_fixtures::set_photo_rating(
+            &self.catalog,
+            lightroom_id,
+            Some(((rating + 1) % 6) as i64),
+        )
+        .unwrap();
     }
 }
 

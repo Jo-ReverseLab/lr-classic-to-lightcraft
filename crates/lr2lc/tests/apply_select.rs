@@ -122,14 +122,20 @@ impl Setup {
         serde_json::from_str(&fs::read_to_string(self.state_file()).unwrap()).unwrap()
     }
 
-    /// Changes the rating of one recorded photo (a difference to the catalog).
+    /// Changes the rating of one recorded photo in the catalog: Lightroom
+    /// changed, LightCraft and the mapping file still have the old value.
     fn change_one_rating(&self) {
-        let mut state = self.state();
-        let photos = state["photos"].as_object_mut().unwrap();
-        let entry = photos.values_mut().next().expect("a recorded photo");
+        let state = self.state();
+        let photos = state["photos"].as_object().unwrap();
+        let entry = photos.values().next().expect("a recorded photo");
+        let lightroom_id = entry["lightroom_id"].as_i64().unwrap();
         let rating = entry["fields"]["rating"].as_u64().unwrap();
-        entry["fields"]["rating"] = Value::from((rating + 1) % 6);
-        fs::write(self.state_file(), serde_json::to_string(&state).unwrap()).unwrap();
+        lrcat_fixtures::set_photo_rating(
+            &self.catalog,
+            lightroom_id,
+            Some(((rating + 1) % 6) as i64),
+        )
+        .unwrap();
     }
 }
 
@@ -173,11 +179,20 @@ fn select_count(commands: &[(String, Value)]) -> usize {
         .count()
 }
 
+/// A read command. `library.select` also appears in `READ_COMMANDS`, but it
+/// changes the selection and therefore matters here.
+fn is_read(command: &str) -> bool {
+    command != "library.select" && READ_COMMANDS.contains(&command)
+}
+
 /// Every `photo.*` command follows a select naming its photo; every select
 /// is directly followed by an update of the photo it names.
 fn assert_always_selected(commands: &[(String, Value)]) {
     let mut selected: Option<i64> = None;
     for (i, (command, params)) in commands.iter().enumerate() {
+        if is_read(command) {
+            continue;
+        }
         if command == "library.select" {
             assert_eq!(params["ids"].as_array().map(Vec::len), Some(1), "{params}");
             assert_eq!(params["ids"][0], params["active"], "{params}");
@@ -241,7 +256,7 @@ fn a_changed_known_photo_is_selected_in_a_fresh_session() {
     let names: Vec<&str> = commands
         .iter()
         .map(|(c, _)| c.as_str())
-        .filter(|c| !READ_COMMANDS.contains(c) || *c == "library.select")
+        .filter(|c| !is_read(c))
         .collect();
     assert_eq!(names, ["library.select", "photo.rate"], "{commands:?}");
     assert_always_selected(&commands);

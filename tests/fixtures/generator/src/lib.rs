@@ -2294,6 +2294,18 @@ pub fn set_photo_global_id(path: &Path, id: i64, global: &str) -> Result<()> {
     Ok(())
 }
 
+/// Sets `Adobe_images.rating` of photo `id`, as if the user had changed the
+/// stars in Lightroom. `None` writes SQL NULL, which the reader treats like
+/// zero stars.
+pub fn set_photo_rating(path: &Path, id: i64, rating: Option<i64>) -> Result<()> {
+    let c = Connection::open(path)?;
+    c.execute(
+        "UPDATE Adobe_images SET rating = ?2 WHERE id_local = ?1",
+        params![id, rating],
+    )?;
+    Ok(())
+}
+
 /// Sets `AgLibraryKeyword.id_global` of keyword `id` (NOT NULL, see above).
 pub fn set_keyword_global_id(path: &Path, id: i64, global: &str) -> Result<()> {
     let c = Connection::open(path)?;
