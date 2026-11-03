@@ -401,38 +401,6 @@ impl Report {
             .checked_add(self.skipped.len())
             .is_some_and(|handled| handled == self.read)
     }
-
-    /// Counts the skipped elements whose reason starts with `prefix` as
-    /// converted instead; returns how many moved. The balance is kept.
-    pub fn convert_skipped(&mut self, prefix: &str) -> usize {
-        let before = self.skipped.len();
-        self.skipped.retain(|s| !s.reason.starts_with(prefix));
-        let moved = before - self.skipped.len();
-        self.converted += moved;
-        moved
-    }
-
-    /// Replaces the reason and the code of every skipped element whose
-    /// reason starts with `prefix`; an empty `reason` is replaced by
-    /// "unspecified". Returns how many changed.
-    pub fn replace_skipped(&mut self, prefix: &str, code: SkipCode, reason: &str) -> usize {
-        let reason = if reason.trim().is_empty() {
-            Self::UNSPECIFIED_REASON
-        } else {
-            reason
-        };
-        let mut changed = 0;
-        for s in self
-            .skipped
-            .iter_mut()
-            .filter(|s| s.reason.starts_with(prefix))
-        {
-            s.reason = reason.to_string();
-            s.code = code;
-            changed += 1;
-        }
-        changed
-    }
 }
 
 #[cfg(test)]
@@ -451,16 +419,6 @@ mod tests {
     }
 
     #[test]
-    fn convert_skipped_moves_matching_entries_and_keeps_the_balance() {
-        let mut r = report(&["c 1: a", "c 10: b", "c 1: c"]);
-        assert_eq!(r.convert_skipped("c 1:"), 2);
-        assert_eq!(r.converted_count(), 3);
-        assert_eq!(r.skipped_items()[0].reason, "c 10: b");
-        assert!(r.is_balanced());
-        assert_eq!(r.convert_skipped("c 2:"), 0);
-    }
-
-    #[test]
     fn skip_records_the_code_and_counts_by_code() {
         let mut r = Report::new();
         r.skip(SkipCode::Video, "v");
@@ -473,18 +431,6 @@ mod tests {
         assert_eq!(by.get("video"), Some(&2));
         assert_eq!(by.get("missing"), Some(&1));
         assert_eq!(by.get("unspecified"), Some(&1));
-    }
-
-    #[test]
-    fn replace_skipped_changes_only_matching_reasons() {
-        let mut r = report(&["c 1: a", "c 10: b"]);
-        assert_eq!(r.replace_skipped("c 1:", SkipCode::Video, "c 1: new"), 1);
-        assert_eq!(r.skipped_items()[0].code, SkipCode::Video);
-        assert_eq!(r.skipped_items()[0].reason, "c 1: new");
-        assert_eq!(r.skipped_items()[1].reason, "c 10: b");
-        r.replace_skipped("c 10:", SkipCode::Video, " ");
-        assert_eq!(r.skipped_items()[1].reason, Report::UNSPECIFIED_REASON);
-        assert!(r.is_balanced());
     }
 
     #[test]

@@ -47,14 +47,20 @@
 //!   `ag.library.smart_collection` of collections whose `creationId` is
 //!   smart count. A missing `AgLibraryCollectionContent` table, a missing
 //!   row or a NULL content is "unreadable rules", not an error.
-//! - Nothing is translated yet: every smart collection stays skipped. The
-//!   reason keeps the old phrase and id: `collection <id>: smart collection
-//!   is not converted (first criterion: <name>)` for readable rules,
-//!   `... (no criteria)` for an empty rule list, `... (unreadable rules)`
-//!   for the rest. The exact wording beyond the quoted phrases is not
-//!   tested (case-insensitive). Reasons never contain a rule value, an
-//!   operation or a collection name; criterion names (also unknown ones)
-//!   are allowed.
+//! - The reader produces the final verdict: a smart collection whose rules
+//!   have an exact target equivalent (today a star rating with `==` or `>=`
+//!   and a whole number of stars, top level or nested in a converted
+//!   collection set) is converted and not skipped — in the smart fixture
+//!   that is collection 101 (rating >= 3, top level). Every other smart
+//!   collection is skipped with a reason that names the first criterion
+//!   without an equivalent: `collection <id>: smart collection is not
+//!   converted (criterion "<name>" has no exact LightCraft equivalent)`,
+//!   `... (the combine mode has no exact LightCraft equivalent)`,
+//!   `... (no criteria)` for an empty rule list, or `... (unreadable rules)`
+//!   for the rest. The caller never rewrites the report by reason text.
+//!   The exact wording beyond the quoted phrases is not tested
+//!   (case-insensitive). Reasons never contain a rule value, an operation or
+//!   a collection name; criterion names (also unknown ones) are allowed.
 //! - Balance: read = converted + skipped, as before.
 
 use lr_reader::{Catalog, CollectionData, parse_smart_rules};
@@ -287,30 +293,51 @@ fn reason_for(d: &CollectionData, id: i64) -> String {
 }
 
 #[test]
-fn every_smart_collection_stays_skipped_with_the_old_phrase() {
+fn every_untranslatable_smart_collection_is_skipped() {
     let dir = tempfile::tempdir().unwrap();
     let d = read(&fixture(dir.path()));
-    let all = e::READABLE
+    // 101 (rating >= 3, top level) is the one translatable collection: it is
+    // converted, not skipped, and in `convertible_smart`.
+    assert_eq!(
+        d.convertible_smart
+            .iter()
+            .map(|s| s.lightroom_id)
+            .collect::<Vec<_>>(),
+        vec![101]
+    );
+    let skipped = |id: i64| {
+        d.report
+            .skipped_items()
+            .iter()
+            .any(|s| s.reason.starts_with(&format!("collection {id}:")))
+    };
+    assert!(!skipped(101), "101 is converted, not skipped");
+    // Every other smart collection is skipped with the "smart collection"
+    // phrase; none of them is in the converted collections.
+    let mut n = 0;
+    for id in e::READABLE
         .iter()
         .map(|(id, _)| *id)
         .chain(e::UNREADABLE.iter().map(|(id, _)| *id))
-        .chain([e::OTHER_MODULE_ONLY, 5, 6]);
-    let mut n = 0;
-    for id in all {
+        .chain([e::OTHER_MODULE_ONLY, 5, 6])
+        .filter(|id| *id != 101)
+    {
         let r = reason_for(&d, id).to_lowercase();
         assert!(r.contains("smart collection"), "{id}: {r}");
         assert!(!d.collections.iter().any(|c| c.lightroom_id == id), "{id}");
         n += 1;
     }
-    assert_eq!(n, e::SMART_TOTAL);
+    assert_eq!(n, e::SMART_TOTAL - 1);
 }
 
 #[test]
-fn reason_names_the_first_criterion() {
+fn reason_names_the_first_untranslatable_criterion() {
     let dir = tempfile::tempdir().unwrap();
     let d = read(&fixture(dir.path()));
+    // The verdict names the first criterion without an exact equivalent.
+    // For 109 the first rule (rating) translates; the second (labelColor)
+    // does not, so the reason names labelColor, not rating.
     let first = [
-        (101, "rating"),
         (102, "pick"),
         (103, "labelColor"),
         (104, "keywords"),
@@ -318,7 +345,7 @@ fn reason_names_the_first_criterion() {
         (106, "captureTime"),
         (107, "touchTime"),
         (108, "fileFormat"),
-        (109, "rating"),
+        (109, "labelColor"),
         (110, "zyxCriterion"),
         (111, "rating"),
         (112, "keywords"),
@@ -328,9 +355,14 @@ fn reason_names_the_first_criterion() {
         let r = reason_for(&d, id);
         assert!(r.contains(name), "{id}: {r}");
         assert!(!r.to_lowercase().contains("unreadable"), "{id}: {r}");
+        // the old "first criterion" phrase is gone
+        assert!(!r.contains("first criterion"), "{id}: {r}");
     }
-    // 109 starts with rating, not with labelColor.
-    assert!(!reason_for(&d, 109).contains("labelColor"));
+    assert!(
+        !reason_for(&d, 109).contains("rating"),
+        "{}",
+        reason_for(&d, 109)
+    );
     let r = reason_for(&d, 113).to_lowercase();
     assert!(r.contains("no criteria"), "{r}");
 }
