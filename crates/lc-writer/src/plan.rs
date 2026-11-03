@@ -1863,4 +1863,69 @@ mod tests {
         };
         assert!(needs_live(&more, &state));
     }
+
+    #[test]
+    fn a_recorded_photo_missing_from_the_model_is_reported() {
+        let mut state = State::default();
+        state.record("gone", 4, json!(1004), PhotoFields::imported_default());
+        state.record("kept", 5, json!(1005), PhotoFields::imported_default());
+        let input = WriteInput {
+            photos: vec![
+                Photo::new("kept.jpg", 5, Rating::default()).with_global_id("kept"),
+                Photo::new("new.jpg", 6, Rating::default()).with_global_id("new"),
+            ],
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &state, &BTreeSet::new());
+        assert_eq!(p.removed_photos(), [RemovedPhoto { photo: 4 }]);
+        assert!(p.moved_photos().is_empty());
+    }
+
+    #[test]
+    fn a_moved_photo_is_reported_and_not_imported_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("old.jpg");
+        let mut state = State::default();
+        state.record("g", 1, json!(1001), PhotoFields::imported_default());
+        assert!(state.remember_path("g", &old));
+        let input = WriteInput {
+            photos: vec![
+                Photo::new(dir.path().join("new.jpg"), 1, Rating::default()).with_global_id("g"),
+            ],
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &state, &BTreeSet::new());
+        assert_eq!(p.moved_photos(), [MovedPhoto { photo: 1 }]);
+        assert!(p.steps.is_empty(), "{:?}", p.steps);
+        // The recorded base path stays, so the move is reported again.
+        assert_eq!(state.photo("g").unwrap().path.as_deref(), old.to_str());
+    }
+
+    #[test]
+    fn a_renamed_keyword_is_reported_but_neither_created_nor_added() {
+        let mut state = State::default();
+        state.record_keyword(&kw(&["Old"]).with_global_id("kg-1").with_lightroom_id(13));
+        let mut last = PhotoFields::imported_default();
+        last.keywords = vec!["Old".into()];
+        state.record("g", 7, json!(1001), last);
+        let renamed = kw(&["New"]).with_global_id("kg-1").with_lightroom_id(13);
+        let mut photo_keywords = BTreeMap::new();
+        photo_keywords.insert(7, vec![renamed.clone()]);
+        let input = WriteInput {
+            photos: vec![Photo::new("a.jpg", 7, Rating::default()).with_global_id("g")],
+            keywords: vec![renamed],
+            photo_keywords,
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &state, &BTreeSet::new());
+        assert_eq!(p.renamed_keywords(), [RenamedKeyword { keyword: 13 }]);
+        assert!(
+            !p.steps
+                .iter()
+                .any(|s| matches!(s, Step::CreateKeyword { .. } | Step::Update { .. })),
+            "{:?}",
+            p.steps
+        );
+        assert_eq!(p.keywords_removed(), 0);
+    }
 }

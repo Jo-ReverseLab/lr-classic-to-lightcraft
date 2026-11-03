@@ -679,4 +679,50 @@ mod tests {
         assert_eq!(s.photos().count(), 1);
         assert_eq!(s.photo("g").unwrap().lightcraft_id, Value::from(2));
     }
+
+    #[test]
+    fn the_recorded_path_round_trips_and_is_never_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.lr2lc.json");
+        let old = dir.path().join("old.jpg");
+        let new = dir.path().join("new.jpg");
+        let mut s = State::default();
+        s.record("g", 1, Value::from(1), PhotoFields::imported_default());
+        assert!(s.remember_path("g", &old));
+        assert!(!s.remember_path("g", &new));
+        s.save(&path).unwrap();
+        let loaded = State::load(&path).unwrap();
+        assert_eq!(loaded.photo("g").unwrap().path.as_deref(), old.to_str());
+        // Recording new field values keeps the base path for move detection.
+        s.record("g", 1, Value::from(1), PhotoFields::imported_default());
+        assert_eq!(s.photo("g").unwrap().path.as_deref(), old.to_str());
+    }
+
+    #[test]
+    fn remember_path_ignores_unknown_photos() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = State::default();
+        assert!(!s.remember_path("missing", &dir.path().join("a.jpg")));
+    }
+
+    #[test]
+    fn keyword_lightroom_id_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.lr2lc.json");
+        let keyword = kw(&["A"]).with_global_id("kg-1").with_lightroom_id(13);
+        assert_eq!(KeywordEntry::of(&keyword).lightroom_id, Some(13));
+        let mut s = State::default();
+        s.record_keyword(&keyword);
+        s.save(&path).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["keywords"]["A"]["lightroom_id"], 13);
+        assert_eq!(
+            State::load(&path)
+                .unwrap()
+                .keyword("A")
+                .unwrap()
+                .lightroom_id,
+            Some(13)
+        );
+    }
 }
