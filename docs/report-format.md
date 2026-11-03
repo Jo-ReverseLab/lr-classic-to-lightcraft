@@ -239,7 +239,8 @@ Every field is an integer.
 
 ### writer — apply (`applied` section)
 
-All integer counters and all `*_skipped`/`*_incomplete` arrays are always
+All integer counters, all `*_skipped`/`*_incomplete` arrays and the three id
+arrays (`removed_photos`, `moved_photos`, `renamed_keywords`) are always
 present (arrays may be `[]`, maps may be `{}`). `aborted` is the only optional
 key. Conflict data appears only here: a dry run does not connect to
 LightCraft, so the planned section carries none.
@@ -256,6 +257,12 @@ LightCraft, so the planned section carries none.
 | `writer.conflicts` | array | apply | each `{"photo": <Lightroom id>, "field": <name>}`: a field changed differently in Lightroom and LightCraft since the last import; nothing was written |
 | `writer.conflicts_count` | integer | apply | `len(conflicts)` |
 | `writer.keywords_removed` | integer | apply | keyword memberships that left the photo in Lightroom; kept in LightCraft and only counted |
+| `writer.photos_removed` | integer | apply | recorded photos no longer in the Lightroom model; nothing was deleted in LightCraft |
+| `writer.removed_photos` | array | apply | each `{"photo": <Lightroom id>}`, ascending by id; `len(removed_photos) == photos_removed` |
+| `writer.photos_moved` | integer | apply | recorded photos whose original moved while their global id stayed; they are not imported again |
+| `writer.moved_photos` | array | apply | each `{"photo": <Lightroom id>}`, ascending by id; `len(moved_photos) == photos_moved` |
+| `writer.keywords_renamed` | integer | apply | recorded keywords renamed in Lightroom (same global id, new path text); nothing was created or renamed in LightCraft |
+| `writer.renamed_keywords` | array | apply | each `{"keyword": <Lightroom id>}`, ascending by id; `len(renamed_keywords) == keywords_renamed` |
 | `writer.photos_skipped` | array | apply | |
 | `writer.photos_skipped_by_code` | object | apply | |
 | `writer.photos_incomplete` | array | apply | a photo whose update or the select before it failed (resent next run) |
@@ -307,6 +314,7 @@ LightCraft, so the planned section carries none.
 - `stacks.converted == stacks_grouped + stacks_known + len(stacks_skipped)`. (`stacks_incomplete` is a subset of grouped.)
 - smart: `collections.smart == smart_created + smart_known + smart_existing + len(smart_skipped)`.
 - `collections_renamed`, `collections_moved`, `collections_removed`, `smart_rules_changed` and `smart_no_longer_translatable` are subsets of `*_known` (changed in Lightroom, left as is in LightCraft).
+- `removed_photos`, `moved_photos` and `renamed_keywords` carry only Lightroom ids; no path, file name, keyword name or global id.
 - `members_added`, `members_removed`, `stack_members_removed`, `quick_added` and `quick_removed` count photos.
 - For an aborted run the counters reflect what was done up to the stop; a command without a reply counts nowhere; `aborted` is then present.
 
@@ -319,6 +327,8 @@ Reasons never expose user data. They carry fixed text plus Lightroom ids only.
 - No caption, copyright, creator or title text — only counts.
 - No conflict values: `writer.conflicts` carries only a Lightroom id and the
   fixed field name; the Lightroom and LightCraft values are never reported.
+- No paths, file names, keyword names or global ids in `writer.removed_photos`,
+  `writer.moved_photos` and `writer.renamed_keywords`: only Lightroom ids.
 - No colour-label text — only counts, the set name, and the Lightroom id in
   `custom_reasons`.
 - No LightCraft ids — they live in the mapping file, never in the report.

@@ -61,6 +61,14 @@ The project has not made a release yet.
   `keywords_removed` for applied runs. The live state is read only when a
   known photo changed in Lightroom; a dry run never connects.
 - CI for Linux, macOS and Windows (format, clippy, tests).
+- Reporting of items removed or renamed in Lightroom on a later run.
+  `report.json` gains `writer.photos_removed`, `removed_photos`,
+  `photos_moved`, `moved_photos`, `keywords_renamed` and
+  `renamed_keywords`, naming only Lightroom ids. Nothing is deleted or
+  renamed in LightCraft: a removed photo leaves only the albums lr2lc
+  created itself, a moved photo is not imported again, and a renamed
+  keyword is neither created nor added to a photo. The mapping file keeps
+  each original's path as the base of the move comparison.
 - Research notes on the Lightroom catalog schema and on LightCraft in
   `docs/research`.
 

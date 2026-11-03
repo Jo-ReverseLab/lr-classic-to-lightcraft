@@ -487,6 +487,24 @@ one side changes. The live values are read only when a known photo actually
 changed in Lightroom, so a run with nothing to do sends no extra command. A
 dry run never connects to LightCraft and therefore reports no conflicts.
 
+lr2lc also reports items in the mapping file that changed or disappeared in
+Lightroom. It never deletes or renames anything in LightCraft, and the lists
+below carry Lightroom ids only, never names or paths.
+
+- A photo no longer in the Lightroom model is counted in `photos_removed` and
+  listed in `removed_photos`. lr2lc takes it only out of the albums it created
+  itself (recorded in the mapping file), never out of an album the user made.
+- A photo whose file path changed while its global id stayed is counted in
+  `photos_moved` and listed in `moved_photos`; it is not imported again. The
+  mapping file keeps the path of the first import as the comparison base, so
+  a later change of the `--map` prefix also makes a photo appear as moved, and
+  the move is reported on every later run.
+- A keyword whose global id stayed but whose name changed in Lightroom is
+  counted in `keywords_renamed` and listed in `renamed_keywords`; no keyword
+  is created or renamed, and the new name is never added to a photo. A renamed
+  parent also changes the path text of its descendants, so those are reported
+  too.
+
 After all photos, lr2lc creates the missing album folders (for collection
 sets, parents first) and albums (for collections) with `album.create`,
 sending only the name, `folder` and the parent folder; before the first
@@ -671,9 +689,11 @@ counts the smart collections converted as smart albums.
   a value changed differently on both sides is reported as a conflict with
   the photo id and field name only and is not written.
 - Renaming, moving and deleting collections, photos that left a stack, photos
-  that left the Quick Collection and keywords that left a photo in Lightroom
-  are only counted, never applied. Photos that left a collection are removed
-  from the album, but only what lr2lc wrote itself.
+  that left the Quick Collection, photos that disappeared from Lightroom,
+  photos whose file moved and keywords that left a photo or were renamed in
+  Lightroom are only reported, never applied. A moved photo is not imported
+  again, and a renamed keyword is neither created nor added. Photos that left
+  a collection are removed from the album, but only what lr2lc wrote itself.
 - The CI workflow runs format, lint and tests on Linux, macOS and Windows.
 - Only `127.0.0.1` is contacted; a LightCraft app on another machine is not
   supported.
