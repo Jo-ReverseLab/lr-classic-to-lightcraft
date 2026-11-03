@@ -119,33 +119,52 @@ impl Catalog {
     /// count the same). Any other value also gives [`Flag::None`]; the photo
     /// is kept and its id is listed in [`PhotoData::unknown_flag`].
     pub fn photo_data(&self, report: &mut Report) -> Result<PhotoData, ReadError> {
+        // The optional tables are joined only when present. Each one is
+        // grouped once (`image`, smallest `id_local`) instead of being
+        // queried per photo: a correlated scalar subquery would scan the
+        // whole table for every image, which is quadratic on a catalog
+        // without indexes.
+        let mut joins = String::new();
         let creator = if self.has_creator_tables()? {
-            "(SELECT n.value FROM AgHarvestedIptcMetadata h \
-              LEFT JOIN AgInternedIptcCreator n ON n.id_local = h.creatorRef \
-              WHERE h.image = i.id_local ORDER BY h.id_local LIMIT 1)"
+            joins.push_str(
+                " LEFT JOIN (SELECT image AS harvested_image, min(id_local) AS harvested_row \
+                              FROM AgHarvestedIptcMetadata GROUP BY image) hc \
+                         ON hc.harvested_image = i.id_local \
+                 LEFT JOIN AgHarvestedIptcMetadata h ON h.id_local = hc.harvested_row \
+                 LEFT JOIN AgInternedIptcCreator n ON n.id_local = h.creatorRef",
+            );
+            "n.value"
         } else {
             "NULL"
         };
         let xmp = if self.has_xmp_table()? {
-            "(SELECT a.xmp FROM Adobe_AdditionalMetadata a \
-              WHERE a.image = i.id_local ORDER BY a.id_local LIMIT 1)"
+            joins.push_str(
+                " LEFT JOIN (SELECT image AS xmp_image, min(id_local) AS xmp_row \
+                              FROM Adobe_AdditionalMetadata GROUP BY image) xa \
+                         ON xa.xmp_image = i.id_local \
+                 LEFT JOIN Adobe_AdditionalMetadata a ON a.id_local = xa.xmp_row",
+            );
+            "a.xmp"
         } else {
             "NULL"
         };
+        // Both `AgLibraryIPTC` columns come from the same row: the one with
+        // the smallest `id_local` for the image.
         let sql = format!(
             "SELECT i.id_local, i.masterImage, i.rating, i.fileFormat, \
                     f.id_local, f.baseName, f.extension, \
                     d.id_local, d.pathFromRoot, \
                     r.id_local, r.absolutePath, i.id_global, i.pick, i.colorLabels, \
-                    (SELECT c.caption FROM AgLibraryIPTC c \
-                     WHERE c.image = i.id_local ORDER BY c.id_local LIMIT 1), \
-                    (SELECT c.copyright FROM AgLibraryIPTC c \
-                     WHERE c.image = i.id_local ORDER BY c.id_local LIMIT 1), \
-                    {creator}, {xmp} \
+                    c.caption, c.copyright, {creator}, {xmp} \
              FROM Adobe_images i \
+             LEFT JOIN (SELECT image AS iptc_image, min(id_local) AS iptc_row \
+                          FROM AgLibraryIPTC GROUP BY image) ic \
+                    ON ic.iptc_image = i.id_local \
+             LEFT JOIN AgLibraryIPTC c ON c.id_local = ic.iptc_row \
              LEFT JOIN AgLibraryFile f ON f.id_local = i.rootFile \
              LEFT JOIN AgLibraryFolder d ON d.id_local = f.folder \
              LEFT JOIN AgLibraryRootFolder r ON r.id_local = d.rootFolder \
+             {joins} \
              ORDER BY i.id_local"
         );
         let mut stmt = self.conn.prepare(&sql).map_err(ReadError::Query)?;
@@ -784,5 +803,83 @@ mod tests {
         let mut r = row();
         r.file = Some(("clip.mp4".into(), "jpg".into()));
         assert!(photo_from_row(r, &mut HashSet::new(), &mut HashSet::new()).is_ok());
+    }
+
+    /// Reads a generated catalog and returns the photo with `id`.
+    fn photo_with(catalog: &Catalog, id: i64) -> Photo {
+        let mut report = Report::new();
+        let data = catalog.photo_data(&mut report).unwrap();
+        data.photos
+            .iter()
+            .find(|p| p.lightroom_id == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("photo {id} is not converted"))
+    }
+
+    #[test]
+    fn caption_of_one_image_comes_from_its_smallest_id() {
+        use lrcat_fixtures::caption_edge as e;
+        let dir = tempfile::tempdir().unwrap();
+        let path = lrcat_fixtures::write_caption_catalog_with_files(dir.path()).unwrap();
+        let catalog = Catalog::open(&path).unwrap();
+        assert_eq!(
+            photo_with(&catalog, e::DUPLICATE_ID).caption.as_deref(),
+            Some(e::DUPLICATE_TEXT)
+        );
+        assert_eq!(
+            photo_with(&catalog, e::DUPLICATE_NULL_FIRST_ID).caption,
+            None
+        );
+        assert_eq!(photo_with(&catalog, e::NON_TEXT_ID).caption, None);
+    }
+
+    #[test]
+    fn copyright_and_creator_of_one_image_come_from_its_smallest_id() {
+        use lrcat_fixtures::rights_edge as e;
+        let dir = tempfile::tempdir().unwrap();
+        let path = lrcat_fixtures::write_rights_catalog_with_files(dir.path()).unwrap();
+        let catalog = Catalog::open(&path).unwrap();
+        let duplicate = photo_with(&catalog, e::DUPLICATE_ID);
+        assert_eq!(duplicate.copyright.as_deref(), Some(e::DUPLICATE_COPYRIGHT));
+        // The smallest harvested row has no creator, even though a later one
+        // names one.
+        assert_eq!(duplicate.creator, None);
+        assert_eq!(
+            photo_with(&catalog, e::TWO_HARVESTED_ID).creator.as_deref(),
+            Some(e::FIRST_CREATOR)
+        );
+        let null_first = photo_with(&catalog, e::DUPLICATE_NULL_FIRST_ID);
+        assert_eq!(null_first.copyright, None);
+        assert_eq!(null_first.creator, None);
+        let non_text = photo_with(&catalog, e::NON_TEXT_ID);
+        assert_eq!(non_text.copyright, None);
+        assert_eq!(non_text.creator, None);
+    }
+
+    #[test]
+    fn creator_is_absent_without_the_optional_tables() {
+        use lrcat_fixtures::rights_edge as e;
+        let dir = tempfile::tempdir().unwrap();
+        let path = lrcat_fixtures::write_copyright_only_catalog_with_files(dir.path()).unwrap();
+        let catalog = Catalog::open(&path).unwrap();
+        let photo = photo_with(&catalog, e::UMLAUT_ID);
+        assert_eq!(photo.copyright.as_deref(), Some(e::UMLAUT_COPYRIGHT));
+        assert_eq!(photo.creator, None);
+    }
+
+    #[test]
+    fn title_comes_from_the_smallest_xmp_row() {
+        use lrcat_fixtures::title_edge as e;
+        let dir = tempfile::tempdir().unwrap();
+        let path = lrcat_fixtures::write_title_catalog_with_files(dir.path()).unwrap();
+        let catalog = Catalog::open(&path).unwrap();
+        assert_eq!(
+            photo_with(&catalog, e::DUPLICATE_ID).title.as_deref(),
+            Some(e::DUPLICATE_TITLE)
+        );
+        // A NULL xmp in the smallest row wins over a later valid title.
+        assert_eq!(photo_with(&catalog, e::NULL_FIRST_ID).title, None);
+        // A broken blob in the smallest row wins over a later valid title.
+        assert_eq!(photo_with(&catalog, e::BROKEN_FIRST_ID).title, None);
     }
 }
