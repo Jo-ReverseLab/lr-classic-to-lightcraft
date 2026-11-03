@@ -159,7 +159,10 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
 
 /// A port number from 1 to 65535.
 fn parse_port(value: &std::ffi::OsStr) -> Result<u16, String> {
-    let text = value.to_string_lossy();
+    // Never read a mangled value: report the invalid encoding instead.
+    let Some(text) = value.to_str() else {
+        return Err("--port value is not valid UTF-8".to_string());
+    };
     match text.parse::<u16>() {
         Ok(n) if n > 0 => Ok(n),
         _ => Err(format!("--port {text}: expected a number from 1 to 65535")),
@@ -246,6 +249,20 @@ mod tests {
         }
         assert!(parse(&["cat.lrcat", "--port"]).is_err());
         assert!(parse(&["cat.lrcat", "--port", "1", "--port", "2"]).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_port_is_an_error() {
+        use std::os::unix::ffi::OsStringExt;
+        let args = vec![
+            OsString::from("cat.lrcat"),
+            OsString::from("--port"),
+            OsString::from_vec(vec![0xff]),
+        ];
+        let err = parse_args(args).unwrap_err();
+        assert!(err.contains("--port"), "{err}");
+        assert!(err.contains("UTF-8"), "{err}");
     }
 
     #[test]
