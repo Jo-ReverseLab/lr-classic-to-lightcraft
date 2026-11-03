@@ -26,7 +26,7 @@ use model::{ColorLabel, Photo, Rating};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-use fake_lightcraft::{Config, Failure, FakeLightCraft};
+use fake_lightcraft::{Config, Failure, FakeLightCraft, READ_COMMANDS};
 use lc_test_support::fake_lightcraft;
 
 fn photo(gid: &str, lr_id: i64, rating: u8) -> Photo {
@@ -82,12 +82,18 @@ fn run(
     (result, fake.commands()[before..].to_vec())
 }
 
+/// A read command. `library.select` also appears in `READ_COMMANDS`, but it
+/// changes the selection and therefore matters here.
+fn is_read(command: &str) -> bool {
+    command != "library.select" && READ_COMMANDS.contains(&command)
+}
+
 /// The commands that matter here: everything except the reads.
 fn names(commands: &[(String, Value)]) -> Vec<&str> {
     commands
         .iter()
         .map(|(c, _)| c.as_str())
-        .filter(|c| *c != "keyword.list")
+        .filter(|c| !is_read(c))
         .collect()
 }
 
@@ -112,6 +118,9 @@ fn select_params(id: i64) -> Value {
 fn assert_always_selected(commands: &[(String, Value)]) {
     let mut selected: Option<i64> = None;
     for (command, params) in commands {
+        if is_read(command) {
+            continue;
+        }
         if is_select(command) {
             assert_eq!(params["ids"].as_array().map(Vec::len), Some(1), "{params}");
             assert_eq!(params["ids"][0], params["active"], "{params}");
