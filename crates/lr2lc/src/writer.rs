@@ -6,7 +6,7 @@ use crate::output::group_reasons;
 use anyhow::{Context, Result};
 use lc_writer::apply::{Aborted, ApplySummary, apply_partial};
 use lc_writer::control::{ControlClient, WriteError, preflight};
-use lc_writer::plan::{Plan, Step, WriteInput};
+use lc_writer::plan::{Conflict, Plan, Step, WriteInput};
 use lc_writer::state::{State, state_path};
 use model::Skipped;
 use model::skip::count_by_code;
@@ -53,6 +53,14 @@ pub struct AppliedJson {
     photos_unchanged: usize,
     updates: usize,
     not_saved: usize,
+    /// Fields changed differently in Lightroom and LightCraft since the last
+    /// import; nothing was written for them. Only the Lightroom id and the
+    /// field name, never a value.
+    conflicts: Vec<Conflict>,
+    conflicts_count: usize,
+    /// Keyword memberships that left the photo in Lightroom; kept in
+    /// LightCraft and only counted.
+    keywords_removed: usize,
     photos_skipped: Vec<SkipJson>,
     photos_skipped_by_code: ByCode,
     photos_incomplete: Vec<SkipJson>,
@@ -162,6 +170,8 @@ pub fn input(converted: &Converted) -> WriteInput {
         quick: converted.quick.clone(),
         smart: converted.smart.clone(),
         smart_untranslatable_ids: converted.smart_untranslatable_ids.clone(),
+        // A dry run never connects; an apply run reads the live state itself.
+        live: None,
     }
 }
 
@@ -243,6 +253,9 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         photos_unchanged: s.photos_unchanged,
         updates: s.updates,
         not_saved: s.not_saved,
+        conflicts: s.conflicts.clone(),
+        conflicts_count: s.conflicts.len(),
+        keywords_removed: s.keywords_removed,
         photos_skipped: reasons(&s.photos_skipped),
         photos_skipped_by_code: count_by_code(&s.photos_skipped),
         photos_incomplete: reasons(&s.photos_incomplete),
@@ -399,6 +412,20 @@ pub fn applied_summary(s: &ApplySummary) -> String {
         s.collections_incomplete.len(),
         s.members_skipped.len()
     );
+    let _ = writeln!(
+        out,
+        "keywords removed in Lightroom and kept in LightCraft: {}",
+        s.keywords_removed
+    );
+    if !s.conflicts.is_empty() {
+        let _ = writeln!(
+            out,
+            "changed differently in Lightroom and LightCraft, nothing written:"
+        );
+        for conflict in &s.conflicts {
+            let _ = writeln!(out, "  photo {}: {}", conflict.photo, conflict.field);
+        }
+    }
     let _ = writeln!(
         out,
         "written stacks: grouped {}, already in the library {}, skipped {}, incomplete {}, \
