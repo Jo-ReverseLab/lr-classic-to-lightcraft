@@ -460,6 +460,33 @@ commands only to selected photos, so lr2lc selects each photo before its
 first update; this changes the selection in LightCraft, which afterwards
 holds the last updated photo. A select is not counted as an update.
 
+#### Second run and reconciliation
+
+On a second run lr2lc compares three values for every field of a photo that
+is in the mapping file and still in LightCraft: the value it last imported
+(`last`), the value in the Lightroom catalog (`lr`) and the value LightCraft
+holds now (`lc`). It reads the live values from the app before it writes
+anything; a failed read stops the run with nothing written.
+
+- `lr == last`: nothing is written, whatever LightCraft holds. A value
+  changed only in LightCraft is never overwritten.
+- `lr != last` and `lc == last`: the Lightroom value is written.
+- `lr != last` and `lc == lr`: nothing is written; both sides already agree.
+- `lr != last`, `lc != last` and `lc != lr`: a conflict. Nothing is written,
+  and the report names only the photo's Lightroom id and the field
+  (`rating`, `flag`, `label`, `title`, `caption`, `copyright` or `creator`),
+  never a value.
+
+Keywords are compared element by element: a keyword new in Lightroom is
+added unless LightCraft already has it; a keyword that left the photo in
+Lightroom is kept in LightCraft and only counted (`keywords_removed`, in
+the report and the summary); a keyword only in LightCraft stays. lr2lc
+never removes a keyword from a photo. A field in conflict keeps its last
+imported value in the mapping file, so a later run reports it again until
+one side changes. The live values are read only when a known photo actually
+changed in Lightroom, so a run with nothing to do sends no extra command. A
+dry run never connects to LightCraft and therefore reports no conflicts.
+
 After all photos, lr2lc creates the missing album folders (for collection
 sets, parents first) and albums (for collections) with `album.create`,
 sending only the name, `folder` and the parent folder; before the first
@@ -639,15 +666,14 @@ counts the smart collections converted as smart albums.
 - The collapsed or expanded state of stacks is only counted, not written;
   stacks are always written expanded.
 - Development settings (the Lightroom edit state) are not converted yet.
-- A second run sends what changed in Lightroom since the last run, compared
-  with the mapping file. lr2lc does not yet compare these values with what
-  LightCraft holds now, so a value you changed in LightCraft may be
-  overwritten if the same value also changed in Lightroom.
-- Renaming, moving and deleting collections, photos that left a stack and
-  photos that left the Quick Collection are only counted, never applied.
-  Photos that left a collection are removed from the album, and keywords
-  removed in Lightroom are removed from the photo, but only what lr2lc wrote
-  itself.
+- A second run reconciles every field of a known photo with what LightCraft
+  holds now (see [Second run and reconciliation](#second-run-and-reconciliation)):
+  a value changed differently on both sides is reported as a conflict with
+  the photo id and field name only and is not written.
+- Renaming, moving and deleting collections, photos that left a stack, photos
+  that left the Quick Collection and keywords that left a photo in Lightroom
+  are only counted, never applied. Photos that left a collection are removed
+  from the album, but only what lr2lc wrote itself.
 - The CI workflow runs format, lint and tests on Linux, macOS and Windows.
 - Only `127.0.0.1` is contacted; a LightCraft app on another machine is not
   supported.

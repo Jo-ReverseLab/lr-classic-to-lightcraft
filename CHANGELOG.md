@@ -51,6 +51,15 @@ The project has not made a release yet.
 - `--script FILE` writes the planned commands as JSON lines.
 - A read-only snapshot of the current LightCraft library state, as groundwork
   for comparing it with Lightroom.
+- Three-way reconciliation on a second run. For every field of a photo the
+  mapping file knows and LightCraft still has, lr2lc compares the last
+  imported value, the Lightroom value and the live LightCraft value. A field
+  changed differently on both sides is not written and is reported with the
+  photo id and field name only. Keywords are reconciled element by element
+  and never removed: ones that left the photo in Lightroom are kept and
+  counted. `report.json` gains `writer.conflicts`, `conflicts_count` and
+  `keywords_removed` for applied runs. The live state is read only when a
+  known photo changed in Lightroom; a dry run never connects.
 - CI for Linux, macOS and Windows (format, clippy, tests).
 - Research notes on the Lightroom catalog schema and on LightCraft in
   `docs/research`.

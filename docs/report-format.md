@@ -241,7 +241,8 @@ Every field is an integer.
 
 All integer counters and all `*_skipped`/`*_incomplete` arrays are always
 present (arrays may be `[]`, maps may be `{}`). `aborted` is the only optional
-key.
+key. Conflict data appears only here: a dry run does not connect to
+LightCraft, so the planned section carries none.
 
 | Key | Type | When | Notes |
 | --- | --- | --- | --- |
@@ -252,6 +253,9 @@ key.
 | `writer.photos_unchanged` | integer | apply | known photos, no command |
 | `writer.updates` | integer | apply | field updates applied |
 | `writer.not_saved` | integer | apply | applied in memory but not yet saved to disk |
+| `writer.conflicts` | array | apply | each `{"photo": <Lightroom id>, "field": <name>}`: a field changed differently in Lightroom and LightCraft since the last import; nothing was written |
+| `writer.conflicts_count` | integer | apply | `len(conflicts)` |
+| `writer.keywords_removed` | integer | apply | keyword memberships that left the photo in Lightroom; kept in LightCraft and only counted |
 | `writer.photos_skipped` | array | apply | |
 | `writer.photos_skipped_by_code` | object | apply | |
 | `writer.photos_incomplete` | array | apply | a photo whose update or the select before it failed (resent next run) |
@@ -313,6 +317,8 @@ Reasons never expose user data. They carry fixed text plus Lightroom ids only.
 - No file paths.
 - No collection names, keyword names or synonym names.
 - No caption, copyright, creator or title text — only counts.
+- No conflict values: `writer.conflicts` carries only a Lightroom id and the
+  fixed field name; the Lightroom and LightCraft values are never reported.
 - No colour-label text — only counts, the set name, and the Lightroom id in
   `custom_reasons`.
 - No LightCraft ids — they live in the mapping file, never in the report.
