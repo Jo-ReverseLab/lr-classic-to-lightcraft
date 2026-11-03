@@ -1,0 +1,124 @@
+lr2lc 0.1.0 dry run: nothing is written (use --apply to convert)
+catalog version 1500000
+folders: read 6, would convert 6, skipped 0
+photos: read 21, would convert 15, skipped 6
+collections: read 47, would convert 14, skipped 33
+collection members: read 29, would convert 17, skipped 12
+stacks: read 8, would convert 6, skipped 2
+stack members: read 20, would convert 13, skipped 7
+keywords: read 17, would convert 12, skipped 5
+keyword assignments: read 37, would convert 21, skipped 16
+keyword synonyms: read 6, would convert 2, skipped 4
+videos: skipped 3
+stack details: collapsed 1 (written expanded), no top photo 1
+keyword attributes: persons 1, not exported 1, no parents on export 0, no synonyms on export 0, unknown type 0, unused 2
+skipped photos:
+       3 x video files are not supported by LightCraft
+       2 x original file is missing
+       1 x virtual copy of photo 4 cannot be created, the master was not converted
+skipped collections:
+      10 x smart collection is not converted (unreadable rules)
+       3 x parent chain forms a cycle
+       3 x smart collection is not converted (criterion "keywords" has no exact LightCraft equivalent)
+       2 x smart collection is not converted (criterion "labelColor" has no exact LightCraft equivalent)
+       2 x smart collection is not converted (criterion "pick" has no exact LightCraft equivalent)
+       1 x collection type "com.adobe.ag.print" is not converted
+       1 x collection type "com.adobe.ag.webGallery" is not converted
+       1 x parent 13 is skipped
+       1 x parent 18 is not a collection set
+       1 x parent 21 is skipped
+       1 x parent 4 is not a collection set
+       1 x parent 9999 is missing
+       1 x smart collection is not converted (criterion "captureTime" has no exact LightCraft equivalent)
+       1 x smart collection is not converted (criterion "fileFormat" has no exact LightCraft equivalent)
+       1 x smart collection is not converted (criterion "rating" has no exact LightCraft equivalent)
+       1 x smart collection is not converted (criterion "touchTime" has no exact LightCraft equivalent)
+       1 x smart collection is not converted (criterion "zyxCriterion" has no exact LightCraft equivalent)
+       1 x smart collection is not converted (no criteria)
+skipped collection members:
+       2 x skipped or unknown photo, not added to collection 14
+       2 x skipped or unknown photo, not added to collection 4
+       2 x skipped or unknown photo, not added to collection 8
+       1 x collection 3 is a collection set and holds no photos
+       1 x collection skipped (collection 13)
+       1 x collection skipped (collection 16)
+       1 x collection skipped (collection 18)
+       1 x collection skipped (collection 22)
+       1 x duplicate member of collection 7
+skipped stacks:
+       2 x fewer than two converted photos
+skipped stack members:
+       1 x already in stack 6
+       1 x skipped or unknown photo, not added to stack 3
+       1 x skipped or unknown photo, not added to stack 4
+       1 x skipped or unknown photo, not added to stack 5
+       1 x skipped or unknown photo, not added to stack 8
+       1 x stack 3 is skipped
+       1 x stack 4 is skipped
+skipped keywords:
+       2 x name is empty
+       1 x name contains a vertical bar
+       1 x parent keyword 16 is skipped
+       1 x parent keyword 17 is skipped
+skipped keyword assignments:
+       3 x photo 2 is skipped or unknown
+       3 x photo 4 is skipped or unknown
+       3 x photo 5 is skipped or unknown
+       2 x photo 20 is skipped or unknown
+       2 x photo 3 is skipped or unknown
+       1 x keyword 14 is skipped
+       1 x keyword 16 is skipped
+       1 x photo 999 is skipped or unknown
+skipped keyword synonyms:
+       2 x name is empty
+       1 x keyword 16 is skipped
+       1 x keyword 999 is unknown
+skip codes photos:
+       3 x video
+       2 x missing
+       1 x virtual_copy
+skip codes collections:
+      12 x smart_untranslatable
+      10 x smart_unreadable
+       3 x parent_cycle
+       2 x collection_kind_unsupported
+       2 x parent_not_set
+       2 x parent_skipped
+       1 x parent_missing
+       1 x smart_no_criteria
+skip codes collection members:
+       6 x photo_not_converted
+       4 x collection_skipped
+       1 x collection_is_set
+       1 x duplicate_member
+skip codes stacks:
+       2 x too_few_photos
+skip codes stack members:
+       4 x photo_not_converted
+       2 x stack_skipped
+       1 x already_in_stack
+skip codes keywords:
+       2 x name_empty
+       2 x parent_skipped
+       1 x name_has_bar
+skip codes keyword assignments:
+      14 x assignment_photo_skipped
+       2 x assignment_keyword_skipped
+skip codes keyword synonyms:
+       2 x name_empty
+       1 x keyword_skipped
+       1 x keyword_unknown
+ratings: 0: 4, 1: 3, 2: 2, 3: 3, 4: 2, 5: 1
+flags: pick 1, reject 1, none 10, unknown 3
+labels: red 1, yellow 0, green 1, blue 1, purple 1, none 11, custom 0, set auto
+captions: 1
+copyrights: 1
+creators: 3
+titles: 5
+titles unreadable: 4
+catalog unchanged (checksum verified)
+writer: keywords to create 12, photos to import 15, updates 32, albums to create 9, album members to add 14
+writer stacks: to group 6, already in the library 0, members left in LightCraft 0
+writer quick collection: to add 3, already in it 0, members left in LightCraft 0
+writer smart albums: smart albums to create 1, already in the library 0, rules changed in Lightroom 0
+writer smart albums no longer translatable (left as is in LightCraft): 0

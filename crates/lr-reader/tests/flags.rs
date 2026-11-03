@@ -74,19 +74,23 @@ fn unknown_values_do_not_skip_the_photo() {
     for id in flag_edge::UNKNOWN_IDS {
         assert!(photos.iter().any(|p| p.lightroom_id == id), "photo {id}");
     }
+    // Virtual copy 20 converts with its master (T03): nothing is skipped.
     let reasons: Vec<_> = report.skipped_items().iter().map(|s| &s.reason).collect();
-    assert_eq!(reasons.len(), 1, "{reasons:?}");
-    assert!(reasons[0].starts_with("photo 20:") && reasons[0].contains("virtual copy"));
+    assert!(reasons.is_empty(), "{reasons:?}");
 }
 
 #[test]
-fn skipped_virtual_copy_with_pick_is_not_returned_and_counts_as_read() {
+fn virtual_copy_with_pick_is_returned_and_counts_as_read() {
     let (_d, cat) = fixture();
     let (photos, report) = read_photos(&cat);
-    assert!(photos.iter().all(|p| p.lightroom_id != 20));
+    // The virtual copy converts with its master (T03) and keeps its pick.
+    assert_eq!(
+        photos.iter().find(|p| p.lightroom_id == 20).map(|p| p.flag),
+        Some(Flag::Pick)
+    );
     assert_eq!(report.read_count() as i64, flag_edge::PHOTOS);
-    assert_eq!(report.skipped_count(), 1);
-    assert_eq!(photos.len() as i64, flag_edge::PHOTOS - 1);
+    assert_eq!(report.skipped_count(), 0);
+    assert_eq!(photos.len() as i64, flag_edge::PHOTOS);
 }
 
 #[test]
@@ -102,14 +106,15 @@ fn collection_pick_is_not_read() {
         .filter(|p| p.flag == Flag::Pick)
         .map(|p| p.lightroom_id)
         .collect();
-    assert_eq!(picks, flag_edge::PICK_IDS);
+    assert_eq!(picks, flag_edge::PICK_IDS_READER);
     let rejects: Vec<i64> = photos
         .iter()
         .filter(|p| p.flag == Flag::Reject)
         .map(|p| p.lightroom_id)
         .collect();
-    // Photo 2 (missing original) is returned by the reader and is a reject.
-    assert_eq!(rejects, [2, 5, 9]);
+    // Photos 2 (missing original) and 20 (virtual copy) are returned by the
+    // reader; both are rejects/picks as stored.
+    assert_eq!(rejects, flag_edge::REJECT_IDS_READER);
 }
 
 #[test]
@@ -118,7 +123,7 @@ fn small_fixture_has_no_flags() {
     let path = dir.path().join("small.lrcat");
     write_small_catalog(&path).unwrap();
     let (photos, _) = read_photos(&path);
-    assert_eq!(photos.len() as i64, small::PHOTOS - small::VIRTUAL_COPIES);
+    assert_eq!(photos.len() as i64, small::PHOTOS);
     assert!(photos.iter().all(|p| p.flag == Flag::None));
 }
 

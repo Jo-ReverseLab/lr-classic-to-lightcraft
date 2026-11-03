@@ -420,17 +420,6 @@ impl Report {
 mod tests {
     use super::*;
 
-    fn report(reasons: &[&str]) -> Report {
-        let mut r = Report::new();
-        r.read();
-        r.converted();
-        for reason in reasons {
-            r.read();
-            r.skipped(*reason);
-        }
-        r
-    }
-
     #[test]
     fn skip_records_the_code_and_counts_by_code() {
         let mut r = Report::new();

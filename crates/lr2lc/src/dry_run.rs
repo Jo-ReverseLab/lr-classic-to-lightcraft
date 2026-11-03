@@ -261,9 +261,25 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
             mapped_photos.push(p);
         }
         // Two photos landing on the same path after mapping would be a silent
-        // merge: keep the first, report each later one.
-        let paths: Vec<&Path> = mapped_photos.iter().map(|p| p.path.as_path()).collect();
-        let collisions = mappings.collisions(&paths);
+        // merge: keep the first, report each later one. A virtual copy shares
+        // its master's file by design, so only masters take part in the
+        // check; a copy is never a collision with its own master.
+        let master_indices: Vec<usize> = mapped_photos
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.master.is_none())
+            .map(|(i, _)| i)
+            .collect();
+        let master_paths: Vec<&Path> = master_indices
+            .iter()
+            .map(|&i| mapped_photos[i].path.as_path())
+            .collect();
+        let mut collisions: Vec<usize> = mappings
+            .collisions(&master_paths)
+            .into_iter()
+            .map(|j| master_indices[j])
+            .collect();
+        collisions.sort_unstable();
         let mut kept_before_originals: Vec<Photo> = Vec::with_capacity(mapped_photos.len());
         for (i, p) in mapped_photos.drain(..).enumerate() {
             if collisions.binary_search(&i).is_ok() {
@@ -288,7 +304,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         let data = catalog.keywords(&kept_photos, &mut keywords, &mut keyword_assignments)?;
         let keyword_attributes = KeywordAttributes::count(&data);
         // Members naming skipped photos are skipped as well.
-        let mut collection_data = catalog.collection_data(&kept_photos)?;
+        let collection_data = catalog.collection_data(&kept_photos)?;
         // The reader already produced the final verdict for every smart
         // collection (converted or skipped with a reason); the caller no
         // longer rewrites the report by reason text. The convertible ones go

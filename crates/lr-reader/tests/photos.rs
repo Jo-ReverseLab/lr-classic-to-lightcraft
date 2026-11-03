@@ -8,10 +8,12 @@
 //!   exactly once. The path is the folder path (as in `Catalog::folders`) plus
 //!   `baseName` and `.extension` (no dot when the extension is empty), built
 //!   from stored strings only. `lightroom_id` is `Adobe_images.id_local`; a
-//!   NULL rating becomes 0. Skipped with a reason (photo not returned, no
-//!   abort): virtual copies (reason contains "virtual copy"), a missing file,
-//!   folder or root folder row (reason names what is missing), a rating
-//!   outside 0..=5 (reason contains "rating"). `photos` never calls
+//!   NULL rating becomes 0. A virtual copy is returned with `master` set to
+//!   its master's `lightroom_id` (T03); it is skipped only when the master is
+//!   not converted (reason contains "virtual copy"). Skipped with a reason
+//!   (photo not returned, no abort): a missing file, folder or root folder row
+//!   (reason names what is missing), a rating outside 0..=5 (reason contains
+//!   "rating"). `photos` never calls
 //!   `report.converted()`; the writer does that later. Order: by `id_local`.
 //! - `lr_reader::drop_missing_originals(photos: Vec<model::Photo>,
 //!   report: &mut model::Report) -> Vec<model::Photo>`. Photos whose file does
@@ -25,8 +27,6 @@ use rusqlite::Connection;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-/// Rating of the virtual copy (photo 20) in the generator.
-const VIRTUAL_COPY_RATING: u8 = 5;
 const VIRTUAL_COPY_ID: i64 = 20;
 
 fn with_files(dir: &Path) -> PathBuf {
@@ -55,15 +55,18 @@ fn ids(photos: &[Photo]) -> Vec<i64> {
 }
 
 #[test]
-fn every_row_is_read_and_virtual_copy_is_skipped() {
+fn every_row_is_read_and_virtual_copy_converts_with_its_master() {
     let dir = tempfile::tempdir().unwrap();
     let (photos, report) = read_photos(&with_files(dir.path()));
     assert_eq!(report.read_count() as i64, small::PHOTOS);
-    assert_eq!(report.skipped_count() as i64, small::VIRTUAL_COPIES);
-    assert_eq!(photos.len() as i64, small::PHOTOS - small::VIRTUAL_COPIES);
-    assert!(!ids(&photos).contains(&VIRTUAL_COPY_ID));
-    let reason = &report.skipped_items()[0].reason;
-    assert!(reason.contains("virtual copy"), "reason: {reason}");
+    assert_eq!(report.skipped_count(), 0);
+    assert_eq!(photos.len() as i64, small::PHOTOS);
+    let copy = photos
+        .iter()
+        .find(|p| p.lightroom_id == VIRTUAL_COPY_ID)
+        .expect("virtual copy is returned");
+    // Photo 20 is a virtual copy of photo 3 (the generator's copy row).
+    assert_eq!(copy.master, Some(3));
 }
 
 #[test]
@@ -100,11 +103,10 @@ fn ratings_match_the_fixture_counts() {
     // NULL and 0 both map to 0 stars.
     assert_eq!(count(0), small::RATING_NULL + small::RATING_ZERO);
     for stars in 1..=5_u8 {
-        // The virtual copy is not part of the result.
-        let skipped_here = i64::from(stars == VIRTUAL_COPY_RATING);
+        // The virtual copy is part of the result and keeps its own rating.
         assert_eq!(
             count(stars),
-            small::RATING_STARS[(stars - 1) as usize] - skipped_here,
+            small::RATING_STARS[(stars - 1) as usize],
             "photos with {stars} stars"
         );
     }
@@ -145,7 +147,7 @@ fn paths_lie_below_their_root_folders() {
 fn photos_without_files_still_read_with_stored_paths() {
     let dir = tempfile::tempdir().unwrap();
     let (photos, report) = read_photos(&without_files(dir.path()));
-    assert_eq!(photos.len() as i64, small::PHOTOS - small::VIRTUAL_COPIES);
+    assert_eq!(photos.len() as i64, small::PHOTOS);
     assert_eq!(report.read_count() as i64, small::PHOTOS);
     let paths: Vec<String> = photos.iter().map(|p| norm(&p.path)).collect();
     assert!(
@@ -166,11 +168,10 @@ fn missing_originals_are_dropped_with_a_reason() {
     let (photos, mut report) = read_photos(&with_files(dir.path()));
     let read_before = report.read_count();
     let kept = drop_missing_originals(photos, &mut report);
-    let missing_non_copies = small::MISSING_PHOTO_IDS.len() as i64 - small::VIRTUAL_COPIES;
-    assert_eq!(
-        kept.len() as i64,
-        small::PHOTOS - small::VIRTUAL_COPIES - missing_non_copies
-    );
+    // The virtual copy is returned by the reader (T03), and its original is
+    // missing too, so it is dropped here like any other missing original.
+    let missing = small::MISSING_PHOTO_IDS.len() as i64;
+    assert_eq!(kept.len() as i64, small::PHOTOS - missing);
     for id in small::MISSING_FILE_IDS {
         assert!(!ids(&kept).contains(&id), "photo {id} should be dropped");
     }
@@ -181,7 +182,7 @@ fn missing_originals_are_dropped_with_a_reason() {
         .iter()
         .filter(|s| s.reason.contains("missing"))
         .count();
-    assert_eq!(missing_reasons as i64, missing_non_copies);
+    assert_eq!(missing_reasons as i64, missing);
 }
 
 #[test]
@@ -275,10 +276,8 @@ fn assert_one_extra_skip(sql: &str, photo_ids: &[i64], reason_part: &str) {
     for id in photo_ids {
         assert!(!ids(&photos).contains(id), "photo {id} should be skipped");
     }
-    assert_eq!(
-        report.skipped_count(),
-        small::VIRTUAL_COPIES as usize + photo_ids.len()
-    );
+    // Virtual copies are not skipped any more (T03); only the broken rows are.
+    assert_eq!(report.skipped_count(), photo_ids.len());
     assert_eq!(report.read_count(), photos.len() + report.skipped_count());
     assert!(
         report

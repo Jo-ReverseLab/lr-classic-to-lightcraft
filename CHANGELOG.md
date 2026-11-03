@@ -14,7 +14,8 @@ The project has not made a release yet.
   unsaved `-wal` or `-journal` changes are pending. A checksum before and
   after each run proves the catalog is unchanged.
 - Reading of folders and photos, with a check that the original files exist.
-  Videos and virtual copies are skipped with a reason.
+  Videos are skipped with a reason; a virtual copy is converted with its
+  master and created once in LightCraft.
 - Path mapping (`--map OLD=NEW`) for moved catalogs and photo folders, with
   the same behaviour on every platform.
 - Keywords with their hierarchy, synonyms and attributes (export flags,

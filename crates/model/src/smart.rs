@@ -151,13 +151,6 @@ mod tests {
         }
     }
 
-    fn all(rules: Vec<SmartRule>) -> SmartRules {
-        SmartRules {
-            combine: SmartCombine::Intersect,
-            rules,
-        }
-    }
-
     #[test]
     fn combine_texts() {
         assert_eq!(

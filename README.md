@@ -95,7 +95,7 @@ translates exactly; otherwise they are skipped. A collection whose parent
 is missing, skipped, not a collection set or part of a cycle is skipped,
 and so is everything below it. Empty collections are kept. Members keep
 Lightroom's order; a member is skipped if its photo is not converted (for
-example a missing original or a virtual copy), if it repeats a photo
+example a missing original), if it repeats a photo
 already in the collection, if its collection is skipped, or if it belongs
 to a collection set, which holds no photos. Collection names never appear
 in the output or in the report.
@@ -122,8 +122,8 @@ members under `quick` as `{"members": [...]}` (sorted global ids).
 
 Folder stacks are read with their members, the top photo first. Members
 are ordered by Lightroom's position (the top photo has position 1), then by
-row id. A member is skipped if its photo is not converted (a virtual copy, a
-video, a missing original or an unknown id) or if the photo is already in a
+row id. A member is skipped if its photo is not converted (a video, a missing
+original or an unknown id) or if the photo is already in a
 stack with a smaller id; a stack left with fewer than two photos is skipped
 with the reason `fewer than two converted photos`, together with its
 members. A line `stack details: collapsed N (written expanded), no top
@@ -135,7 +135,14 @@ LightCraft cannot read videos, so they are skipped with the reason
 `video files are not supported by LightCraft`. A photo counts as a video if
 Lightroom stores its format as `VIDEO` or its file extension is one of mov,
 mp4, m4v, avi, mts, m2ts, 3gp, mpg, mpeg, wmv or mkv (any letter case).
-Virtual copies keep their own reason, even of a video.
+
+A virtual copy is converted together with its master: it keeps its own
+rating, flag, label, keywords, title and caption, and the writer creates it
+once in LightCraft with `photo.virtualCopy` (recorded in the mapping file, so
+a later run never creates it twice). A copy whose master is not converted (a
+video, a missing original, ...) is skipped with the reason
+`virtual copy of ... cannot be created`; its collection and stack memberships
+are skipped with it.
 
 Each photo keeps its flag: picked, rejected or none. A stored flag value
 other than pick, reject or none is converted as no flag and counted as
@@ -624,7 +631,8 @@ counts the smart collections converted as smart albums.
 ### Known limits
 
 - Videos are skipped (`video files are not supported by LightCraft`).
-- Virtual copies are skipped; so are their collection and stack memberships.
+- A virtual copy is converted with its master; a copy whose master is not
+  converted (for example a video) is skipped with its memberships.
 - Smart collections become smart albums only when every rule translates
   exactly, which currently means star-rating rules; all others are only
   reported, with a code.

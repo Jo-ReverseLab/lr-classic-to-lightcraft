@@ -245,9 +245,6 @@ fn skipped_assignments_have_exact_reasons() {
     let dir = tempfile::tempdir().unwrap();
     let r = run(&edge_fixture(dir.path()));
     let expected = sorted(vec![
-        // Virtual copy photo 20 (small fixture's own assignment, and the extra).
-        "assignment 20: photo 20 is skipped or unknown".to_string(),
-        "assignment 35: photo 20 is skipped or unknown".to_string(),
         // Missing photo.
         "assignment 34: photo 999 is skipped or unknown".to_string(),
         // Skipped keywords: `|`, empty, below empty, other empty.
@@ -263,7 +260,9 @@ fn skipped_assignments_have_exact_reasons() {
 fn skipped_photo_has_no_keyword_entry() {
     let dir = tempfile::tempdir().unwrap();
     let r = run(&edge_fixture(dir.path()));
-    assert!(!r.data.assignments.contains_key(&20));
+    // The virtual copy 20 converts with its master (T03) and keeps its own
+    // assignments; the unknown photo 999 has none.
+    assert!(r.data.assignments.contains_key(&20));
     assert!(!r.data.assignments.contains_key(&999));
 }
 

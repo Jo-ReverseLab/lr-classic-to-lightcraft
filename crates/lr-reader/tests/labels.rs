@@ -7,8 +7,9 @@
 //!   is exactly the stored string (no trimming, no normalisation, no case
 //!   change).
 //! - the empty string, NULL and non-text values give no entry (no label).
-//! - photos that are skipped (virtual copy, missing file row, ...) get no
-//!   entry, even if their label is set.
+//! - photos that are skipped (missing file row, ...) get no entry, even if
+//!   their label is set. A virtual copy is returned with its master (T03), so
+//!   its own label is read.
 //! - Labels do not change `photos`: same list as before, same `read` /
 //!   `skipped` counts, no extra skip reason. The `Photo::label` field stays
 //!   `None` here; mapping to `ColorLabel` is the CLI's job (it needs the
@@ -59,7 +60,8 @@ fn english_labels_are_returned_raw() {
             (6, "Green"),
             (7, "Blue"),
             (8, "Purple"),
-            (9, "Red")
+            (9, "Red"),
+            (20, "Green")
         ]
     );
 }
@@ -77,7 +79,8 @@ fn german_labels_are_returned_raw_in_nfc() {
             (6, "Gr\u{fc}n"),
             (7, "Blau"),
             (8, "Lila"),
-            (9, "Rot")
+            (9, "Rot"),
+            (20, "Gr\u{fc}n")
         ]
     );
 }
@@ -95,7 +98,8 @@ fn odd_labels_are_not_trimmed_or_normalised() {
             (6, "Red "),
             (7, label_edge::CUSTOM_NAME),
             (8, "Green"),
-            (9, "Red")
+            (9, "Red"),
+            (20, "Green")
         ]
     );
 }
@@ -116,13 +120,14 @@ fn empty_string_and_null_mean_no_label() {
 }
 
 #[test]
-fn skipped_photos_get_no_label_entry() {
+fn returned_photos_get_a_label_entry() {
     // Photo 2 (missing original) is still returned by the reader (the CLI
-    // drops it later); photo 20 is a virtual copy and is not returned.
+    // drops it later); photo 20 is a virtual copy and converts with its
+    // master (T03), so both are returned with their label.
     for f in [Fixture::En, Fixture::De, Fixture::Mixed, Fixture::Odd] {
         let (_d, cat) = fixture(f);
         let (data, _) = read(&cat);
-        assert!(data.color_labels.iter().all(|(id, _)| *id != 20), "{f:?}");
+        assert!(data.color_labels.iter().any(|(id, _)| *id == 20), "{f:?}");
         let returned: Vec<i64> = data.photos.iter().map(|p| p.lightroom_id).collect();
         for (id, _) in &data.color_labels {
             assert!(returned.contains(id), "{f:?}: entry {id} has no photo");

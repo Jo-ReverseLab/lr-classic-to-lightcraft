@@ -231,10 +231,13 @@ fn apply_case(path: &Path, case: HostileCase) -> Result<()> {
             &c,
             "UPDATE Adobe_images SET rating = NULL WHERE id_local = 1",
         ),
-        NullPhotoGlobalId => exec(
-            &c,
-            "UPDATE Adobe_images SET id_global = NULL WHERE id_local = 1",
-        ),
+        NullPhotoGlobalId => {
+            make_nullable(&c, "Adobe_images", "id_global NOT NULL,")?;
+            exec(
+                &c,
+                "UPDATE Adobe_images SET id_global = NULL WHERE id_local = 1",
+            )
+        }
         NullPhotoPick => {
             make_nullable(&c, "Adobe_images", "pick NOT NULL,")?;
             exec(&c, "UPDATE Adobe_images SET pick = NULL WHERE id_local = 1")

@@ -704,8 +704,11 @@ fn videos_are_counted_by_code() {
     let r = dry_run(&cat).report;
     assert_eq!(r["photos"]["by_code"]["video"], 3);
     assert_eq!(r["photos"]["videos"], 3);
-    assert_eq!(r["photos"]["by_code"]["virtual_copy"], 2);
-    assert_eq!(r["photos"]["by_code"]["missing"], 1);
+    // Only the virtual copy 21 of video 4 keeps the virtual-copy code; the
+    // copy 20 of photo 3 converts with its master (T03) and is dropped as a
+    // missing original.
+    assert_eq!(r["photos"]["by_code"]["virtual_copy"], 1);
+    assert_eq!(r["photos"]["by_code"]["missing"], 2);
     assert_eq!(r["skipped_by_code"]["video"], 3);
     // Every other fixture: videos == by_code.video.
     for (label, run) in all_runs().iter() {

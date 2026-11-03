@@ -106,11 +106,14 @@ fn broken_blobs_give_none_keep_the_photo_and_are_listed() {
     for id in e::UNREADABLE_IDS {
         assert_eq!(title(&data, id), None, "photo {id}");
     }
-    assert_eq!(data.title_unreadable, e::UNREADABLE_IDS.to_vec());
-    // Missing title, NULL and empty are not "unreadable"; skipped photos
-    // (20 has a broken blob) are never listed.
+    // The virtual copy 20 converts with its master (T03) and has a broken
+    // blob too, so it is listed.
+    let mut want = e::UNREADABLE_IDS.to_vec();
+    want.push(20);
+    assert_eq!(data.title_unreadable, want);
+    // Missing title, NULL and empty are not "unreadable".
     assert!(!data.title_unreadable.contains(&e::NO_TITLE_ID));
-    assert!(!data.title_unreadable.contains(&20));
+    assert!(data.title_unreadable.contains(&20));
 }
 
 #[test]

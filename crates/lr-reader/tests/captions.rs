@@ -87,8 +87,10 @@ fn captions_do_not_change_photos_or_counts() {
     assert_eq!(ids(&data), ids(&plain_data));
     assert_eq!(report.read_count(), plain_report.read_count());
     assert_eq!(report.skipped_count(), plain_report.skipped_count());
-    // Virtual copy 20 is not returned, whatever its caption.
-    assert!(!ids(&data).contains(&20));
+    // Virtual copy 20 is converted with its master (T03), so it is returned
+    // exactly as in the plain catalog; its caption does not change that.
+    assert!(ids(&data).contains(&20));
+    assert_eq!(ids(&data), ids(&plain_data));
     assert!(plain_data.photos.iter().all(|p| p.caption.is_none()));
 }
 

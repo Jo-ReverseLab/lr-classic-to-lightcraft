@@ -117,7 +117,8 @@ Carries the area fields (`read`, `converted`, `skipped`, `by_code`) plus:
 | `photos.labels.purple` | integer | |
 | `photos.labels.none` | integer | empty or NULL label |
 | `photos.labels.custom` | integer | label not in the chosen set; converted without a label |
-| `photos.labels.label_set` | string | `en`, `de`, `file` or `none` |
+| `photos.labels.label_set` | string | `auto`, `en`, `de` or `file` |
+| `photos.labels.matched_sets` | array | under `auto`, the standard sets that matched at least one name, in the order `en`, `de`; empty for a fixed set |
 | `photos.labels.custom_reasons` | array | one entry per custom photo, ascending by Lightroom id |
 
 Each `custom_reasons` entry is `{"reason": string}`. The reason is the fixed
@@ -190,8 +191,8 @@ several).
 | `writer.planned` | object | dry run | see below |
 | `writer.photos_skipped` | array | dry run | each `{"reason","code"}` |
 | `writer.photos_skipped_by_code` | object | dry run | |
-| `writer.keywords_skipped` | array | dry run | |
-| `writer.keywords_skipped_by_code` | object | dry run | |
+| `writer.keywords_not_created` | array | dry run | |
+| `writer.keywords_not_created_by_code` | object | dry run | |
 | `writer.members_skipped` | array | dry run | album members |
 | `writer.members_skipped_by_code` | object | dry run | |
 | `writer.stacks_skipped` | array | dry run | |
@@ -255,8 +256,8 @@ key.
 | `writer.photos_skipped_by_code` | object | apply | |
 | `writer.photos_incomplete` | array | apply | a photo whose update or the select before it failed (resent next run) |
 | `writer.photos_incomplete_by_code` | object | apply | |
-| `writer.keywords_skipped` | array | apply | |
-| `writer.keywords_skipped_by_code` | object | apply | |
+| `writer.keywords_not_created` | array | apply | |
+| `writer.keywords_not_created_by_code` | object | apply | |
 | `writer.folders_created` | integer | apply | |
 | `writer.albums_created` | integer | apply | |
 | `writer.collections_known` | integer | apply | already in the mapping file |
@@ -297,7 +298,7 @@ key.
 
 **Guarantees (apply, complete run).**
 - `photos.converted == photos_imported + photos_existing + photos_updated + photos_unchanged + len(photos_skipped)`. (`photos_incomplete` is a subset of imported/existing/updated, not part of this partition.)
-- `keywords.converted == keywords_created + len(keywords_skipped)`.
+- `keywords.converted == keywords_created + len(keywords_not_created)`.
 - `collections.converted == folders_created + albums_created + collections_known + collections_existing + len(collections_skipped)`. (`collections_incomplete` is a subset of created/existing.)
 - `stacks.converted == stacks_grouped + stacks_known + len(stacks_skipped)`. (`stacks_incomplete` is a subset of grouped.)
 - smart: `collections.smart == smart_created + smart_known + smart_existing + len(smart_skipped)`.

@@ -1,0 +1,553 @@
+{
+  "tool_version": "0.1.0",
+  "catalog_version": "1500000",
+  "dry_run": true,
+  "catalog_unchanged": true,
+  "folders": {
+    "read": 6,
+    "converted": 6,
+    "skipped": [],
+    "by_code": {}
+  },
+  "photos": {
+    "read": 21,
+    "converted": 15,
+    "skipped": [
+      {
+        "reason": "photo 2: video files are not supported by LightCraft",
+        "code": "video"
+      },
+      {
+        "reason": "photo 4: video files are not supported by LightCraft",
+        "code": "video"
+      },
+      {
+        "reason": "photo 5: video files are not supported by LightCraft",
+        "code": "video"
+      },
+      {
+        "reason": "photo 21: virtual copy of photo 4 cannot be created, the master was not converted",
+        "code": "virtual_copy"
+      },
+      {
+        "reason": "photo 3: original file is missing",
+        "code": "missing"
+      },
+      {
+        "reason": "photo 20: original file is missing",
+        "code": "missing"
+      }
+    ],
+    "by_code": {
+      "missing": 2,
+      "video": 3,
+      "virtual_copy": 1
+    },
+    "videos": 3,
+    "flags": {
+      "pick": 1,
+      "reject": 1,
+      "none": 10,
+      "unknown": 3
+    },
+    "labels": {
+      "red": 1,
+      "yellow": 0,
+      "green": 1,
+      "blue": 1,
+      "purple": 1,
+      "none": 11,
+      "custom": 0,
+      "label_set": "auto",
+      "matched_sets": [
+        "en"
+      ],
+      "custom_reasons": []
+    },
+    "captions": 1,
+    "copyrights": 1,
+    "creators": 3,
+    "titles": 5,
+    "titles_unreadable": 4
+  },
+  "collections": {
+    "read": 47,
+    "converted": 14,
+    "skipped": [
+      {
+        "reason": "collection 16: collection type \"com.adobe.ag.webGallery\" is not converted",
+        "code": "collection_kind_unsupported"
+      },
+      {
+        "reason": "collection 17: collection type \"com.adobe.ag.print\" is not converted",
+        "code": "collection_kind_unsupported"
+      },
+      {
+        "reason": "collection 18: parent 9999 is missing",
+        "code": "parent_missing"
+      },
+      {
+        "reason": "collection 19: parent 4 is not a collection set",
+        "code": "parent_not_set"
+      },
+      {
+        "reason": "collection 20: parent 13 is skipped",
+        "code": "parent_skipped"
+      },
+      {
+        "reason": "collection 21: parent 18 is not a collection set",
+        "code": "parent_not_set"
+      },
+      {
+        "reason": "collection 22: parent 21 is skipped",
+        "code": "parent_skipped"
+      },
+      {
+        "reason": "collection 23: parent chain forms a cycle",
+        "code": "parent_cycle"
+      },
+      {
+        "reason": "collection 24: parent chain forms a cycle",
+        "code": "parent_cycle"
+      },
+      {
+        "reason": "collection 25: parent chain forms a cycle",
+        "code": "parent_cycle"
+      },
+      {
+        "reason": "collection 102: smart collection is not converted (criterion \"pick\" has no exact LightCraft equivalent)",
+        "code": "smart_untranslatable"
+      },
+      {
+        "reason": "collection 103: smart collection is not converted (criterion \"labelColor\" has no exact LightCraft equivalent)",
+        "code": "smart_untranslatable"
+      },
+      {
+        "reason": "collection 104: smart collection is not converted (criterion \"keywords\" has no exact LightCraft equivalent)",
+        "code": "smart_untranslatable"
+      },
+      {
+        "reason": "collection 105: smart collection is not converted (criterion \"keywords\" has no exact LightCraft equivalent)",
+        "code": "smart_untranslatable"
+      },
+      {
+        "reason": "collection 106: smart collection is not converted (criterion \"captureTime\" has no exact LightCraft equivalent)",
+        "code": "smart_untranslatable"
+      },
+      {
+        "reason": "collection 107: smart collection is not converted (criterion \"touchTime\" has no exact LightCraft equivalent)",
+        "code": "smart_untranslatable"
+      },
+      {
+        "reason": "collection 108: smart collection is not converted (criterion \"fileFormat\" has no exact LightCraft equivalent)",
+        "code": "smart_untranslatable"
+      },
+      {
+        "reason": "collection 109: smart collection is not converted (criterion \"labelColor\" has no exact LightCraft equivalent)",
+        "code": "smart_untranslatable"
+      },
+      {
+        "reason": "collection 110: smart collection is not converted (criterion \"zyxCriterion\" has no exact LightCraft equivalent)",
+        "code": "smart_untranslatable"
+      },
+      {
+        "reason": "collection 111: smart collection is not converted (criterion \"rating\" has no exact LightCraft equivalent)",
+        "code": "smart_untranslatable"
+      },
+      {
+        "reason": "collection 112: smart collection is not converted (criterion \"keywords\" has no exact LightCraft equivalent)",
+        "code": "smart_untranslatable"
+      },
+      {
+        "reason": "collection 113: smart collection is not converted (no criteria)",
+        "code": "smart_no_criteria"
+      },
+      {
+        "reason": "collection 114: smart collection is not converted (criterion \"pick\" has no exact LightCraft equivalent)",
+        "code": "smart_untranslatable"
+      },
+      {
+        "reason": "collection 13: smart collection is not converted (unreadable rules)",
+        "code": "smart_unreadable"
+      },
+      {
+        "reason": "collection 121: smart collection is not converted (unreadable rules)",
+        "code": "smart_unreadable"
+      },
+      {
+        "reason": "collection 122: smart collection is not converted (unreadable rules)",
+        "code": "smart_unreadable"
+      },
+      {
+        "reason": "collection 123: smart collection is not converted (unreadable rules)",
+        "code": "smart_unreadable"
+      },
+      {
+        "reason": "collection 124: smart collection is not converted (unreadable rules)",
+        "code": "smart_unreadable"
+      },
+      {
+        "reason": "collection 125: smart collection is not converted (unreadable rules)",
+        "code": "smart_unreadable"
+      },
+      {
+        "reason": "collection 126: smart collection is not converted (unreadable rules)",
+        "code": "smart_unreadable"
+      },
+      {
+        "reason": "collection 127: smart collection is not converted (unreadable rules)",
+        "code": "smart_unreadable"
+      },
+      {
+        "reason": "collection 128: smart collection is not converted (unreadable rules)",
+        "code": "smart_unreadable"
+      },
+      {
+        "reason": "collection 129: smart collection is not converted (unreadable rules)",
+        "code": "smart_unreadable"
+      }
+    ],
+    "by_code": {
+      "collection_kind_unsupported": 2,
+      "parent_cycle": 3,
+      "parent_missing": 1,
+      "parent_not_set": 2,
+      "parent_skipped": 2,
+      "smart_no_criteria": 1,
+      "smart_unreadable": 10,
+      "smart_untranslatable": 12
+    },
+    "albums": 9,
+    "folders": 3,
+    "duplicate_names": 1,
+    "quick": 1,
+    "smart": 1
+  },
+  "collection_members": {
+    "read": 29,
+    "converted": 17,
+    "skipped": [
+      {
+        "reason": "photo 19: collection 3 is a collection set and holds no photos",
+        "code": "collection_is_set"
+      },
+      {
+        "reason": "photo 4: skipped or unknown photo, not added to collection 4",
+        "code": "photo_not_converted"
+      },
+      {
+        "reason": "photo 5: skipped or unknown photo, not added to collection 4",
+        "code": "photo_not_converted"
+      },
+      {
+        "reason": "photo 15: duplicate member of collection 7",
+        "code": "duplicate_member"
+      },
+      {
+        "reason": "photo 20: skipped or unknown photo, not added to collection 8",
+        "code": "photo_not_converted"
+      },
+      {
+        "reason": "photo 999: skipped or unknown photo, not added to collection 8",
+        "code": "photo_not_converted"
+      },
+      {
+        "reason": "photo 1: collection skipped (collection 13)",
+        "code": "collection_skipped"
+      },
+      {
+        "reason": "photo 20: skipped or unknown photo, not added to collection 14",
+        "code": "photo_not_converted"
+      },
+      {
+        "reason": "photo 999: skipped or unknown photo, not added to collection 14",
+        "code": "photo_not_converted"
+      },
+      {
+        "reason": "photo 4: collection skipped (collection 16)",
+        "code": "collection_skipped"
+      },
+      {
+        "reason": "photo 5: collection skipped (collection 18)",
+        "code": "collection_skipped"
+      },
+      {
+        "reason": "photo 15: collection skipped (collection 22)",
+        "code": "collection_skipped"
+      }
+    ],
+    "by_code": {
+      "collection_is_set": 1,
+      "collection_skipped": 4,
+      "duplicate_member": 1,
+      "photo_not_converted": 6
+    }
+  },
+  "stacks": {
+    "read": 8,
+    "converted": 6,
+    "skipped": [
+      {
+        "reason": "stack 3: fewer than two converted photos",
+        "code": "too_few_photos"
+      },
+      {
+        "reason": "stack 4: fewer than two converted photos",
+        "code": "too_few_photos"
+      }
+    ],
+    "by_code": {
+      "too_few_photos": 2
+    },
+    "collapsed": 1,
+    "no_top": 1
+  },
+  "stack_members": {
+    "read": 20,
+    "converted": 13,
+    "skipped": [
+      {
+        "reason": "photo 11: stack 3 is skipped",
+        "code": "stack_skipped"
+      },
+      {
+        "reason": "photo 20: skipped or unknown photo, not added to stack 3",
+        "code": "photo_not_converted"
+      },
+      {
+        "reason": "photo 12: stack 4 is skipped",
+        "code": "stack_skipped"
+      },
+      {
+        "reason": "photo 4: skipped or unknown photo, not added to stack 4",
+        "code": "photo_not_converted"
+      },
+      {
+        "reason": "photo 5: skipped or unknown photo, not added to stack 5",
+        "code": "photo_not_converted"
+      },
+      {
+        "reason": "photo 16: already in stack 6",
+        "code": "already_in_stack"
+      },
+      {
+        "reason": "photo 999: skipped or unknown photo, not added to stack 8",
+        "code": "photo_not_converted"
+      }
+    ],
+    "by_code": {
+      "already_in_stack": 1,
+      "photo_not_converted": 4,
+      "stack_skipped": 2
+    }
+  },
+  "keywords": {
+    "read": 17,
+    "converted": 12,
+    "skipped": [
+      {
+        "reason": "keyword 12: name is empty",
+        "code": "name_empty"
+      },
+      {
+        "reason": "keyword 14: name contains a vertical bar",
+        "code": "name_has_bar"
+      },
+      {
+        "reason": "keyword 16: name is empty",
+        "code": "name_empty"
+      },
+      {
+        "reason": "keyword 17: parent keyword 16 is skipped",
+        "code": "parent_skipped"
+      },
+      {
+        "reason": "keyword 18: parent keyword 17 is skipped",
+        "code": "parent_skipped"
+      }
+    ],
+    "by_code": {
+      "name_empty": 2,
+      "name_has_bar": 1,
+      "parent_skipped": 2
+    },
+    "persons": 1,
+    "not_exported": 1,
+    "no_parents_on_export": 0,
+    "no_synonyms_on_export": 0,
+    "unknown_type": 0,
+    "unused": 2
+  },
+  "keyword_assignments": {
+    "read": 37,
+    "converted": 21,
+    "skipped": [
+      {
+        "reason": "assignment 2: photo 2 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 3: photo 3 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 4: photo 4 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 5: photo 5 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 20: photo 20 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 22: photo 2 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 23: photo 3 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 24: photo 4 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 25: photo 5 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 31: keyword 14 is skipped",
+        "code": "assignment_keyword_skipped"
+      },
+      {
+        "reason": "assignment 32: keyword 16 is skipped",
+        "code": "assignment_keyword_skipped"
+      },
+      {
+        "reason": "assignment 33: photo 2 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 34: photo 999 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 35: photo 20 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 36: photo 4 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      },
+      {
+        "reason": "assignment 37: photo 5 is skipped or unknown",
+        "code": "assignment_photo_skipped"
+      }
+    ],
+    "by_code": {
+      "assignment_keyword_skipped": 2,
+      "assignment_photo_skipped": 14
+    }
+  },
+  "keyword_synonyms": {
+    "read": 6,
+    "converted": 2,
+    "skipped": [
+      {
+        "reason": "synonym 3: keyword 16 is skipped",
+        "code": "keyword_skipped"
+      },
+      {
+        "reason": "synonym 4: keyword 999 is unknown",
+        "code": "keyword_unknown"
+      },
+      {
+        "reason": "synonym 5: name is empty",
+        "code": "name_empty"
+      },
+      {
+        "reason": "synonym 6: name is empty",
+        "code": "name_empty"
+      }
+    ],
+    "by_code": {
+      "keyword_skipped": 1,
+      "keyword_unknown": 1,
+      "name_empty": 2
+    }
+  },
+  "skipped_by_code": {
+    "already_in_stack": 1,
+    "assignment_keyword_skipped": 2,
+    "assignment_photo_skipped": 14,
+    "collection_is_set": 1,
+    "collection_kind_unsupported": 2,
+    "collection_skipped": 4,
+    "duplicate_member": 1,
+    "keyword_skipped": 1,
+    "keyword_unknown": 1,
+    "missing": 2,
+    "name_empty": 4,
+    "name_has_bar": 1,
+    "parent_cycle": 3,
+    "parent_missing": 1,
+    "parent_not_set": 2,
+    "parent_skipped": 4,
+    "photo_not_converted": 10,
+    "smart_no_criteria": 1,
+    "smart_unreadable": 10,
+    "smart_untranslatable": 12,
+    "stack_skipped": 2,
+    "too_few_photos": 2,
+    "video": 3,
+    "virtual_copy": 1
+  },
+  "ratings": {
+    "0": 4,
+    "1": 3,
+    "2": 2,
+    "3": 3,
+    "4": 2,
+    "5": 1
+  },
+  "writer": {
+    "planned": {
+      "keywords": 12,
+      "photos": 15,
+      "updates": 32,
+      "photos_updated": 0,
+      "photos_unchanged": 0,
+      "folders": 3,
+      "albums": 9,
+      "members_added": 14,
+      "members_removed": 0,
+      "collections_known": 0,
+      "collections_removed": 0,
+      "stacks": 6,
+      "stacks_known": 0,
+      "stack_members_removed": 0,
+      "quick_add": 3,
+      "quick_already": 0,
+      "quick_removed": 0,
+      "smart_albums": 1,
+      "smart_known": 0,
+      "smart_rules_changed": 0,
+      "smart_no_longer_translatable": 0
+    },
+    "photos_skipped": [],
+    "photos_skipped_by_code": {},
+    "keywords_not_created": [],
+    "keywords_not_created_by_code": {},
+    "members_skipped": [],
+    "members_skipped_by_code": {},
+    "stacks_skipped": [],
+    "stacks_skipped_by_code": {},
+    "quick_skipped": [],
+    "quick_skipped_by_code": {},
+    "smart_skipped": [],
+    "smart_skipped_by_code": {}
+  }
+}

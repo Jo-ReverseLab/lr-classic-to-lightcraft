@@ -177,7 +177,10 @@ mod tests {
     #[test]
     fn report_and_script_pointing_at_the_same_file_is_rejected() {
         let same = PathBuf::from("out.json");
-        let err = check_targets(&options_with(Some(same.clone()), Some(same))).unwrap_err();
+        let err = match check_targets(&options_with(Some(same.clone()), Some(same))) {
+            Ok(_) => panic!("expected an error"),
+            Err(err) => err,
+        };
         assert!(
             err.contains("--report and --script name the same file"),
             "{err}"

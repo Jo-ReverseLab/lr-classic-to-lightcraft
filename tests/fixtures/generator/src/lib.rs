@@ -68,12 +68,12 @@ pub mod keyword_edge {
     pub const KEYWORD_PERSON_ID: i64 = 19;
     /// Rows in `AgLibraryKeywordImage` (small: ids 1-30, extra: ids 31-37).
     pub const ASSIGNMENTS: i64 = 37;
-    /// Assignment ids that cannot be converted: 20 (virtual copy photo 20),
-    /// 31 (pipe keyword), 32 (empty keyword), 33 (keyword under empty one),
-    /// 34 (photo 999 does not exist), 35 (virtual copy photo 20),
-    /// 36 (empty keyword 12).
-    pub const ASSIGNMENTS_SKIPPED: [i64; 7] = [20, 31, 32, 33, 34, 35, 36];
-    pub const ASSIGNMENTS_CONVERTED: i64 = 30;
+    /// Assignment ids that cannot be converted: 31 (pipe keyword), 32 (empty
+    /// keyword), 33 (keyword under empty one), 34 (photo 999 does not exist),
+    /// 36 (empty keyword 12). The virtual copy 20 converts with its master
+    /// (T03), so assignments 20 and 35 convert too.
+    pub const ASSIGNMENTS_SKIPPED: [i64; 5] = [31, 32, 33, 34, 36];
+    pub const ASSIGNMENTS_CONVERTED: i64 = 32;
     /// Rows in `AgLibraryKeywordSynonym` (small fixture: none). Ids 1 and 2
     /// belong to keyword 3 (id 1 sorts after id 2 alphabetically, so id order
     /// matters), id 3 to the skipped keyword 16, id 4 to the non-existent
@@ -155,6 +155,9 @@ pub mod keyword_attr {
     pub const UNUSED: i64 = 4;
     /// Ids of the unused converted keywords.
     pub const UNUSED_IDS: [i64; 4] = [11, 20, 23, 27];
+    /// Reader level: photo 20 (virtual copy) converts with its master (T03),
+    /// so keyword 27 is used there; the CLI still drops photo 20.
+    pub const UNUSED_READER: i64 = 3;
     /// Rows in `AgLibraryKeywordImage` (small: 30, plus 12 added).
     pub const ASSIGNMENTS: i64 = 42;
     /// Converted assignments: the 12 added ones minus the one on photo 20.
@@ -191,6 +194,10 @@ pub mod flag_edge {
     ];
     pub const PICK_IDS: [i64; 2] = [4, 8];
     pub const REJECT_IDS: [i64; 2] = [5, 9];
+    /// Reader level: the virtual copy 20 converts with its master (T03), so
+    /// its pick is returned too.
+    pub const PICK_IDS_READER: [i64; 3] = [4, 8, 20];
+    pub const REJECT_IDS_READER: [i64; 3] = [2, 5, 9];
     pub const UNKNOWN_IDS: [i64; 3] = [10, 11, 12];
     /// Photos 6 and 7 plus every photo not listed above.
     pub const PHOTOS: i64 = 20;
@@ -420,8 +427,9 @@ pub mod video_edge {
     /// Not videos although they look similar: 6 (extension `mpo`, a still
     /// image format) and 7 (base name `clip.mp4`, extension `jpg`).
     pub const LOOKALIKE_IDS: [i64; 2] = [6, 7];
-    /// Virtual copies: 20 (of photo 3) and 21 (of video 4). They keep the
-    /// virtual copy reason and are not counted as videos.
+    /// Virtual copies: 20 (of photo 3) and 21 (of video 4). At reader level
+    /// 20 converts with its master (T03); 21 keeps the virtual-copy reason
+    /// because its master is a video. Neither is counted as a video.
     pub const VIRTUAL_COPY_IDS: [i64; 2] = [20, 21];
     /// Photos with a missing original that are not videos: only photo 3.
     pub const MISSING_ORIGINAL_IDS: [i64; 1] = [3];
@@ -460,13 +468,30 @@ pub mod stack_edge {
     ];
     pub const CONVERTED: i64 = 6;
     /// Stack 3 (original 11 plus virtual copy 20) and stack 4 (photo 12 plus
-    /// video 4) keep fewer than two photos.
+    /// video 4) keep fewer than two photos (CLI: photo 20's original is
+    /// missing, so it is dropped first).
     pub const SKIPPED_STACKS: [i64; 2] = [3, 4];
     pub const SKIPPED: i64 = 2;
     pub const MEMBERS_CONVERTED: i64 = 13;
     /// Member rows skipped: stack 3 (2 rows), stack 4 (2), video 5, photo
     /// 16 in stack 7, photo 999.
     pub const MEMBERS_SKIPPED: i64 = 7;
+    /// Reader level (before missing originals are dropped): virtual copy 20
+    /// converts with its master (T03), so stack 3 also converts.
+    pub const CONVERTED_READER: i64 = 7;
+    pub const SKIPPED_READER: i64 = 1;
+    pub const SKIPPED_STACKS_READER: [i64; 1] = [4];
+    pub const MEMBERS_CONVERTED_READER: i64 = 15;
+    pub const MEMBERS_SKIPPED_READER: i64 = 5;
+    pub const STACK_MEMBERS_READER: [(i64, &[i64]); 7] = [
+        (1, &[6, 7]),
+        (2, &[9, 10, 8]),
+        (3, &[11, 20]),
+        (5, &[13, 14]),
+        (6, &[15, 16]),
+        (7, &[17, 18]),
+        (8, &[19, 1]),
+    ];
     /// Converted stacks with `collapsed` 1 (stack 2).
     pub const COLLAPSED: i64 = 1;
     /// Converted stacks without a member at position 1 (stack 8).
@@ -503,6 +528,25 @@ pub mod collection_edge {
     pub const MEMBER_ROWS: i64 = 26;
     pub const MEMBERS_CONVERTED: i64 = 16;
     pub const MEMBERS_SKIPPED: i64 = 10;
+    /// Reader level (before missing originals are dropped): virtual copy 20
+    /// converts with its master (T03), so one more member row converts and
+    /// one fewer is skipped. `MEMBERS_SKIPPED_READER` still counts the quick
+    /// collection's row, which converts too.
+    pub const MEMBERS_CONVERTED_READER: i64 = 17;
+    pub const MEMBERS_SKIPPED_READER: i64 = 9;
+    /// [`MEMBERS`] at reader level; album 8 also holds the converted virtual
+    /// copy 20.
+    pub const MEMBERS_READER: [(i64, &[i64]); 9] = [
+        (4, &[4, 5, 1]),
+        (5, &[7, 6, 8]),
+        (6, &[11, 10, 9, 12]),
+        (7, &[15, 16]),
+        (8, &[20, 17]),
+        (9, &[18]),
+        (10, &[]),
+        (11, &[13]),
+        (12, &[14]),
+    ];
     /// Folder ids and the ids of the folders' (converted) albums.
     pub const FOLDER_IDS: [i64; 3] = [1, 2, 3];
     pub const ALBUM_IDS: [i64; 9] = [4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -559,9 +603,10 @@ pub mod collection_edge {
         "Zyx-Cycle-B",
         "Zyx-Self",
     ];
-    /// Member photos that are skipped inside converted albums: virtual
-    /// copy 20 and unknown 999 (album 8), duplicate of 15 (album 7).
-    pub const NOT_CONVERTED_PHOTOS: [i64; 2] = [20, 999];
+    /// Member photos that are skipped inside converted albums: unknown 999
+    /// (album 8), duplicate of 15 (album 7). Virtual copy 20 converts with
+    /// its master (T03).
+    pub const NOT_CONVERTED_PHOTOS: [i64; 1] = [999];
     /// Album 7 stores the pair (7, 15) twice.
     pub const DUPLICATE_MEMBER: (i64, i64) = (7, 15);
     /// Folder 3 has a member row (photo 19).
@@ -1317,9 +1362,13 @@ pub mod quick_edge {
     /// `(photo, position)` rows of the quick collection, in row order. 20 is a
     /// virtual copy and 999 does not exist: both are skipped.
     pub const ROWS: [(i64, f64); 5] = [(1, 3.0), (9, 1.0), (7, 2.0), (20, 4.0), (999, 5.0)];
-    /// The converted members in Lightroom order.
+    /// The converted members in Lightroom order (CLI: photo 20's original is
+    /// missing, so it is dropped before collections are read).
     pub const MEMBERS: [i64; 3] = [9, 7, 1];
     pub const MEMBERS_SKIPPED: i64 = 2;
+    /// Reader level: the virtual copy 20 converts with its master (T03).
+    pub const MEMBERS_READER: [i64; 4] = [9, 7, 1, 20];
+    pub const MEMBERS_SKIPPED_READER: i64 = 1;
 }
 
 /// Writes the collection fixture as `dir/quick.lrcat` with placeholder

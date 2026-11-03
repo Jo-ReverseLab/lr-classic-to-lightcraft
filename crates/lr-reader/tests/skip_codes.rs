@@ -17,7 +17,7 @@ use lrcat_fixtures::{
     write_keyword_edge_catalog, write_small_catalog, write_small_catalog_with_files,
     write_smart_catalog, write_stack_catalog_with_files, write_video_catalog_with_files,
 };
-use model::{Photo, Report, SkipCode};
+use model::{Report, SkipCode};
 use rusqlite::Connection;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -45,12 +45,12 @@ fn exec(path: &Path, sql: &str) {
 #[test]
 fn video_and_virtual_copy_codes() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("video.lrcat");
-    write_video_catalog_with_files(&path).unwrap();
+    let path = write_video_catalog_with_files(dir.path()).unwrap();
     let catalog = Catalog::open(&path).unwrap();
     let mut report = Report::new();
     catalog.photos(&mut report).unwrap();
     has(&report, SkipCode::Video);
+    // The virtual copy of a video keeps the virtual-copy code (T03).
     has(&report, SkipCode::VirtualCopy);
 }
 
@@ -58,7 +58,7 @@ fn video_and_virtual_copy_codes() {
 fn missing_original_code() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("small.lrcat");
-    write_small_catalog_with_files(&dir).unwrap();
+    write_small_catalog_with_files(dir.path()).unwrap();
     let catalog = Catalog::open(&path).unwrap();
     let photos = catalog.photos(&mut Report::new()).unwrap();
     let mut report = Report::new();
@@ -70,7 +70,7 @@ fn missing_original_code() {
 fn photo_row_defect_codes() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("small.lrcat");
-    write_small_catalog_with_files(&dir).unwrap();
+    write_small_catalog_with_files(dir.path()).unwrap();
     // Photo 5: its AgLibraryFile row is gone.
     exec(&path, "DELETE FROM AgLibraryFile WHERE id_local = 5;");
     // Photo 7: its file points at a non-existent folder.
@@ -127,7 +127,6 @@ fn photo_identity_codes() {
 // ---- keywords ----
 
 struct KeywordRead {
-    photos: Vec<Photo>,
     keyword_report: Report,
     assignment_report: Report,
     data: lr_reader::KeywordData,
@@ -143,7 +142,6 @@ fn read_keywords(path: &Path) -> KeywordRead {
         .keywords(&photos, &mut keyword_report, &mut assignment_report)
         .expect("keywords");
     KeywordRead {
-        photos,
         keyword_report,
         assignment_report,
         data,
@@ -311,7 +309,7 @@ fn smart_codes() {
 fn stack_codes() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("stacks.lrcat");
-    write_stack_catalog_with_files(&dir).unwrap();
+    write_stack_catalog_with_files(dir.path()).unwrap();
     let catalog = Catalog::open(&path).unwrap();
     let photos = catalog.photos(&mut Report::new()).unwrap();
     let data = catalog.stack_data(&photos).unwrap();
@@ -329,7 +327,7 @@ fn stack_codes() {
 fn stack_member_unknown_stack() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("stacks.lrcat");
-    write_stack_catalog_with_files(&dir).unwrap();
+    write_stack_catalog_with_files(dir.path()).unwrap();
     exec(
         &path,
         "INSERT INTO AgLibraryFolderStackImage (image, stack) VALUES (1, 999);",
@@ -344,7 +342,7 @@ fn stack_member_unknown_stack() {
 fn stack_member_invalid_stack_id() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("stacks.lrcat");
-    write_stack_catalog_with_files(&dir).unwrap();
+    write_stack_catalog_with_files(dir.path()).unwrap();
     exec(
         &path,
         "INSERT INTO AgLibraryFolderStackImage (image, stack) VALUES (1, NULL);",
@@ -359,7 +357,7 @@ fn stack_member_invalid_stack_id() {
 fn stack_member_both_ids_invalid() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("stacks.lrcat");
-    write_stack_catalog_with_files(&dir).unwrap();
+    write_stack_catalog_with_files(dir.path()).unwrap();
     exec(
         &path,
         "INSERT INTO AgLibraryFolderStackImage (image, stack) VALUES (NULL, NULL);",
@@ -374,7 +372,7 @@ fn stack_member_both_ids_invalid() {
 fn stack_member_invalid_photo_id() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("stacks.lrcat");
-    write_stack_catalog_with_files(&dir).unwrap();
+    write_stack_catalog_with_files(dir.path()).unwrap();
     // stack 1 exists; its member has no photo id.
     exec(
         &path,
@@ -390,7 +388,7 @@ fn stack_member_invalid_photo_id() {
 fn stack_member_duplicate_within_stack() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("stacks.lrcat");
-    write_stack_catalog_with_files(&dir).unwrap();
+    write_stack_catalog_with_files(dir.path()).unwrap();
     // Photo 1 is converted; stack 1 is processed before stack 8 (which also
     // holds photo 1). Two identical rows in stack 1 -> the second is a
     // duplicate member of that stack.

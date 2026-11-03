@@ -22,8 +22,9 @@ fn unused_keywords_are_kept_in_the_result() {
         .iter()
         .filter(|k| !used.iter().any(|u| u.path() == k.path()))
         .collect();
-    assert_eq!(unused.len() as i64, keyword_attr::UNUSED);
-    // Keyword 27 is only assigned to a skipped photo; it is still present.
+    assert_eq!(unused.len() as i64, keyword_attr::UNUSED_READER);
+    // Keyword 27 is assigned to the virtual copy photo 20, which converts at
+    // reader level (T03); the keyword is present either way.
     assert!(
         data.keywords
             .iter()

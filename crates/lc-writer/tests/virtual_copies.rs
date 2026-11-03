@@ -117,13 +117,20 @@ fn second_run_creates_none() {
     let env = env();
     let input = master_and_copy();
     run(&fake, &env, &input).unwrap();
+    // The fake keeps every request; compare only what the second run sends.
+    let mark = fake.commands().len();
     fake.clear_selection();
     // Second run with the state from the first.
     let summary = run(&fake, &env, &input).unwrap();
     assert_eq!(summary.photos_imported, 0);
-    assert!(virtual_copy_calls(&fake).is_empty());
+    let commands = &fake.commands()[mark..];
+    let copies = commands
+        .iter()
+        .filter(|(c, _)| c == "photo.virtualCopy")
+        .count();
+    assert_eq!(copies, 0, "second run created a copy: {commands:?}");
     assert!(
-        fake.commands().iter().all(|(c, _)| c != "library.import"),
+        commands.iter().all(|(c, _)| c != "library.import"),
         "second run imported a photo"
     );
 }

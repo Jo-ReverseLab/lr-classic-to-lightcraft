@@ -34,12 +34,14 @@ use lrcat_fixtures::write_full_catalog_with_files;
 use std::ffi::OsStr;
 use std::fs;
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Output};
 
 /// The golden files are committed next to this test, under `tests/golden/`.
 fn golden_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("golden")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("golden")
 }
 
 /// Names that must never appear in stdout or report.json.
@@ -230,7 +232,14 @@ const COLLECTION_KEYS: &[&str] = &[
 ];
 
 /// `AreaJson` flattened into `StacksJson`, plus the stack sub-counts.
-const STACK_KEYS: &[&str] = &["read", "converted", "skipped", "by_code", "collapsed", "no_top"];
+const STACK_KEYS: &[&str] = &[
+    "read",
+    "converted",
+    "skipped",
+    "by_code",
+    "collapsed",
+    "no_top",
+];
 
 /// `AreaJson` flattened into `KeywordsJson`, plus the keyword sub-counts.
 const KEYWORD_KEYS: &[&str] = &[
@@ -272,6 +281,7 @@ const LABEL_KEYS: &[&str] = &[
     "none",
     "custom",
     "label_set",
+    "matched_sets",
     "custom_reasons",
 ];
 
@@ -303,8 +313,8 @@ const PLANNED_SECTION_KEYS: &[&str] = &[
     "planned",
     "photos_skipped",
     "photos_skipped_by_code",
-    "keywords_skipped",
-    "keywords_skipped_by_code",
+    "keywords_not_created",
+    "keywords_not_created_by_code",
     "members_skipped",
     "members_skipped_by_code",
     "stacks_skipped",
@@ -438,8 +448,7 @@ fn report_keys_match_the_documented_schema() {
         let a = &v[area];
         assert_eq!(
             a["read"].as_u64().unwrap(),
-            a["converted"].as_u64().unwrap()
-                + a["skipped"].as_array().unwrap().len() as u64,
+            a["converted"].as_u64().unwrap() + a["skipped"].as_array().unwrap().len() as u64,
             "{area}: read != converted + skipped"
         );
     }

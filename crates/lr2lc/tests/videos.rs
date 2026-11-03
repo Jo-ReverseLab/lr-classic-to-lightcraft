@@ -151,8 +151,13 @@ fn missing_video_is_a_video_and_virtual_copy_keeps_its_reason() {
     let missing = for_id(3);
     assert_eq!(missing.len(), 1);
     assert!(missing[0].contains("missing"));
+    // Photo 3 is missing; the virtual copy 20 shares its file (T03), so it is
+    // dropped as a missing original too.
     let missing_reasons = reasons.iter().filter(|r| r.contains("missing")).count();
-    assert_eq!(missing_reasons, video_edge::MISSING_ORIGINAL_IDS.len());
+    assert_eq!(missing_reasons, video_edge::MISSING_ORIGINAL_IDS.len() + 1);
+    let copy_missing = for_id(20);
+    assert_eq!(copy_missing.len(), 1);
+    assert!(copy_missing[0].contains("missing"));
 }
 
 #[test]

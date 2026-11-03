@@ -85,16 +85,16 @@ fn counts_balance_and_stacks_are_ascending() {
     let dir = tempfile::tempdir().unwrap();
     let d = read(&fixture(dir.path()));
     assert_eq!(d.report.read_count() as i64, e::STACKS);
-    assert_eq!(d.stacks.len() as i64, e::CONVERTED);
-    assert_eq!(d.report.skipped_count() as i64, e::SKIPPED);
+    assert_eq!(d.stacks.len() as i64, e::CONVERTED_READER);
+    assert_eq!(d.report.skipped_count() as i64, e::SKIPPED_READER);
     assert_eq!(
         d.report.read_count(),
         d.stacks.len() + d.report.skipped_count()
     );
     assert_eq!(d.members.read_count() as i64, e::MEMBER_ROWS);
     let kept: usize = d.stacks.iter().map(|s| s.members.len()).sum();
-    assert_eq!(kept as i64, e::MEMBERS_CONVERTED);
-    assert_eq!(d.members.skipped_count() as i64, e::MEMBERS_SKIPPED);
+    assert_eq!(kept as i64, e::MEMBERS_CONVERTED_READER);
+    assert_eq!(d.members.skipped_count() as i64, e::MEMBERS_SKIPPED_READER);
     assert_eq!(
         d.members.read_count(),
         kept + d.members.skipped_count(),
@@ -111,7 +111,7 @@ fn counts_balance_and_stacks_are_ascending() {
 fn members_are_in_order_top_first() {
     let dir = tempfile::tempdir().unwrap();
     let d = read(&fixture(dir.path()));
-    for (id, members) in e::STACK_MEMBERS {
+    for (id, members) in e::STACK_MEMBERS_READER {
         assert_eq!(stack(&d, id).members, members, "stack {id}");
     }
 }
@@ -139,11 +139,14 @@ fn every_photo_is_in_at_most_one_stack() {
 }
 
 #[test]
-fn virtual_copy_member_is_skipped_and_the_small_stack_with_it() {
+fn virtual_copy_member_converts_with_its_master_and_keeps_the_stack() {
     let dir = tempfile::tempdir().unwrap();
     let d = read(&fixture(dir.path()));
-    assert!(has_reason(&d.members, "", e::VIRTUAL_COPY_MEMBER));
-    for id in e::SKIPPED_STACKS {
+    // Photo 20 is a virtual copy; it converts with its master 11 (T03), so
+    // stack 3 has two converted photos and is grouped.
+    assert_eq!(stack(&d, 3).members, [11, 20]);
+    assert!(!has_reason(&d.members, "", e::VIRTUAL_COPY_MEMBER));
+    for id in e::SKIPPED_STACKS_READER {
         assert!(
             has_reason(&d.report, "fewer than two converted photos", id),
             "stack {id}: {:?}",

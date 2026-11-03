@@ -611,7 +611,8 @@ fn a_lightcraft_side_rename_is_not_detected() {
     assert!(of(&commands, "albums.list").is_empty(), "{commands:?}");
     // The members went to id 5001, which the app still calls "Deep Renamed".
     assert_eq!(fake.album_members(5001), [1001]);
-    let album = fake.albums().iter().find(|a| a.id == 5001).unwrap();
+    let albums = fake.albums();
+    let album = albums.iter().find(|a| a.id == 5001).unwrap();
     assert_eq!(album.name, "Deep Renamed");
     assert_eq!(state(&env)["collections"]["1"]["members"], json!(["g101"]));
 }

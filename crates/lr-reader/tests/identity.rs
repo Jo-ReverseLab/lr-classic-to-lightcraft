@@ -146,7 +146,7 @@ fn unusual_global_ids_are_kept_exactly() {
         .unwrap();
     assert_eq!(k.global_id.as_deref(), Some(odd));
     // Same value in two different tables is no duplicate.
-    assert_eq!(r.photo_report.skipped_count(), 1); // only the virtual copy
+    assert_eq!(r.photo_report.skipped_count(), 0); // the virtual copy converts (T03)
     assert!(
         reasons(&r.keyword_report)
             .iter()
@@ -242,8 +242,9 @@ fn empty_or_blank_photo_global_id_is_skipped() {
         rs.contains(&"photo 5: missing global id".to_string()),
         "{rs:?}"
     );
-    // The virtual copy keeps its own reason: read = kept + skipped.
-    assert_eq!(rs.len(), 3, "{rs:?}");
+    // Only the two missing global ids are skipped; the virtual copy converts
+    // with its master (T03): read = kept + skipped.
+    assert_eq!(rs.len(), 2, "{rs:?}");
     assert_eq!(r.photo_report.read_count(), r.photos.len() + rs.len());
     assert_eq!(
         r.photo_report.read_count() as i64,

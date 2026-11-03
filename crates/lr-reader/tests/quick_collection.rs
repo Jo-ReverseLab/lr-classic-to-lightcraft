@@ -113,18 +113,19 @@ fn members_follow_the_album_rules() {
     let d = read(&quick_fixture(dir.path()), |p| p);
     let quick = d.quick.expect("quick collection");
     assert_eq!(quick.lightroom_id, q::QUICK_ID);
-    assert_eq!(quick.members, q::MEMBERS, "position order, skipped removed");
+    assert_eq!(
+        quick.members,
+        q::MEMBERS_READER,
+        "position order, skipped removed"
+    );
     let r = reasons(&d.members);
-    // Virtual copy 20 and unknown photo 999: skipped, each named once.
-    for photo in [20, 999] {
-        let n = r
-            .iter()
-            .filter(|r| {
-                has_number(r, photo) && has_number(r, 14) && !r.contains("collection skipped")
-            })
-            .count();
-        assert_eq!(n, 1, "photo {photo}: {r:?}");
-    }
+    // Unknown photo 999 is skipped once. Virtual copy 20 converts with its
+    // master (T03), so it is a member above.
+    let n = r
+        .iter()
+        .filter(|r| has_number(r, 999) && has_number(r, 14) && !r.contains("collection skipped"))
+        .count();
+    assert_eq!(n, 1, "photo 999: {r:?}");
     // Balance over albums and the quick collection.
     let kept: usize =
         d.collections.iter().map(|c| c.members.len()).sum::<usize>() + quick.members.len();
@@ -132,7 +133,7 @@ fn members_follow_the_album_rules() {
     // The only collection reason left over by the fixture's single quick row
     // is none about quick.
     assert!(!reasons(&d.report).iter().any(|r| r.contains("quick")));
-    let skipped_quick_rows = q::MEMBERS_SKIPPED as usize;
+    let skipped_quick_rows = q::MEMBERS_SKIPPED_READER as usize;
     assert!(d.members.skipped_count() >= skipped_quick_rows);
 }
 
@@ -142,7 +143,7 @@ fn members_not_converted_are_skipped() {
     let d = read(&quick_fixture(dir.path()), |p| {
         p.into_iter().filter(|p| p.lightroom_id != 7).collect()
     });
-    assert_eq!(d.quick.unwrap().members, vec![9, 1]);
+    assert_eq!(d.quick.unwrap().members, vec![9, 1, 20]);
     assert!(reasons(&d.members).iter().any(|r| has_number(r, 7)));
 }
 

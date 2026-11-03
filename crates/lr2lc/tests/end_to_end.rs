@@ -30,9 +30,8 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-#[path = "support/fake_lightcraft.rs"]
-mod fake_lightcraft;
 use fake_lightcraft::{Config, FakeLightCraft, READ_COMMANDS};
+use lc_test_support::fake_lightcraft;
 
 /// Every top-level area that carries `read` / `converted` / `skipped`.
 const AREAS: [&str; 9] = [
@@ -243,7 +242,12 @@ fn full_catalog_pipeline_round_trip() {
         "labels do not add up to photos.converted"
     );
     assert_eq!(
-        dry_report["ratings"].as_object().unwrap().values().map(|v| v.as_u64().unwrap_or(0)).sum::<u64>(),
+        dry_report["ratings"]
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|v| v.as_u64().unwrap_or(0))
+            .sum::<u64>(),
         photos_converted,
         "ratings do not add up to photos.converted"
     );
@@ -270,8 +274,7 @@ fn full_catalog_pipeline_round_trip() {
     for area in AREAS {
         assert_eq!(r1[area]["read"], dry_report[area]["read"], "{area}.read");
         assert_eq!(
-            r1[area]["converted"],
-            dry_report[area]["converted"],
+            r1[area]["converted"], dry_report[area]["converted"],
             "{area}.converted"
         );
         assert_eq!(
@@ -288,10 +291,7 @@ fn full_catalog_pipeline_round_trip() {
     assert_eq!(w1["not_saved"], 0);
 
     // A photo counts once: converted = imported + existing + writer-skipped.
-    let writer_skipped = w1["photos_skipped"]
-        .as_array()
-        .unwrap()
-        .len()
+    let writer_skipped = w1["photos_skipped"].as_array().unwrap().len()
         + w1["photos_incomplete"].as_array().unwrap().len();
     assert_eq!(
         photos_converted,
@@ -309,9 +309,15 @@ fn full_catalog_pipeline_round_trip() {
             Path::new(path).starts_with(s.photos.path()),
             "{path}: imported path must stay below the photos dir"
         );
-        assert!(Path::new(path).exists(), "{path}: only existing files are imported");
+        assert!(
+            Path::new(path).exists(),
+            "{path}: only existing files are imported"
+        );
     }
-    assert!(s.state_file().exists(), "the mapping file is next to the library");
+    assert!(
+        s.state_file().exists(),
+        "the mapping file is next to the library"
+    );
 
     // Principles 1 and 2: the catalog and the originals are unchanged.
     assert_eq!(fs::read(&s.catalog).unwrap(), catalog_before);
@@ -330,7 +336,12 @@ fn full_catalog_pipeline_round_trip() {
     assert_eq!(fs::read(s.state_file()).unwrap(), state_after_1);
 
     let w2 = &s.report_json()["writer"];
-    for key in ["keywords_created", "photos_imported", "photos_existing", "updates"] {
+    for key in [
+        "keywords_created",
+        "photos_imported",
+        "photos_existing",
+        "updates",
+    ] {
         assert_eq!(w2[key], 0, "second apply is not idempotent: {key}");
     }
 

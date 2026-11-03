@@ -175,7 +175,7 @@ fn members_are_in_lightroom_order() {
     let dir = tempfile::tempdir().unwrap();
     let d = read(&fixture(dir.path()));
     // 4: REAL positions; 5: all NULL (row order); 6: mixed, NULL last.
-    for (id, members) in e::MEMBERS {
+    for (id, members) in e::MEMBERS_READER {
         assert_eq!(album(&d, id).members, members, "members of {id}");
     }
     for id in e::FOLDER_IDS {
@@ -239,8 +239,11 @@ fn member_report_balance_and_reasons() {
     // (`CollectionData.quick` is checked in quick_collection.rs.)
     let kept: usize = d.collections.iter().map(|c| c.members.len()).sum::<usize>() + 1;
     assert_eq!(d.members.read_count() as i64, e::MEMBER_ROWS);
-    assert_eq!(kept as i64, e::MEMBERS_CONVERTED + 1);
-    assert_eq!(d.members.skipped_count() as i64, e::MEMBERS_SKIPPED - 1);
+    assert_eq!(kept as i64, e::MEMBERS_CONVERTED_READER + 1);
+    assert_eq!(
+        d.members.skipped_count() as i64,
+        e::MEMBERS_SKIPPED_READER - 1
+    );
     assert_eq!(d.members.read_count(), kept + d.members.skipped_count());
     let r = reasons(&d.members);
     // Repeat of (7, 15): exactly one.
@@ -287,7 +290,7 @@ fn photo_missing_from_the_converted_list_is_a_skipped_member() {
     assert_eq!(album(&d, 4).members, vec![4, 1]);
     assert_eq!(d.collections.len() as i64, e::CONVERTED, "album stays");
     // Quick collection 14 now converts its member 2: one skipped row less.
-    assert_eq!(d.members.skipped_count() as i64, e::MEMBERS_SKIPPED);
+    assert_eq!(d.members.skipped_count() as i64, e::MEMBERS_SKIPPED_READER);
     assert!(
         reasons(&d.members)
             .iter()

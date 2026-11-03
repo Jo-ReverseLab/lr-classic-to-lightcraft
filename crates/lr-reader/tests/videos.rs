@@ -160,10 +160,9 @@ fn only_the_defined_videos_carry_the_video_reason() {
         .filter(|r| r.contains(VIDEO_REASON))
         .count();
     assert_eq!(video_skips, video_edge::VIDEO_IDS.len());
-    assert_eq!(
-        report.skipped_count(),
-        video_edge::VIDEO_IDS.len() + video_edge::VIRTUAL_COPY_IDS.len()
-    );
+    // The three videos plus the virtual copy 21 of video 4. The virtual copy
+    // 20 of photo 3 converts with its master (T03).
+    assert_eq!(report.skipped_count(), video_edge::VIDEO_IDS.len() + 1);
     assert_eq!(report.read_count(), photos.len() + report.skipped_count());
 }
 
