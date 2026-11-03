@@ -4,7 +4,7 @@ Status: done — every finding is either fixed test-first on this branch or
 justified as safe. No panic remains on catalog, LightCraft or command-line
 data.
 Branch: `agent/t21-audit`
-Base: `agent/t23-ci-proposal` (`b5f440d`, "Correct CI cost arithmetic and audit job status"; contains the T20, T22 and T23 work). The fixes were written on top of `agent/t20-performance` (`3edac05`) and rebased onto T23 before the final run.
+Base: `agent/t23-ci-proposal` (`0754cd0`, "Correct C5 monthly cost to four runs per month"; contains the T20, T22 and T23 work). The fixes were written on top of `agent/t20-performance` (`3edac05`) and rebased onto T23 before the final run.
 
 ## Goal
 
