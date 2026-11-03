@@ -13,7 +13,7 @@ pub mod skip;
 pub mod smart;
 
 pub use label::{ColorLabel, LabelSet};
-pub use mapping::{PathMapping, PathMappings};
+pub use mapping::{MappedPath, PathMapping, PathMappings};
 pub use skip::{SkipCode, Skipped};
 pub use smart::{SmartCollection, SmartCombine, SmartRule, SmartRules, SmartValue};
 
