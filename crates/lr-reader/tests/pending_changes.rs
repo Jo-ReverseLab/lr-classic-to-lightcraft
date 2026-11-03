@@ -140,3 +140,25 @@ fn side_files_of_other_catalogs_are_ignored() {
     fs::write(dir.path().join("other.lrcat-wal"), b"not ours").unwrap();
     Catalog::open(&path).expect("unrelated side file must not matter");
 }
+
+// A non-empty `-shm` (shared-memory) file next to the catalog is **not**
+// rejected today: only `-wal` and `-journal` are checked. This pins the
+// current behaviour. A `-shm` file only ever accompanies a `-wal` file in
+// WAL mode, so a lone `-shm` is a stale leftover and the existing `-wal`
+// check already catches a live WAL. Whether a lone `-shm` should also be
+// refused is a decision for the owner, not changed here.
+#[test]
+fn non_empty_shm_is_not_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = small_fixture(dir.path());
+    let shm = side_file(&path, "-shm");
+    fs::write(&shm, b"pretend this is shared memory").unwrap();
+    let catalog = Catalog::open(&path).expect("a lone -shm is not checked");
+    assert_eq!(catalog.version(), "1500000");
+    // Nothing is written: the catalog and the -shm stay byte-identical.
+    let before = checksum(&path).unwrap();
+    let shm_before = fs::read(&shm).unwrap();
+    drop(catalog);
+    assert_eq!(before, checksum(&path).unwrap());
+    assert_eq!(shm_before, fs::read(&shm).unwrap());
+}
