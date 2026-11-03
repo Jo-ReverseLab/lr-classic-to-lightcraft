@@ -41,7 +41,7 @@ CI runs formatting, lint and tests on Linux, macOS and Windows.
 | `--port N` | Control port of the running LightCraft app (default 7980) |
 | `--allow-xmp` | Write even if the library writes XMP sidecars next to the originals |
 | `--map OLD=NEW` | Replace a path prefix, repeatable |
-| `--label-set SET` | Names of the colour labels: `en`, `de`, `auto` or a JSON file |
+| `--label-set SET` | Names of the colour labels: `en`, `de`, `auto` (default) or a JSON file |
 | `--report FILE` | Write `report.json` |
 | `--script FILE` | Write the planned commands as JSON lines |
 
@@ -220,11 +220,12 @@ of a JSON file such as `{"My red": "red", "Todo": "yellow"}` whose values
 are `red`, `yellow`, `green`, `blue` or `purple`. Names are compared exactly,
 including letter case, spaces and Unicode form.
 
-With `auto`, the English or German set is used if every label of the
-converted photos belongs to it. Otherwise nothing is guessed: the set is
-`none`, every label is custom, and a hint suggests choosing a set with
-`--label-set`. A missing or invalid file is a command-line error (exit
-code 2).
+With `auto`, the English and German standard names count together: a label
+that equals one of them exactly maps to its colour, whatever the other
+labels are. Every other non-empty label is a custom label of its own photo
+(converted without a label, reported by id only). Nothing else is guessed:
+there is no recommendation. A missing or invalid file is a command-line
+error (exit code 2).
 
 ### `--report FILE`
 
@@ -245,7 +246,7 @@ Writes a machine-readable report to `FILE` after the run:
     "flags": { "pick": 1, "reject": 0, "none": 1, "unknown": 0 },
     "labels": {
       "red": 1, "yellow": 0, "green": 0, "blue": 0, "purple": 0,
-      "none": 0, "custom": 1, "label_set": "en",
+      "none": 0, "custom": 1, "label_set": "en", "matched_sets": [],
       "custom_reasons": [{ "reason": "photo 5: custom label not in label set" }]
     }
   },
@@ -321,8 +322,10 @@ counts add up to `photos.converted`. `photos.videos` is the number of
 skipped videos; they are also listed in `photos.skipped`. `photos.flags`
 counts the converted photos per flag; `none` does not include `unknown`, so
 the four counts add up to `photos.converted`. `photos.labels` counts the
-converted photos per colour label, names the label set (`en`, `de`, `file`
-or `none`) and lists each photo with a custom label; its seven counts add
+converted photos per colour label, names the label set (`auto`, `en`, `de`
+or `file`), and under `auto` lists the standard sets that matched at least
+one name in `matched_sets` (order `en`, `de`; empty for a fixed set); it
+lists each photo with a custom label; its seven counts add
 up to `photos.converted`. The six attribute
 counts in `keywords` cover converted keywords only, like the summary line.
 `collections.albums` and `collections.folders` count the converted

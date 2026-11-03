@@ -99,8 +99,11 @@ pub struct LabelsJson {
     pub purple: usize,
     pub none: usize,
     pub custom: usize,
-    /// `en`, `de`, `file` or `none`.
+    /// `auto`, `en`, `de` or `file`.
     pub label_set: &'static str,
+    /// Under `auto`, the standard sets whose names matched at least one
+    /// converted photo, in the order `en`, `de`; empty for a fixed set.
+    pub matched_sets: Vec<&'static str>,
     /// One entry per custom photo, ascending by id.
     pub custom_reasons: Vec<ReasonJson>,
 }
@@ -122,6 +125,7 @@ impl From<&LabelCounts> for LabelsJson {
             none: l.none,
             custom: l.custom,
             label_set: l.set,
+            matched_sets: l.matched_sets.clone(),
             custom_reasons: l
                 .custom_ids
                 .iter()
@@ -350,14 +354,6 @@ pub fn summary_with(outcome: &Outcome, dry_run: bool) -> String {
     let _ = writeln!(out, "creators: {}", outcome.creators);
     let _ = writeln!(out, "titles: {}", outcome.titles);
     let _ = writeln!(out, "titles unreadable: {}", outcome.titles_unreadable);
-    if outcome.labels.recommend {
-        let _ = writeln!(
-            out,
-            "hint: the colour label names match neither the English nor the German set; \
-             {} photos keep no label. Choose a set with --label-set en, de or FILE",
-            outcome.labels.custom
-        );
-    }
     if outcome.catalog_unchanged {
         let _ = writeln!(out, "catalog unchanged (checksum verified)");
     }
@@ -566,7 +562,7 @@ mod tests {
                 unknown: 0,
             },
             labels: LabelCounts {
-                set: "none",
+                set: "auto",
                 none: 1,
                 ..LabelCounts::default()
             },
@@ -627,28 +623,25 @@ mod tests {
         o.labels = LabelCounts {
             red: 1,
             custom: 2,
-            set: "none",
+            set: "auto",
+            matched_sets: vec!["en"],
             custom_ids: vec![3, 8],
-            recommend: true,
             ..LabelCounts::default()
         };
         let text = summary(&o);
         assert!(text.lines().any(|l| l
-            == "labels: red 1, yellow 0, green 0, blue 0, purple 0, none 0, custom 2, set none"));
-        assert!(
-            text.lines()
-                .any(|l| l.starts_with("hint:") && l.contains("--label-set"))
-        );
+            == "labels: red 1, yellow 0, green 0, blue 0, purple 0, none 0, custom 2, set auto"));
+        // The recommendation line is gone in every case.
+        assert!(!text.lines().any(|l| l.contains("--label-set")));
         let v: serde_json::Value = serde_json::from_str(&report_json(&o)).unwrap();
         let l = &v["photos"]["labels"];
         assert_eq!(l["custom"], 2);
-        assert_eq!(l["label_set"], "none");
+        assert_eq!(l["label_set"], "auto");
+        assert_eq!(l["matched_sets"], serde_json::json!(["en"]));
         assert_eq!(
             l["custom_reasons"][1]["reason"],
             "photo 8: custom label not in label set"
         );
-        o.labels.recommend = false;
-        assert!(!summary(&o).contains("--label-set"));
     }
 
     #[test]

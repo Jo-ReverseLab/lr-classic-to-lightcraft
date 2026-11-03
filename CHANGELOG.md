@@ -56,6 +56,14 @@ The project has not made a release yet.
 
 ### Changed
 
+- With `--label-set auto` (the default), the English and German standard
+  colour-label names are recognised together: a name that equals one of
+  them exactly maps to its colour, whatever the other labels are. Other
+  non-empty labels are custom labels of their own photo. `report.json` gains
+  `photos.labels.matched_sets` (the standard sets that matched at least one
+  name, in the order `en`, `de`; empty for a fixed set); `label_set` is now
+  `auto` under auto, never `none`. The old hint recommending `--label-set`
+  is removed in every case.
 - Photos, collections and stacks each satisfy a strict balance in the
   summary and report, in dry runs and real runs alike.
 - Documentation brought up to date: README options, limits and the status of
