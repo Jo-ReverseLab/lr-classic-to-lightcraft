@@ -115,8 +115,10 @@ pub struct ApplySummary {
     /// Imported, existing or updated photos with an update that failed; a
     /// later run sends their updates again.
     pub photos_incomplete: Vec<Skipped>,
-    /// Keywords not created, each with a reason.
-    pub keywords_skipped: Vec<Skipped>,
+    /// Keywords not created, each with a reason. Named `keywords_not_created`
+    /// in `report.json` to distinguish it from the reader's `keywords.skipped`
+    /// (a different set: keywords skipped while reading the catalog).
+    pub keywords_not_created: Vec<Skipped>,
     /// Album folders created by this run.
     pub folders_created: usize,
     /// Albums created by this run.
@@ -240,7 +242,7 @@ pub fn apply_partial(
         summary: ApplySummary {
             photos_unchanged: plan.photos_unchanged(),
             photos_skipped: plan.photo_skips().to_vec(),
-            keywords_skipped: plan.keyword_skips().to_vec(),
+            keywords_not_created: plan.keyword_skips().to_vec(),
             collections_known: plan.collections_known(),
             collections_renamed: plan.collections_renamed(),
             collections_moved: plan.collections_moved(),
@@ -1117,7 +1119,7 @@ impl Run<'_> {
         });
         if parent_failed {
             self.failed_keywords.insert(path.to_string());
-            self.summary.keywords_skipped.push(Skipped::new(
+            self.summary.keywords_not_created.push(Skipped::new(
                 SkipCode::ParentFailed,
                 "keyword not created: `keyword.create` failed for its parent keyword".to_string(),
             ));
@@ -1145,7 +1147,7 @@ impl Run<'_> {
             Ok(Outcome::AppliedNotSaved(_)) => {
                 self.summary.not_saved += 1;
                 self.failed_keywords.insert(path.to_string());
-                self.summary.keywords_skipped.push(Skipped::new(
+                self.summary.keywords_not_created.push(Skipped::new(
                     SkipCode::AppliedNotSaved,
                     "keyword not created: `keyword.create` was applied but not saved; \
                      the next run creates it again, check LightCraft for a duplicate"
@@ -1155,7 +1157,7 @@ impl Run<'_> {
             }
             Err(WriteError::Command { command, .. }) => {
                 self.failed_keywords.insert(path.to_string());
-                self.summary.keywords_skipped.push(Skipped::new(
+                self.summary.keywords_not_created.push(Skipped::new(
                     SkipCode::Rejected,
                     format!("keyword not created: LightCraft rejected `{command}`"),
                 ));

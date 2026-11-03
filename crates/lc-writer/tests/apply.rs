@@ -6,7 +6,7 @@
 //!   -> Result<ApplySummary, WriteError>`;
 //! - `ApplySummary { keywords_created, photos_imported, photos_existing,
 //!   updates, not_saved: usize, photos_skipped, photos_incomplete,
-//!   keywords_skipped: Vec<model::Skipped> }` (all pub). Every photo counts
+//!   keywords_not_created: Vec<model::Skipped> }` (all pub). Every photo counts
 //!   once: photos in `photos_skipped` were not written; `photos_incomplete`
 //!   (a subset of imported + existing) lost an update.
 //!
@@ -27,7 +27,7 @@
 //! - `Outcome::AppliedNotSaved` is not recorded: an update leaves the photo
 //!   incomplete (listed in `photos_incomplete`, counted in `not_saved`) and
 //!   the next run sends it again; a `keyword.create` leaves the keyword
-//!   unrecorded (listed in `keywords_skipped`, counted in `not_saved`) and the
+//!   unrecorded (listed in `keywords_not_created`, counted in `not_saved`) and the
 //!   next run creates it again;
 //! - `WriteError::Command` skips only the affected photo/keyword, with a
 //!   reason that names the command and no catalog text;
@@ -121,7 +121,11 @@ fn run(fake: &FakeLightCraft, env: &Env, input: &WriteInput) -> Result<ApplySumm
 fn assert_clean(s: &ApplySummary) {
     assert!(s.photos_skipped.is_empty(), "{:?}", s.photos_skipped);
     assert!(s.photos_incomplete.is_empty(), "{:?}", s.photos_incomplete);
-    assert!(s.keywords_skipped.is_empty(), "{:?}", s.keywords_skipped);
+    assert!(
+        s.keywords_not_created.is_empty(),
+        "{:?}",
+        s.keywords_not_created
+    );
 }
 
 fn texts(items: &[&str]) -> BTreeSet<String> {
@@ -611,7 +615,7 @@ fn error_reply_for_one_photo_skips_only_that_photo() {
         "{:?}",
         summary.photos_skipped
     );
-    assert!(summary.keywords_skipped.is_empty());
+    assert!(summary.keywords_not_created.is_empty());
     assert_eq!(
         4,
         summary.photos_imported + summary.photos_existing + summary.photos_skipped.len(),
@@ -661,9 +665,9 @@ fn error_reply_for_a_keyword_skips_that_keyword_and_the_run_goes_on() {
     let fake = FakeLightCraft::start(config);
     let summary = run(&fake, &env, &input()).unwrap();
     assert_eq!(summary.keywords_created, 0);
-    assert!(!summary.keywords_skipped.is_empty());
+    assert!(!summary.keywords_not_created.is_empty());
     assert!(summary.photos_skipped.is_empty());
-    for s in &summary.keywords_skipped {
+    for s in &summary.keywords_not_created {
         assert!(s.reason.contains("keyword.create"), "{}", s.reason);
         assert!(
             !s.reason.contains("Café") && !s.reason.contains("Rome"),
@@ -775,10 +779,10 @@ fn not_saved_keyword_create_is_not_recorded_and_rerun_resends() {
     // Travel and Café ☕ were applied but not saved; Travel|Rome was skipped
     // because its parent Travel was not created (ParentFailed).
     assert_eq!(summary.not_saved, 2);
-    assert_eq!(summary.keywords_skipped.len(), 3);
+    assert_eq!(summary.keywords_not_created.len(), 3);
     assert_eq!(
         summary
-            .keywords_skipped
+            .keywords_not_created
             .iter()
             .filter(|s| s.code == SkipCode::AppliedNotSaved)
             .count(),
@@ -786,7 +790,7 @@ fn not_saved_keyword_create_is_not_recorded_and_rerun_resends() {
     );
     assert_eq!(
         summary
-            .keywords_skipped
+            .keywords_not_created
             .iter()
             .filter(|s| s.code == SkipCode::ParentFailed)
             .count(),
@@ -923,5 +927,5 @@ fn keyword_deleted_in_lightcraft_is_not_recreated() {
     assert!(fake2.write_commands().is_empty());
     // Gap: a vanished keyword is not reported. There is no skipped or
     // incomplete entry for it.
-    assert!(summary.keywords_skipped.is_empty());
+    assert!(summary.keywords_not_created.is_empty());
 }
