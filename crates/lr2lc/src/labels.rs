@@ -165,17 +165,9 @@ pub fn apply(photos: &mut [Photo], raw: &[(i64, String)], mode: &LabelMode) -> L
         let resolved = match mode {
             LabelMode::Auto => en
                 .resolve(t)
-                .map(|c| {
-                    matched_en = true;
-                    c
-                })
-                .or_else(|| {
-                    de.resolve(t).map(|c| {
-                        matched_de = true;
-                        c
-                    })
-                }),
-            LabelMode::Fixed(_) => fixed_set.as_ref().and_then(|s| s.resolve(t)),
+                .inspect(|_| matched_en = true)
+                .or_else(|| de.resolve(t).inspect(|_| matched_de = true)),
+            LabelMode::Fixed(..) => fixed_set.as_ref().and_then(|s| s.resolve(t)),
         };
         match resolved {
             Some(label) => {
