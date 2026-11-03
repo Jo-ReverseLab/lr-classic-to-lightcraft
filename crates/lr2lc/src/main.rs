@@ -89,7 +89,7 @@ fn run_and_report(options: &RunOptions, labels: &LabelMode, targets: &Targets) -
 /// `--apply`, writes them through the LightCraft control port.
 fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()> {
     let mut outcome = dry_run::run(&options.catalog, &options.mappings, labels)?;
-    let input = writer::input(&outcome.converted);
+    let input = writer::input(std::mem::take(&mut outcome.converted));
     let state = writer::load_state(options.library.as_deref())?;
     // Without a connection the library's own keywords are unknown; the
     // plan assumes none beyond the mapping file.

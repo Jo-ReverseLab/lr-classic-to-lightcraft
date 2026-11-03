@@ -327,6 +327,9 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
         for _ in data.assignments.values().flatten() {
             keyword_assignments.converted();
         }
+        // Membership test once per photo instead of a linear scan of the
+        // unreadable ids for every photo.
+        let title_unreadable: HashSet<i64> = photo_data.title_unreadable.iter().copied().collect();
         (
             catalog.version().to_string(),
             folders,
@@ -359,7 +362,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
             kept_photos.iter().filter(|p| p.title.is_some()).count(),
             kept_photos
                 .iter()
-                .filter(|p| photo_data.title_unreadable.contains(&p.lightroom_id))
+                .filter(|p| title_unreadable.contains(&p.lightroom_id))
                 .count(),
             Converted {
                 photos: kept_photos,

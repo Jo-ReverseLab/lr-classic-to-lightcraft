@@ -172,16 +172,20 @@ pub struct PlannedJson {
 }
 
 /// The writer input from the converted elements of the catalog.
-pub fn input(converted: &Converted) -> WriteInput {
+///
+/// Takes the elements by value: they are not needed again after the plan is
+/// built, and copying them would duplicate every photo, keyword and keyword
+/// assignment on a large catalog.
+pub fn input(converted: Converted) -> WriteInput {
     WriteInput {
-        photos: converted.photos.clone(),
-        keywords: converted.keywords.clone(),
-        photo_keywords: converted.photo_keywords.clone(),
-        collections: converted.collections.clone(),
-        stacks: converted.stacks.clone(),
-        quick: converted.quick.clone(),
-        smart: converted.smart.clone(),
-        smart_untranslatable_ids: converted.smart_untranslatable_ids.clone(),
+        photos: converted.photos,
+        keywords: converted.keywords,
+        photo_keywords: converted.photo_keywords,
+        collections: converted.collections,
+        stacks: converted.stacks,
+        quick: converted.quick,
+        smart: converted.smart,
+        smart_untranslatable_ids: converted.smart_untranslatable_ids,
         // A dry run never connects; an apply run reads the live state itself.
         live: None,
     }
