@@ -416,18 +416,16 @@ fn added_keyword_gives_one_setmeta_with_addkeywords() {
 }
 
 #[test]
-fn removed_keyword_gives_removekeywords() {
+fn a_keyword_removed_in_lightroom_is_only_reported() {
+    // F-022 (a): LightCraft keeps every keyword it has; nothing is removed.
     let p = change(
         full_photo(),
         full_photo(),
         &[kw(&["A"]), kw(&["B"])],
         &[kw(&["A"])],
     );
-    assert_eq!(p.steps.len(), 1);
-    assert_eq!(
-        updates(&p),
-        vec![("photo.setMeta", &json!({"removeKeywords": ["B"]}))]
-    );
+    assert!(p.steps.is_empty(), "{:?}", p.steps);
+    assert_eq!(p.keywords_removed(), 1);
 }
 
 #[test]
@@ -440,13 +438,8 @@ fn one_keyword_added_and_one_removed_make_a_single_setmeta() {
     );
     let u = updates(&p);
     assert_eq!(u.len(), 1);
-    assert_eq!(
-        u[0],
-        (
-            "photo.setMeta",
-            &json!({"addKeywords": ["C"], "removeKeywords": ["B"]})
-        )
-    );
+    assert_eq!(u[0], ("photo.setMeta", &json!({"addKeywords": ["C"]})));
+    assert_eq!(p.keywords_removed(), 1);
 }
 
 #[test]
@@ -463,9 +456,10 @@ fn keyword_changes_and_text_changes_share_one_setmeta() {
         u[0],
         (
             "photo.setMeta",
-            &json!({"title": "New", "addKeywords": ["B"], "removeKeywords": ["A"]})
+            &json!({"title": "New", "addKeywords": ["B"]})
         )
     );
+    assert_eq!(p.keywords_removed(), 1);
 }
 
 #[test]
