@@ -227,6 +227,12 @@ labels are. Every other non-empty label is a custom label of its own photo
 there is no recommendation. A missing or invalid file is a command-line
 error (exit code 2).
 
+French and Spanish standard names are not in `auto` yet: they are pending a
+citable Adobe source for each name. See `docs/research/label-names.md` for
+the candidates, the sources attempted and what is still open. A guard test
+(`no_standard_name_maps_to_two_colors`) keeps any future set from clashing
+with an existing name.
+
 ### `--report FILE`
 
 Writes a machine-readable report to `FILE` after the run:
