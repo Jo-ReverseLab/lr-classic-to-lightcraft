@@ -1129,7 +1129,7 @@ fn decide<T: PartialEq>(last: &T, lr: &T, lc: &T) -> Decision {
 /// the Lightroom values, given what LightCraft has now, and the values to
 /// record afterwards. A conflicting field is not written and keeps its last
 /// imported value in the mapping file, so a later run reports it again.
-/// `phot` is the Lightroom id used in the conflict report.
+/// `photo` is the Lightroom id used in the conflict report.
 fn reconcile(
     old: &PhotoFields,
     new: &PhotoFields,
