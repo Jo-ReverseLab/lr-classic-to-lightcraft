@@ -28,8 +28,8 @@
 use lc_writer::apply::{ApplySummary, apply};
 use lc_writer::control::{ControlClient, WriteError};
 use lc_writer::plan::WriteInput;
-use lc_writer::state::State;
-use model::{Collection, CollectionKind, Photo, QuickCollection, Rating};
+use lc_writer::state::{PhotoFields, State};
+use model::{Collection, CollectionKind, Photo, QuickCollection, Rating, SkipCode};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
@@ -379,4 +379,42 @@ fn a_member_without_a_lightcraft_id_is_skipped_with_a_reason() {
     assert_eq!(s.quick_skipped.len(), 1);
     assert!(s.quick_skipped[0].reason.contains("999"));
     assert_eq!(of(&commands, "album.toggleTarget")[0]["ids"], json!([1001]));
+}
+
+#[test]
+fn a_member_whose_photo_left_lightcraft_is_incomplete_and_records_nothing() {
+    // Photo 101 was imported in an earlier run (the mapping file remembers
+    // LightCraft id 9999), then the user deleted it from LightCraft. The fake
+    // library has no photo 9999: `library.select [9999]` is rejected, so the
+    // member is reported incomplete, nothing is toggled and nothing recorded.
+    let env = env();
+    let fake = FakeLightCraft::start(Config::new(&env.library));
+    {
+        let mut state = State::load(&env.state_file).unwrap();
+        state.record(
+            "g101",
+            101,
+            Value::from(9999),
+            PhotoFields::imported_default(),
+        );
+        state.save(&env.state_file).unwrap();
+    }
+    let (s, commands) = ok(&fake, &env, &input(1, &[101]));
+    assert_eq!(s.quick_added, 0);
+    assert_eq!(s.quick_incomplete.len(), 1);
+    assert_eq!(s.quick_incomplete[0].code, SkipCode::Rejected);
+    // The select named the vanished id; no toggle followed.
+    assert_eq!(of(&commands, "library.select").len(), 1);
+    assert_eq!(of(&commands, "library.select")[0]["ids"], json!([9999]));
+    assert!(
+        of(&commands, "album.toggleTarget").is_empty(),
+        "{commands:?}"
+    );
+    // Nothing was recorded; the next run tries again.
+    assert!(
+        state(&env)["quick"]["members"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+    );
+    assert!(fake.quick_collection().is_none());
 }
