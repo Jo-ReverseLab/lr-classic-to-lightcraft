@@ -68,6 +68,13 @@ pub enum WriteError {
     /// command is sent whose result could not be recorded.
     #[error(transparent)]
     State(#[from] crate::state::StateError),
+    /// An internal invariant broke: a step was run for an element the plan
+    /// or the mapping file does not hold. Not reachable through normal input
+    /// or a fake control-port server; the run stops with a clear message
+    /// instead of silently returning `Ok(())`. The detail names only ids,
+    /// never user content (paths or names).
+    #[error("internal invariant broken: {detail}")]
+    Internal { detail: String },
 }
 
 impl WriteError {
@@ -86,6 +93,7 @@ impl WriteError {
             WriteError::LibraryProblem(_) => "LightCraft reports a library problem".into(),
             WriteError::XmpAutoWrite => "the library writes XMP sidecars automatically".into(),
             WriteError::State(_) => "the mapping file could not be read or written".into(),
+            WriteError::Internal { .. } => "an internal invariant broke; the run stopped".into(),
         }
     }
 }
@@ -353,6 +361,9 @@ mod tests {
                 path: secret.into(),
                 source: std::io::Error::other(secret),
             }),
+            WriteError::Internal {
+                detail: secret.into(),
+            },
         ];
         for e in &errors {
             let text = e.short_reason();

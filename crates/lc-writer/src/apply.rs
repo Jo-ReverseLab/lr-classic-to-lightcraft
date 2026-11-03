@@ -533,10 +533,18 @@ impl Run<'_> {
     /// library already has, and records it at once. The parent's
     /// LightCraft id is taken from the mapping file; a parent folder that
     /// was not created skips the smart collection.
+    ///
+    /// Invariant: `collection_id` is always an input smart collection (the
+    /// plan emits a smart-collection step only for input smart collections).
+    /// A violation is a true invariant break, not a skip: the run stops with
+    /// `WriteError::Internal` instead of a silent `Ok(())`.
     fn create_smart(&mut self, collection_id: i64, params: &Value) -> Result<(), WriteError> {
         let Some(s) = self.smart.get(&collection_id).copied() else {
-            // Not reachable: the plan only creates input smart collections.
-            return Ok(());
+            return Err(WriteError::Internal {
+                detail: format!(
+                    "create_smart called for collection {collection_id} that is not an input smart collection"
+                ),
+            });
         };
         self.load_existing()?;
         let mut params = params.clone();
@@ -821,10 +829,18 @@ impl Run<'_> {
     /// the mapping file, so a parent created or adopted earlier in this run
     /// replaces its placeholder; a parent that was not created skips the
     /// collection.
+    ///
+    /// Invariant: `collection_id` is always an input collection (the plan
+    /// emits a collection step only for input collections). A violation is a
+    /// true invariant break, not a skip: the run stops with
+    /// `WriteError::Internal` instead of a silent `Ok(())`.
     fn create_album(&mut self, collection_id: i64, params: &Value) -> Result<(), WriteError> {
         let Some(c) = self.collections.get(&collection_id).copied() else {
-            // Not reachable: the plan only creates input collections.
-            return Ok(());
+            return Err(WriteError::Internal {
+                detail: format!(
+                    "create_album called for collection {collection_id} that is not an input collection"
+                ),
+            });
         };
         self.load_existing()?;
         let mut params = params.clone();
@@ -1312,6 +1328,13 @@ impl Run<'_> {
     }
 
     /// Records the photo whose steps all succeeded with its full fields.
+    ///
+    /// The first two early returns are normal no-ops: nothing is in progress,
+    /// or the current photo already failed and was counted. The third — the
+    /// photo or its mapping entry missing after a successful step — is a true
+    /// invariant break (the plan holds the photo, and a successful import
+    /// writes the mapping entry): the run stops with `WriteError::Internal`
+    /// instead of a silent `Ok(())`.
     fn finish_photo(&mut self) -> Result<(), WriteError> {
         let Some(current) = self.current.take() else {
             return Ok(());
@@ -1323,7 +1346,12 @@ impl Run<'_> {
             self.photos.get(current.global_id.as_str()).copied(),
             self.state.photo(&current.global_id),
         ) else {
-            return Ok(());
+            return Err(WriteError::Internal {
+                detail: format!(
+                    "finish_photo: photo {} is missing from the plan or the mapping file",
+                    current.global_id
+                ),
+            });
         };
         let keywords = self
             .photo_keywords
