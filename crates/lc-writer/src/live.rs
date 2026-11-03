@@ -13,6 +13,12 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// The fields of one photo as LightCraft has them now.
+///
+/// `flag` is LightCraft's spelling of the pick/reject flag: `none`, `pick`
+/// or `reject`. `rating` is a whole number from 0 to 5. `label` is a colour
+/// name (`red`, `yellow`, `green`, `blue`, `purple`) or `None`. Text fields
+/// are `None` when LightCraft has the empty string, since the mapping file
+/// never stores `""`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LivePhoto {
     pub rating: u8,
@@ -27,6 +33,10 @@ pub struct LivePhoto {
 }
 
 /// One mapped album or album folder as LightCraft has it now.
+///
+/// `members` holds the global ids of the photos LightCraft lists as members
+/// that the mapping file also knows; members the mapping file does not know
+/// are dropped. Album folders have no members.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiveAlbum {
     pub name: String,
@@ -36,6 +46,12 @@ pub struct LiveAlbum {
 }
 
 /// A snapshot of the library, limited to what the mapping file knows.
+///
+/// Built by [`read_live`], which sends only the read commands `catalog.query`,
+/// `photo.inspect`, `albums.list` and `keyword.list`. A read error (a rejected
+/// command, a lost connection or an unexpected reply) is returned as a
+/// [`WriteError`] and aborts the whole run: live state is read to decide what
+/// to reconcile, so a partial picture is never acted on.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LiveState {
     /// Mapped photos LightCraft still has, by global id.

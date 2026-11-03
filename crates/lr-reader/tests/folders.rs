@@ -159,3 +159,58 @@ fn broken_root_folder_is_skipped_not_an_error() {
     }
     assert!(report.is_balanced());
 }
+
+#[test]
+fn folder_identity_is_the_path_not_an_id() {
+    // Folders have no global id in the model: their identity is the assembled
+    // path. A folder moved or renamed in Lightroom (a different pathFromRoot
+    // or root) is therefore seen as a different folder, with no memory of the
+    // old path. The folder row id staying the same does not keep the identity.
+    let dir = tempfile::tempdir().unwrap();
+    let path = small_fixture(dir.path());
+    let catalog = Catalog::open(&path).unwrap();
+    let before: HashSet<String> = folder_paths(&catalog).into_iter().collect();
+    // Pick a real sub-folder (one with a non-empty pathFromRoot).
+    let row_id: i64 = {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.query_row(
+            "SELECT id_local FROM AgLibraryFolder \
+             WHERE pathFromRoot <> '' ORDER BY id_local LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    // Rename the folder in the catalog: same row id, new path.
+    {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute(
+            "UPDATE AgLibraryFolder SET pathFromRoot = 'renamed/' WHERE id_local = ?1",
+            [row_id],
+        )
+        .unwrap();
+    }
+    let catalog = Catalog::open(&path).unwrap();
+    let after: HashSet<String> = folder_paths(&catalog).into_iter().collect();
+
+    // The row id is unchanged, but the path changed: exactly one path left
+    // (the old one) and exactly one arrived (the new one, ending in `renamed`).
+    let gone: Vec<&String> = before.difference(&after).collect();
+    let arrived: Vec<&String> = after.difference(&before).collect();
+    assert_eq!(
+        gone.len(),
+        1,
+        "exactly one old path should disappear: {gone:?}"
+    );
+    assert_eq!(
+        arrived.len(),
+        1,
+        "exactly one new path should appear: {arrived:?}"
+    );
+    assert!(
+        arrived[0].ends_with("renamed"),
+        "the new path should end with `renamed`: {}",
+        arrived[0]
+    );
+    assert_eq!(before.len(), after.len(), "no folder was added or removed");
+}
