@@ -130,6 +130,32 @@ fn error_reply_becomes_command_error_with_name_and_text() {
     });
 }
 
+// A server that accepts the request but never replies must surface as a
+// clear error, not a hang. The 75 s production timeout is shortened for the
+// test through `ControlClient::connect_with_timeout`; the fake stalls longer
+// than that, so the read times out.
+#[test]
+fn stalled_server_times_out_instead_of_hanging() {
+    with_timeout(|| {
+        let port = FakePort::start(|_, _| {
+            // Hold the connection open without replying longer than the
+            // client's read timeout.
+            std::thread::sleep(Duration::from_secs(2));
+            Reply::Ok(json!(null))
+        });
+        let mut client =
+            ControlClient::connect_with_timeout(port.port(), Duration::from_millis(100)).unwrap();
+        match err(client.execute("photo.rate", json!({"rating": 3}))) {
+            WriteError::ConnectionLost { command } => {
+                assert_eq!(command, "photo.rate");
+            }
+            other => panic!("expected ConnectionLost from a stalled server, got {other:?}"),
+        }
+        // The request was received exactly once; it is not retried.
+        assert_eq!(port.received().len(), 1);
+    });
+}
+
 #[test]
 fn saved_in_memory_error_counts_as_applied_not_saved() {
     with_timeout(|| {

@@ -822,3 +822,106 @@ fn nothing_to_do_still_reads_the_keyword_list_only() {
     );
     assert!(fake.write_commands().is_empty());
 }
+
+// ------------------------------------------------------ writer failure cases
+
+/// A mapping file whose parent directory does not exist cannot be written.
+/// The run stops with `WriteError::State` instead of continuing to send
+/// commands whose outcome could not be recorded; in particular no photo is
+/// imported.
+#[test]
+fn mapping_file_write_failure_is_reported_and_not_a_success() {
+    let env = env();
+    let fake = first_run_fake(&env);
+    let mut client = ControlClient::connect(fake.port()).unwrap();
+    let mut state = State::load(&env.state_file).unwrap();
+    // The atomic rename target lives in a directory that does not exist, so
+    // the first persistence fails.
+    let bad_state_file = env._dir.path().join("no-such-subdir/state.json");
+    let err = apply(&mut client, &input(), &mut state, &bad_state_file).unwrap_err();
+    assert!(
+        matches!(err, WriteError::State(_)),
+        "expected WriteError::State, got {err:?}"
+    );
+    // The run never reached the photos: no import was sent.
+    assert!(
+        fake.commands().iter().all(|(c, _)| c != "library.import"),
+        "no photo is imported while the mapping file is unwritable"
+    );
+}
+
+/// A photo that was deleted from LightCraft between runs (but is still in the
+/// mapping file with a changed field) is reported as incomplete and is never
+/// re-imported: the plan emits an update, the select of the vanished id is
+/// rejected, and the photo lands in `photos_incomplete`.
+#[test]
+fn photo_deleted_in_lightcraft_is_reported_not_recreated() {
+    let env = env();
+    let fake1 = first_run_fake(&env);
+    let first = run(&fake1, &env, &input()).unwrap();
+    assert_clean(&first);
+    assert_eq!(fake1.photos().len(), 4);
+
+    // A second library that lost every photo but kept the keywords. g1 has a
+    // changed rating, so the plan emits an update (and thus a select) rather
+    // than an import.
+    let mut cfg2 = Config::new(&env.library);
+    cfg2.keywords = expected_keywords();
+    let fake2 = FakeLightCraft::start(cfg2);
+    let changed = {
+        let mut inp = input();
+        inp.photos[0] = photo("g1", 1, 4);
+        inp
+    };
+    let summary = run(&fake2, &env, &changed).unwrap();
+    assert_eq!(summary.photos_imported, 0);
+    assert_eq!(
+        summary.photos_incomplete.len(),
+        1,
+        "{:?}",
+        summary.photos_incomplete
+    );
+    let reason = &summary.photos_incomplete[0].reason;
+    assert!(reason.contains("library.select"), "{reason}");
+    assert!(
+        !reason.contains("example") && !reason.contains("g1.jpg"),
+        "{reason}"
+    );
+    assert!(
+        fake2.commands().iter().all(|(c, _)| c != "library.import"),
+        "a deleted photo is never re-imported"
+    );
+}
+
+/// A keyword that was deleted from LightCraft between runs (but is still in
+/// the mapping file) is not recreated: the plan treats it as already created
+/// and never sends `keyword.create`. Known gap: the deletion is not reported
+/// in the summary.
+#[test]
+fn keyword_deleted_in_lightcraft_is_not_recreated() {
+    let env = env();
+    let fake1 = first_run_fake(&env);
+    let first = run(&fake1, &env, &input()).unwrap();
+    assert_clean(&first);
+    assert!(fake1.keywords().contains("Café ☕"));
+
+    // A second library that dropped `Café ☕`. The mapping file still knows
+    // it, so the plan skips its creation.
+    let mut cfg2 = Config::new(&env.library);
+    cfg2.keywords = texts(&["Travel", "Travel|Rome"]);
+    let fake2 = FakeLightCraft::start(cfg2);
+    let summary = run(&fake2, &env, &input()).unwrap();
+    assert!(
+        fake2.commands().iter().all(|(c, _)| c != "keyword.create"),
+        "a keyword the mapping file already knows is not recreated"
+    );
+    assert!(
+        !fake2.keywords().contains("Café ☕"),
+        "the deleted keyword stayed deleted"
+    );
+    // The photos are unchanged, so only read commands went out.
+    assert!(fake2.write_commands().is_empty());
+    // Gap: a vanished keyword is not reported. There is no skipped or
+    // incomplete entry for it.
+    assert!(summary.keywords_skipped.is_empty());
+}
