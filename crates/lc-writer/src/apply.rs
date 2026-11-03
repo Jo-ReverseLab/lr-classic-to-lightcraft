@@ -81,10 +81,10 @@ use crate::control::{ControlClient, Outcome, WriteError};
 use crate::live::read_live;
 use crate::plan::{
     Conflict, MovedPhoto, RemovedPhoto, RenamedKeyword, Step, WriteInput, group_params,
-    import_params, members_select_params, needs_live, plan, same_members, select_params,
-    smart_skip_reason,
+    import_params, members_select_params, needs_live, plan, renamed_keywords, same_members,
+    select_params, smart_skip_reason, snapshot_with_renames,
 };
-use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, keyword_text, snapshot};
+use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, keyword_text};
 use model::{Collection, CollectionKind, Keyword, Photo, SkipCode, Skipped, SmartCollection};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -284,6 +284,8 @@ pub fn apply_partial(
         input
     };
     let plan = plan(input, state, &listed);
+    // The plan already used this map; keep it for recording fresh imports.
+    let renamed = renamed_keywords(input, state).0;
     let mut run = Run {
         client,
         state,
@@ -325,6 +327,7 @@ pub fn apply_partial(
             .filter_map(|p| p.global_id.as_deref().map(|g| (g, p)))
             .collect(),
         photo_keywords: &input.photo_keywords,
+        renamed,
         failed_keywords: BTreeSet::new(),
         failed_photos: BTreeSet::new(),
         current: None,
@@ -436,6 +439,11 @@ struct Run<'a> {
     /// a conflicting field keeps its last imported value.
     recorded: BTreeMap<String, PhotoFields>,
     photo_keywords: &'a BTreeMap<i64, Vec<Keyword>>,
+    /// New keyword path text → recorded path text, for keywords renamed in
+    /// Lightroom. A freshly imported photo records its keywords under the
+    /// recorded path, so the next run does not read the rename as a removed
+    /// membership.
+    renamed: BTreeMap<String, String>,
     /// Path texts of keywords that could not be created.
     failed_keywords: BTreeSet<String>,
     /// Global ids of photos whose steps failed; their reconciled values are
@@ -1545,7 +1553,7 @@ impl Run<'_> {
             .recorded
             .get(&current.global_id)
             .cloned()
-            .unwrap_or_else(|| snapshot(photo, keywords));
+            .unwrap_or_else(|| snapshot_with_renames(photo, keywords, &self.renamed));
         if entry.fields == fields && entry.lightroom_id == photo.lightroom_id && !path_added {
             return Ok(());
         }
@@ -1912,5 +1920,52 @@ mod tests {
         let w = wanted_keywords(&input);
         assert!(w["A|B"].person);
         assert!(!w["A"].person);
+    }
+
+    #[test]
+    fn a_freshly_imported_photo_records_the_recorded_keyword_path() {
+        use lc_test_support::fake_lightcraft::{Config, FakeLightCraft};
+
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("Test.lightcraft");
+        let state_file = crate::state::state_path(&library);
+        let mut state = State::default();
+        // The keyword was created earlier and has since been renamed in
+        // Lightroom; the mapping file still knows the old path text only.
+        state.record_keyword(
+            &Keyword::new(vec!["Old".into()])
+                .unwrap()
+                .with_global_id("kg-1")
+                .with_lightroom_id(13),
+        );
+        state.save(&state_file).unwrap();
+
+        let fake = FakeLightCraft::start(Config::new(&library));
+        let renamed = Keyword::new(vec!["New".into()])
+            .unwrap()
+            .with_global_id("kg-1")
+            .with_lightroom_id(13);
+        let mut photo_keywords = BTreeMap::new();
+        photo_keywords.insert(7, vec![renamed.clone()]);
+        let input = WriteInput {
+            photos: vec![
+                Photo::new("/photos/a.jpg", 7, model::Rating::default()).with_global_id("g1"),
+            ],
+            keywords: vec![renamed],
+            photo_keywords,
+            ..WriteInput::default()
+        };
+        let mut client = ControlClient::connect(fake.port()).unwrap();
+        apply(&mut client, &input, &mut state, &state_file).unwrap();
+
+        let recorded = State::load(&state_file).unwrap();
+        assert_eq!(
+            recorded.photo("g1").unwrap().fields.keywords,
+            ["Old".to_string()],
+            "a fresh import records the keyword under its recorded path text"
+        );
+        // The next run does not read the rename as a removed membership.
+        let p = plan(&input, &recorded, &BTreeSet::new());
+        assert_eq!(p.keywords_removed(), 0);
     }
 }
