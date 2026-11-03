@@ -16,11 +16,15 @@ This document answers four questions:
 Every statement is either **sourced** (the source is named inline, with
 `file:line` for code and a URL or repository path for documents) or marked
 **(assumption)**. An assumption is not a fact and must be checked before it is
-built on.
+built on. A statement that carries neither a citation nor a URL from §9 is an
+assumption; where such a statement is not marked explicitly, treat it as one.
 
 Source roots used below:
 
-- **LightCraft 0.14.0 source tree** — line numbers refer to that tree. Path
+- **LightCraft 0.14.0 source tree** — commit
+  `bb08a697a41b2561a54f1b740245119503b24758`, public at
+  https://github.com/storytold/lightcraft (§9 gives the URL for every
+  citation and the retrieval date). Line numbers refer to that tree. Path
   shorthand used in citations:
   - `crs.rs` = `crates/engine/src/crs.rs`
   - `crs_masks.rs` = `crates/engine/src/crs_masks.rs`
@@ -31,9 +35,13 @@ Source roots used below:
   - `develop.rs` = `crates/engine/src/cmd/develop.rs`
   - docs are under `docs/`.
 - **lr2lc repository**, branch `main`, commit `e611212` — line numbers for the
-  files that exist there today.
-- **lrcat-extractor 0.6.0** — only read, no code copied (MPL-2.0). Its format
-  notes are `doc/lrcat_format.md`.
+  files that exist there today. The repository is not published yet, so these
+  citations have no public URL; later commits moved some of these lines, so
+  re-check a line number against the current tree before relying on it.
+- **lrcat-extractor 0.6.0** — commit
+  `a3a59b37a1081a03f69b06648210c65a53aeb482`, public at
+  https://github.com/hfiguiere/lrcat-extractor (§9). Only read, no code copied
+  (MPL-2.0). Its format notes are `doc/lrcat_format.md`.
 
 No real catalog was opened for this document. No values, names, paths or
 keywords from any catalog appear here. The only examples are synthetic field
@@ -776,6 +784,51 @@ as expected (`docs/lightroom-catalog-import.md:100-107`).
 
 ## 9. Sources
 
+### Citation rule
+
+LightCraft was read at commit `bb08a697a41b2561a54f1b740245119503b24758`
+(its `Cargo.toml` says version 0.14.0), retrieved 2026-11-04 from
+https://github.com/storytold/lightcraft.
+
+- A citation written `lightcraft:<path>:<line>` means
+  https://github.com/storytold/lightcraft/blob/bb08a697a41b2561a54f1b740245119503b24758/<path>#L<line>.
+- The path shorthands under "How to read this document" use the same rule:
+  `crs.rs:211` is `crates/engine/src/crs.rs:211`, i.e.
+  https://github.com/storytold/lightcraft/blob/bb08a697a41b2561a54f1b740245119503b24758/crates/engine/src/crs.rs#L211.
+  A range (`:211-220`) is `#L211-L220`.
+- A document shorthand without a directory (`xmp-interop.md:143`,
+  `lightroom-catalog-import.md:59-74`) is a file under `docs/` of the same
+  commit, e.g.
+  https://github.com/storytold/lightcraft/blob/bb08a697a41b2561a54f1b740245119503b24758/docs/xmp-interop.md#L143.
+
+lrcat-extractor was read at commit
+`a3a59b37a1081a03f69b06648210c65a53aeb482` (version 0.6.0), retrieved
+2026-11-04 from https://github.com/hfiguiere/lrcat-extractor. A citation
+`doc/lrcat_format.md:131` means
+https://github.com/hfiguiere/lrcat-extractor/blob/a3a59b37a1081a03f69b06648210c65a53aeb482/doc/lrcat_format.md#L131.
+
+lr2lc is not published yet; its citations (`docs/…`, `crates/…`, `tests/…`,
+`CLAUDE.md`) have no public URL and refer to commit `e611212` in the local
+repository. The one bare lr2lc shorthand, `skip.rs` (§5), means
+`crates/model/src/skip.rs`.
+
+A statement without a citation or URL is an assumption.
+
+### Public sources
+
+| Source | Version / commit | URL | Retrieved |
+| --- | --- | --- | --- |
+| LightCraft source tree | 0.14.0, `bb08a697a41b2561a54f1b740245119503b24758` | https://github.com/storytold/lightcraft/tree/bb08a697a41b2561a54f1b740245119503b24758 | 2026-11-04 |
+| LightCraft `docs/lightroom-catalog-import.md` | same commit | https://github.com/storytold/lightcraft/blob/bb08a697a41b2561a54f1b740245119503b24758/docs/lightroom-catalog-import.md | 2026-11-04 |
+| LightCraft `docs/xmp-interop.md` | same commit | https://github.com/storytold/lightcraft/blob/bb08a697a41b2561a54f1b740245119503b24758/docs/xmp-interop.md | 2026-11-04 |
+| LightCraft `docs/control-protocol.md` | same commit | https://github.com/storytold/lightcraft/blob/bb08a697a41b2561a54f1b740245119503b24758/docs/control-protocol.md | 2026-11-04 |
+| LightCraft `docs/process-versions.md` | same commit | https://github.com/storytold/lightcraft/blob/bb08a697a41b2561a54f1b740245119503b24758/docs/process-versions.md | 2026-11-04 |
+| lrcat-extractor | 0.6.0, `a3a59b37a1081a03f69b06648210c65a53aeb482` | https://github.com/hfiguiere/lrcat-extractor/tree/a3a59b37a1081a03f69b06648210c65a53aeb482 | 2026-11-04 |
+| lrcat-extractor `doc/lrcat_format.md` | same commit | https://github.com/hfiguiere/lrcat-extractor/blob/a3a59b37a1081a03f69b06648210c65a53aeb482/doc/lrcat_format.md | 2026-11-04 |
+| lr2lc repository | `e611212` | not published; local repository only | – |
+
+What was read from these sources:
+
 - LightCraft 0.14.0, `crates/engine/src/crs.rs`, `crs_masks.rs`,
   `lightroom_catalog.rs`, `preset_import.rs`, `cmd/develop.rs`, `cmd/query.rs`.
 - LightCraft 0.14.0, `crates/develop/src/settings.rs`, `controls.rs`.
@@ -789,3 +842,7 @@ as expected (`docs/lightroom-catalog-import.md:100-107`).
   `crates/lc-writer/src/plan.rs`, `crates/lc-test-support/src/fake_lightcraft.rs`,
   `tests/fixtures/README.md`, `tests/fixtures/generator/`.
 - lrcat-extractor 0.6.0, `doc/lrcat_format.md` (read only).
+
+No other public source is cited in this document. In particular, no public
+Adobe schema or slider-range documentation was found (§2.1, §3 range caveat);
+those parts are marked as assumptions and are not upgraded by this section.
