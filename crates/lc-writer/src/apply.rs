@@ -303,6 +303,7 @@ pub fn apply_partial(
             .collect(),
         photo_keywords: &input.photo_keywords,
         failed_keywords: BTreeSet::new(),
+        failed_photos: BTreeSet::new(),
         current: None,
         collections: input
             .collections
@@ -414,6 +415,9 @@ struct Run<'a> {
     photo_keywords: &'a BTreeMap<i64, Vec<Keyword>>,
     /// Path texts of keywords that could not be created.
     failed_keywords: BTreeSet<String>,
+    /// Global ids of photos whose steps failed; their reconciled values are
+    /// not recorded, so the next run sends their updates again.
+    failed_photos: BTreeSet<String>,
     current: Option<Current>,
     /// The input collections by Lightroom id.
     collections: BTreeMap<i64, &'a Collection>,
@@ -492,7 +496,8 @@ impl Run<'_> {
         for step in steps {
             self.step(step)?;
         }
-        self.finish_photo()
+        self.finish_photo()?;
+        self.record_converged()
     }
 
     fn step(&mut self, step: &Step) -> Result<(), WriteError> {
@@ -1479,6 +1484,7 @@ impl Run<'_> {
             return Ok(());
         };
         if !current.ok {
+            self.failed_photos.insert(current.global_id);
             return Ok(());
         }
         let (Some(photo), Some(entry)) = (
@@ -1513,6 +1519,39 @@ impl Run<'_> {
         self.state
             .record(current.global_id, photo.lightroom_id, id, fields);
         self.state.save(self.state_file)?;
+        Ok(())
+    }
+
+    /// Persists the reconciled base values of known photos that needed no
+    /// step at all: every field already equal on both sides, or a keyword
+    /// only removed in Lightroom. Such a photo never becomes `current`, so
+    /// [`Self::finish_photo`] does not see it. Without this the mapping file
+    /// keeps the old base: a later Lightroom change would be reported as a
+    /// conflict, and a keyword removed in Lightroom would be counted again on
+    /// every run. A photo whose steps failed keeps its old base.
+    fn record_converged(&mut self) -> Result<(), WriteError> {
+        let mut saved = false;
+        for (global_id, fields) in &self.recorded {
+            if self.failed_photos.contains(global_id) {
+                continue;
+            }
+            let (Some(photo), Some(entry)) = (
+                self.photos.get(global_id.as_str()).copied(),
+                self.state.photo(global_id),
+            ) else {
+                continue;
+            };
+            if entry.fields == *fields && entry.lightroom_id == photo.lightroom_id {
+                continue;
+            }
+            let id = entry.lightcraft_id.clone();
+            self.state
+                .record(global_id, photo.lightroom_id, id, fields.clone());
+            saved = true;
+        }
+        if saved {
+            self.state.save(self.state_file)?;
+        }
         Ok(())
     }
 

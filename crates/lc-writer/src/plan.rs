@@ -821,7 +821,14 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
                     out.recorded.insert(gid.to_string(), recorded);
                     changes
                 }
-                None => field_changes(&old, &new),
+                None => {
+                    // Without live state the only difference can be a
+                    // keyword that left the photo in Lightroom: it is never
+                    // removed in LightCraft, but it is no longer recorded, so
+                    // a later run does not report it again.
+                    out.recorded.insert(gid.to_string(), new.clone());
+                    field_changes(&old, &new)
+                }
             }
         } else {
             field_changes(&old, &new)

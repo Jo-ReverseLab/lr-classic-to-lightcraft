@@ -562,6 +562,96 @@ fn h_a_live_read_error_aborts_without_a_partial_write() {
     );
 }
 
+// --- i) converged values are recorded even without a step ---
+
+/// The recorded fields of one photo in the mapping file on disk.
+fn recorded(env: &Env, global_id: &str) -> PhotoFields {
+    State::load(&env.state_file)
+        .unwrap()
+        .photo(global_id)
+        .unwrap()
+        .fields
+        .clone()
+}
+
+#[test]
+fn i_a_value_equal_on_both_sides_updates_the_base_so_a_later_change_is_written() {
+    let env = env();
+    let mut state = State::default();
+    state.record("g1", 7, json!(1001), last(&[]));
+    state.save(&env.state_file).unwrap();
+
+    // Lightroom and LightCraft both moved to 3 stars: nothing to write, but
+    // the base must become 3 so that a later Lightroom change is not read as
+    // a conflict.
+    let mut config = Config::new(&env.library);
+    config.seed_photos = vec![SeedPhoto {
+        rating: 3,
+        ..SeedPhoto::plain(1001)
+    }];
+    let fake = FakeLightCraft::start(config);
+    let first = apply_once(
+        &fake,
+        &env,
+        &input(vec![photo("g1", 7, 3)], BTreeMap::new(), None),
+    )
+    .unwrap();
+    assert_eq!(first.updates, 0, "{first:?}");
+    assert!(first.conflicts.is_empty(), "{first:?}");
+    assert!(fake.write_commands().is_empty(), "{:?}", fake.commands());
+    assert_eq!(
+        recorded(&env, "g1").rating,
+        3,
+        "the base follows the converged value"
+    );
+
+    // Only Lightroom moves now (3 -> 5); LightCraft still has 3: write it.
+    let second = apply_once(
+        &fake,
+        &env,
+        &input(vec![photo("g1", 7, 5)], BTreeMap::new(), None),
+    )
+    .unwrap();
+    assert_eq!(second.updates, 1, "{second:?}");
+    assert!(second.conflicts.is_empty(), "{second:?}");
+    assert_eq!(fake.ratings()[&1001], 5);
+}
+
+#[test]
+fn i_a_keyword_removed_in_lightroom_is_counted_once_and_stops_being_recorded() {
+    let env = env();
+    let mut state = State::default();
+    state.record("g1", 7, json!(1001), last(&["A", "B"]));
+    state.save(&env.state_file).unwrap();
+
+    // Lightroom removed B and added C; LightCraft already has C, so there is
+    // no command at all. The removal must still be reported exactly once.
+    let mut config = Config::new(&env.library);
+    config.keywords = ["A", "B", "C"].iter().map(|k| k.to_string()).collect();
+    config.seed_photos = vec![SeedPhoto {
+        keywords: vec!["A".into(), "B".into(), "C".into()],
+        ..SeedPhoto::plain(1001)
+    }];
+    let fake = FakeLightCraft::start(config);
+    let mut photo_keywords = BTreeMap::new();
+    photo_keywords.insert(7, vec![kw(&["A"]), kw(&["C"])]);
+    let input = input(vec![photo("g1", 7, 0)], photo_keywords, None);
+
+    let first = apply_once(&fake, &env, &input).unwrap();
+    assert_eq!(first.keywords_removed, 1, "{first:?}");
+    assert_eq!(first.updates, 0, "{first:?}");
+    assert!(fake.write_commands().is_empty(), "{:?}", fake.commands());
+    assert_eq!(
+        recorded(&env, "g1").keywords,
+        ["A".to_string(), "C".to_string()],
+        "B is no longer the recorded base"
+    );
+
+    let second = apply_once(&fake, &env, &input).unwrap();
+    assert_eq!(second.keywords_removed, 0, "{second:?}");
+    assert_eq!(second.updates, 0, "{second:?}");
+}
+
 // --- no live state: the dry run keeps the two-way behaviour ---
 
 #[test]
