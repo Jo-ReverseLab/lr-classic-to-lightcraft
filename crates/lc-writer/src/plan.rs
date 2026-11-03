@@ -33,17 +33,40 @@
 //!   with `name`, `parent` (below top level, as for `album.create`) and the
 //!   translated `rules` (see [`crate::smart`]) for each one that is not
 //!   recorded yet; a recorded one gets no command, whatever changed, and a
-//!   change of its rules is only counted.
+//!   change of its rules is only counted;
+//! - when the live state of the library is known ([`WriteInput::live`]), the
+//!   fields of a known photo are compared three ways: last imported value
+//!   (mapping file), Lightroom now (model) and LightCraft now. A field
+//!   changed in Lightroom is written only if LightCraft still has the last
+//!   imported value or already has the new one; a field changed differently
+//!   on both sides is a conflict, never written and reported by photo and
+//!   field only ([`Conflict`]). Keyword memberships that left a photo in
+//!   Lightroom are only counted ([`Plan::keywords_removed`]);
+//!   `removeKeywords` is never sent.
 
+use crate::live::{LivePhoto, LiveState};
 use crate::smart::{convertible, translate};
 use crate::state::{EntryKind, PhotoFields, State, keyword_text, snapshot};
 use model::{
     Collection, CollectionKind, Keyword, Photo, QuickCollection, SkipCode, Skipped,
     SmartCollection, Stack,
 };
+use serde::Serialize;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+
+/// A field that changed differently on both sides since the last import:
+/// nothing is written for it. Only the photo's Lightroom id and the field
+/// name are carried, never a value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Conflict {
+    /// The photo's id in the Lightroom catalog.
+    pub photo: i64,
+    /// `rating`, `flag`, `label`, `title`, `caption`, `copyright` or
+    /// `creator`.
+    pub field: String,
+}
 
 /// Everything the writer is asked to put into the library.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -68,6 +91,11 @@ pub struct WriteInput {
     /// set). Recorded smart albums with such an id are counted as
     /// [`Plan::smart_no_longer_translatable`], not as removed.
     pub smart_untranslatable_ids: Vec<i64>,
+    /// The library as LightCraft has it now, read with
+    /// [`crate::live::read_live`]. `None` in a dry run (no connection) and
+    /// before an apply run has read the library; the plan then compares only
+    /// Lightroom with the mapping file.
+    pub live: Option<LiveState>,
 }
 
 /// One command of the plan.
@@ -202,9 +230,42 @@ pub struct Plan {
     smart_rules_changed: usize,
     /// Smart collections that cannot be written.
     smart_skips: Vec<Skipped>,
+    /// Fields changed differently on both sides, sorted by photo and field;
+    /// nothing is written for them.
+    conflicts: Vec<Conflict>,
+    /// Keyword memberships that left a photo in Lightroom (`last` has them,
+    /// `lr` does not). They stay in LightCraft and are only counted.
+    keywords_removed: usize,
+    /// The fields to record for known photos after the run, by global id, so
+    /// a conflicting field keeps its last imported value and the next run
+    /// reports the conflict again.
+    recorded: BTreeMap<String, PhotoFields>,
 }
 
 impl Plan {
+    /// The fields that changed differently in Lightroom and in LightCraft
+    /// since the last import, sorted ascending by photo, then by field in
+    /// the fixed order rating, flag, label, title, caption, copyright,
+    /// creator. Nothing is written for a conflicting field and no value is
+    /// ever reported.
+    pub fn conflicts(&self) -> &[Conflict] {
+        &self.conflicts
+    }
+
+    /// Keyword memberships that left a photo in Lightroom since the last
+    /// import. They are kept in LightCraft and only counted; the plan never
+    /// sends `removeKeywords`.
+    pub fn keywords_removed(&self) -> usize {
+        self.keywords_removed
+    }
+
+    /// The field values to record in the mapping file for the known photos
+    /// the live state covered, by global id. A conflicting field keeps its
+    /// last imported value.
+    pub(crate) fn recorded_fields_map(&self) -> BTreeMap<String, PhotoFields> {
+        self.recorded.clone()
+    }
+
     /// The skipped keywords (attributes changed after creation).
     pub fn keyword_skips(&self) -> &[Skipped] {
         &self.skipped[..self.keyword_skips.min(self.skipped.len())]
@@ -484,6 +545,40 @@ pub fn plan(input: &WriteInput, state: &State, library_keywords: &BTreeSet<Strin
     out
 }
 
+/// Whether reconciling at least one known photo needs the live values from
+/// LightCraft: a field or a keyword membership changed in Lightroom since the
+/// last import. If nothing changed in Lightroom, the live value can never
+/// change the outcome (rule: `lr == last` means nothing is written), so an
+/// apply run can skip the read and a second run sends no extra commands.
+pub(crate) fn needs_live(input: &WriteInput, state: &State) -> bool {
+    input.photos.iter().any(|photo| {
+        let Some(global_id) = photo.global_id.as_deref() else {
+            return false;
+        };
+        let Some(entry) = state.photo(global_id) else {
+            return false;
+        };
+        let keywords = input
+            .photo_keywords
+            .get(&photo.lightroom_id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let new = snapshot(photo, keywords);
+        let old = &entry.fields;
+        new.rating != old.rating
+            || new.flag != old.flag
+            || new.label != old.label
+            || new.title != old.title
+            || new.caption != old.caption
+            || new.copyright != old.copyright
+            || new.creator != old.creator
+            || new
+                .keywords
+                .iter()
+                .any(|keyword| !old.keywords.iter().any(|last| last == keyword))
+    })
+}
+
 fn plan_smart(input: &WriteInput, state: &State, out: &mut Plan) {
     for s in &input.smart {
         if let Some(entry) = state.collection(s.lightroom_id) {
@@ -711,7 +806,26 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
                 PhotoFields::imported_default()
             }
         };
-        let changes = field_changes(&old, &new);
+        let changes = if known {
+            // Memberships that left the photo in Lightroom: they stay in
+            // LightCraft, so they are only counted, never sent.
+            out.keywords_removed += old
+                .keywords
+                .iter()
+                .filter(|k| !new.keywords.contains(k))
+                .count();
+            match input.live.as_ref().and_then(|live| live.photos.get(gid)) {
+                Some(live) => {
+                    let (changes, recorded) =
+                        reconcile(&old, &new, live, p.lightroom_id, &mut out.conflicts);
+                    out.recorded.insert(gid.to_string(), recorded);
+                    changes
+                }
+                None => field_changes(&old, &new),
+            }
+        } else {
+            field_changes(&old, &new)
+        };
         if known {
             if changes.is_empty() {
                 out.photos_unchanged += 1;
@@ -726,6 +840,24 @@ fn plan_photos(input: &WriteInput, state: &State, out: &mut Plan) {
                 params,
             });
         }
+    }
+    // Deterministic report order: by photo, then by the fixed field order.
+    out.conflicts
+        .sort_by_key(|c| (c.photo, field_order(&c.field)));
+}
+
+/// The position of a field name in the fixed conflict order.
+fn field_order(field: &str) -> usize {
+    match field {
+        "rating" => 0,
+        "flag" => 1,
+        "label" => 2,
+        "title" => 3,
+        "caption" => 4,
+        "copyright" => 5,
+        "creator" => 6,
+        // Not produced by the plan; keeps the sort total.
+        _ => 7,
     }
 }
 
@@ -928,7 +1060,9 @@ fn create_album_params(c: &Collection, state: &State) -> Value {
 }
 
 /// The commands that turn the fields `old` into `new`, at most one per
-/// command, in a fixed order.
+/// command, in a fixed order. Without a live state this is the two-way
+/// comparison: every change in Lightroom is written. Keywords that left the
+/// photo in Lightroom are never removed; the caller only counts them.
 fn field_changes(old: &PhotoFields, new: &PhotoFields) -> Vec<(&'static str, Value)> {
     let mut out = Vec::new();
     if old.rating != new.rating {
@@ -957,17 +1091,136 @@ fn field_changes(old: &PhotoFields, new: &PhotoFields) -> Vec<(&'static str, Val
     let before: BTreeSet<&String> = old.keywords.iter().collect();
     let after: BTreeSet<&String> = new.keywords.iter().collect();
     let added: Vec<&String> = after.difference(&before).copied().collect();
-    let removed: Vec<&String> = before.difference(&after).copied().collect();
     if !added.is_empty() {
         meta.insert("addKeywords".to_string(), json!(added));
-    }
-    if !removed.is_empty() {
-        meta.insert("removeKeywords".to_string(), json!(removed));
     }
     if !meta.is_empty() {
         out.push(("photo.setMeta", Value::Object(meta)));
     }
     out
+}
+
+/// What a three-way comparison decides for one field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Decision {
+    /// `lr == last`: Lightroom did not change it; nothing to write.
+    Nothing,
+    /// `lr != last`, `lc == last`: write the Lightroom value.
+    Write,
+    /// `lr != last`, `lc == lr`: both sides already agree; nothing to write.
+    AlreadyEqual,
+    /// `lr != last`, `lc != last`, `lc != lr`: a conflict, write nothing.
+    Conflict,
+}
+
+fn decide<T: PartialEq>(last: &T, lr: &T, lc: &T) -> Decision {
+    if lr == last {
+        Decision::Nothing
+    } else if lc == last {
+        Decision::Write
+    } else if lc == lr {
+        Decision::AlreadyEqual
+    } else {
+        Decision::Conflict
+    }
+}
+
+/// The commands that bring one known photo from its last imported values to
+/// the Lightroom values, given what LightCraft has now, and the values to
+/// record afterwards. A conflicting field is not written and keeps its last
+/// imported value in the mapping file, so a later run reports it again.
+/// `phot` is the Lightroom id used in the conflict report.
+fn reconcile(
+    old: &PhotoFields,
+    new: &PhotoFields,
+    live: &LivePhoto,
+    photo: i64,
+    conflicts: &mut Vec<Conflict>,
+) -> (Vec<(&'static str, Value)>, PhotoFields) {
+    let mut changes = Vec::new();
+    let mut recorded = old.clone();
+    let mut conflict = |field: &str| {
+        conflicts.push(Conflict {
+            photo,
+            field: field.to_string(),
+        })
+    };
+
+    let decision = decide(&old.rating, &new.rating, &live.rating);
+    if decision == Decision::Write {
+        changes.push(("photo.rate", json!({"rating": new.rating})));
+    }
+    if decision == Decision::Conflict {
+        conflict("rating");
+    } else {
+        recorded.rating = new.rating;
+    }
+
+    let decision = decide(&old.flag, &new.flag, &live.flag);
+    if decision == Decision::Write {
+        changes.push(("photo.flag", json!({"flag": new.flag})));
+    }
+    if decision == Decision::Conflict {
+        conflict("flag");
+    } else {
+        recorded.flag = new.flag.clone();
+    }
+
+    let decision = decide(&old.label, &new.label, &live.label);
+    if decision == Decision::Write {
+        let label = new.label.as_deref().unwrap_or("none");
+        changes.push(("photo.label", json!({"label": label})));
+    }
+    if decision == Decision::Conflict {
+        conflict("label");
+    } else {
+        recorded.label = new.label.clone();
+    }
+
+    let mut meta = Map::new();
+    macro_rules! text_field {
+        ($field:ident, $name:literal) => {{
+            let decision = decide(&old.$field, &new.$field, &live.$field);
+            match decision {
+                Decision::Write => {
+                    meta.insert(
+                        $name.to_string(),
+                        json!(new.$field.as_deref().unwrap_or("")),
+                    );
+                    recorded.$field = new.$field.clone();
+                }
+                Decision::Nothing | Decision::AlreadyEqual => {
+                    recorded.$field = new.$field.clone();
+                }
+                Decision::Conflict => conflict($name),
+            }
+        }};
+    }
+    text_field!(title, "title");
+    text_field!(caption, "caption");
+    text_field!(copyright, "copyright");
+    text_field!(creator, "creator");
+
+    // Keywords, element by element: a keyword new in Lightroom is added only
+    // if LightCraft does not have it yet; one only in LightCraft is kept.
+    let last: BTreeSet<&String> = old.keywords.iter().collect();
+    let lightroom: BTreeSet<&String> = new.keywords.iter().collect();
+    let added: Vec<&str> = lightroom
+        .difference(&last)
+        .filter(|k| !live.keywords.iter().any(|have| have.as_str() == k.as_str()))
+        .map(|k| k.as_str())
+        .collect();
+    if !added.is_empty() {
+        meta.insert("addKeywords".to_string(), json!(added));
+    }
+    // Keywords that left the photo in Lightroom stay in LightCraft; they are
+    // not recorded any more, so a later run does not report them again.
+    recorded.keywords = new.keywords.clone();
+
+    if !meta.is_empty() {
+        changes.push(("photo.setMeta", Value::Object(meta)));
+    }
+    (changes, recorded)
 }
 
 #[cfg(test)]

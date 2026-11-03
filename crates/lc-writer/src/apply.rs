@@ -78,9 +78,10 @@
 
 use crate::albums::{Decision, Existing, Node, parse_album_list};
 use crate::control::{ControlClient, Outcome, WriteError};
+use crate::live::read_live;
 use crate::plan::{
-    Step, WriteInput, group_params, import_params, members_select_params, plan, same_members,
-    select_params, smart_skip_reason,
+    Conflict, Step, WriteInput, group_params, import_params, members_select_params, needs_live,
+    plan, same_members, select_params, smart_skip_reason,
 };
 use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, keyword_text, snapshot};
 use model::{Collection, CollectionKind, Keyword, Photo, SkipCode, Skipped, SmartCollection};
@@ -194,6 +195,14 @@ pub struct ApplySummary {
     /// Smart collections not created, each with a reason; a later run tries
     /// again.
     pub smart_skipped: Vec<Skipped>,
+    /// Fields changed differently on both sides since the last import
+    /// (Lightroom and LightCraft); nothing was written for them. Sorted by
+    /// photo, then by field; they name only the photo id and the field, never
+    /// a value.
+    pub conflicts: Vec<Conflict>,
+    /// Keyword memberships that left their photo in Lightroom since the last
+    /// import. They stay in LightCraft and are only counted.
+    pub keywords_removed: usize,
 }
 
 /// A run that stopped: the error and what was done up to it.
@@ -234,6 +243,29 @@ pub fn apply_partial(
         error,
         summary: Box::default(),
     })?;
+    // The live state is needed to tell a Lightroom change from a LightCraft
+    // one. It is read before anything is written: a read error aborts the run
+    // with nothing written. When no known photo changed in Lightroom, the
+    // live values cannot change the outcome, so the extra reads are skipped
+    // and a first or unchanged second run sends the same commands as before.
+    let live = match &input.live {
+        Some(_) => None,
+        None if !needs_live(input, state) => None,
+        None => Some(read_live(client, state).map_err(|error| Aborted {
+            error,
+            summary: Box::default(),
+        })?),
+    };
+    let with_live;
+    let input = if let Some(live) = live {
+        with_live = WriteInput {
+            live: Some(live),
+            ..input.clone()
+        };
+        &with_live
+    } else {
+        input
+    };
     let plan = plan(input, state, &listed);
     let mut run = Run {
         client,
@@ -258,8 +290,11 @@ pub fn apply_partial(
             smart_known: plan.smart_known(),
             smart_rules_changed: plan.smart_rules_changed(),
             smart_skipped: plan.smart_skips().to_vec(),
+            conflicts: plan.conflicts().to_vec(),
+            keywords_removed: plan.keywords_removed(),
             ..ApplySummary::default()
         },
+        recorded: plan.recorded_fields_map(),
         keywords: wanted_keywords(input),
         photos: input
             .photos
@@ -373,6 +408,9 @@ struct Run<'a> {
     keywords: BTreeMap<String, Keyword>,
     /// The input photos by global id (first one wins, as in the plan).
     photos: BTreeMap<&'a str, &'a Photo>,
+    /// The fields to record for known photos after the run, from the plan;
+    /// a conflicting field keeps its last imported value.
+    recorded: BTreeMap<String, PhotoFields>,
     photo_keywords: &'a BTreeMap<i64, Vec<Keyword>>,
     /// Path texts of keywords that could not be created.
     failed_keywords: BTreeSet<String>,
@@ -1459,7 +1497,15 @@ impl Run<'_> {
             .get(&photo.lightroom_id)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        let fields = snapshot(photo, keywords);
+        // A known photo the live state covered records what was reconciled:
+        // a field changed on both sides keeps its last imported value, so the
+        // next run reports the conflict again. An imported photo records its
+        // snapshot.
+        let fields = self
+            .recorded
+            .get(&current.global_id)
+            .cloned()
+            .unwrap_or_else(|| snapshot(photo, keywords));
         if entry.fields == fields && entry.lightroom_id == photo.lightroom_id {
             return Ok(());
         }
