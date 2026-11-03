@@ -182,7 +182,9 @@ fn inspect_error() -> WriteError {
 /// Reads `{total, photos: [{id, rating, flag, label, title, keywords}]}`.
 /// Caption, copyright and creator are left `None`.
 fn parse_summary_page(value: &Value) -> Result<(usize, Vec<(Value, LivePhoto)>), WriteError> {
-    let total = value["total"].as_u64().ok_or_else(summary_error)? as usize;
+    let total = value["total"].as_u64().ok_or_else(summary_error)?;
+    // Refuse a count that does not fit `usize` instead of truncating it.
+    let total = usize::try_from(total).map_err(|_| summary_error())?;
     let items = value["photos"].as_array().ok_or_else(summary_error)?;
     let mut out = Vec::with_capacity(items.len());
     for item in items {
@@ -274,6 +276,20 @@ mod tests {
         assert_eq!(items[1].1.title, None);
         assert_eq!(items[1].1.label, None);
         assert!(items[1].1.keywords.is_empty());
+    }
+
+    #[test]
+    fn summary_page_total_is_never_truncated() {
+        let v = json!({"total": 2, "photos": []});
+        assert_eq!(parse_summary_page(&v).unwrap().0, 2);
+        // A count that does not fit `usize` must be refused, not truncated.
+        if usize::BITS < 64 {
+            let v = json!({"total": u64::MAX, "photos": []});
+            assert!(matches!(
+                parse_summary_page(&v),
+                Err(WriteError::Protocol(_))
+            ));
+        }
     }
 
     #[test]

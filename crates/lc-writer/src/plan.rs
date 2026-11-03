@@ -474,7 +474,13 @@ impl Plan {
                 }
                 Step::Import { path, .. } => {
                     selected = None;
-                    push("library.import", import_params(path));
+                    // The plan only creates imports for valid UTF-8 paths
+                    // (others are skipped with `PathNotUtf8`), so this is
+                    // always `Some`; dropping a line is safer than sending a
+                    // path that names another file.
+                    if let Some(params) = import_params(path) {
+                        push("library.import", params);
+                    }
                 }
                 Step::VirtualCopy {
                     master_global_id, ..
@@ -545,9 +551,14 @@ impl Plan {
 
 /// The parameters of a reference-only import of one file. Nothing else is
 /// ever sent: no copy, move, rename, presets or keywords.
-pub fn import_params(path: &std::path::Path) -> Value {
-    // The plan only creates imports for paths that are valid UTF-8.
-    json!({"paths": [path.to_string_lossy()], "mode": "add"})
+///
+/// Returns `None` for a path that is not valid UTF-8: the JSON protocol can
+/// only carry text, and a lossily encoded path would name a different file.
+/// The plan never creates such a step (it skips the photo with
+/// [`SkipCode::PathNotUtf8`] first); the `None` is a defensive check for
+/// callers outside the plan.
+pub fn import_params(path: &std::path::Path) -> Option<Value> {
+    Some(json!({"paths": [path.to_str()?], "mode": "add"}))
 }
 
 /// The LightCraft id of a photo, or the placeholder `lr:<global id>`.
@@ -1439,6 +1450,19 @@ mod tests {
 
     fn kw(parts: &[&str]) -> Keyword {
         Keyword::new(parts.iter().map(|s| s.to_string()).collect()).unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn import_params_rejects_a_non_utf8_path() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::path::Path::new(OsStr::from_bytes(b"/photos/\xff.jpg"));
+        assert_eq!(import_params(path), None);
+        assert_eq!(
+            import_params(std::path::Path::new("/photos/a.jpg")),
+            Some(json!({"paths": ["/photos/a.jpg"], "mode": "add"}))
+        );
     }
 
     #[test]

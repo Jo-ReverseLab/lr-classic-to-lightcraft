@@ -381,7 +381,9 @@ pub(crate) struct QueryPage {
 /// Reads `{total, photos: [{id, …}]}`; any other shape is a protocol error.
 pub(crate) fn parse_query_page(value: &Value) -> Result<QueryPage, WriteError> {
     let bad = || WriteError::Protocol("catalog.query answered in an unknown shape".into());
-    let total = value["total"].as_u64().ok_or_else(bad)? as usize;
+    let total = value["total"].as_u64().ok_or_else(bad)?;
+    // Refuse a count that does not fit `usize` instead of truncating it.
+    let total = usize::try_from(total).map_err(|_| bad())?;
     let ids = value["photos"]
         .as_array()
         .ok_or_else(bad)?
@@ -1260,14 +1262,24 @@ impl Run<'_> {
             self.fail_current();
             return Ok(());
         };
-        let params = import_params(path);
-        let sent_path = params["paths"][0].clone();
         let skip = |summary: &mut ApplySummary, code: SkipCode, why: &str| {
             summary.photos_skipped.push(Skipped::new(
                 code,
                 format!("photo {}: {why}", photo.lightroom_id),
             ));
         };
+        // Not reachable through `plan` (it skips such a photo with
+        // `PathNotUtf8`); never send a lossily encoded path.
+        let Some(params) = import_params(path) else {
+            skip(
+                &mut self.summary,
+                SkipCode::PathNotUtf8,
+                "the file path is not valid UTF-8",
+            );
+            self.fail_current();
+            return Ok(());
+        };
+        let sent_path = params["paths"][0].clone();
         match self.client.execute("library.import", params) {
             Ok(Outcome::Applied(result)) => match import_id(&result, &sent_path) {
                 ImportResult::Imported(id) => {
@@ -1836,6 +1848,20 @@ mod tests {
                 matches!(parse_keyword_list(&v), Err(WriteError::Protocol(_))),
                 "{v}"
             );
+        }
+    }
+
+    #[test]
+    fn query_page_total_is_never_truncated() {
+        let page = parse_query_page(&json!({"total": 3, "photos": []})).unwrap();
+        assert_eq!(page.total, 3);
+        // A count that does not fit `usize` must be refused, not truncated.
+        if usize::BITS < 64 {
+            let value = json!({"total": u64::MAX, "photos": []});
+            assert!(matches!(
+                parse_query_page(&value),
+                Err(WriteError::Protocol(_))
+            ));
         }
     }
 

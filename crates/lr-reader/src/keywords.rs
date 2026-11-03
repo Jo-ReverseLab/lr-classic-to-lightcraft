@@ -77,6 +77,9 @@ struct SynonymRow {
     keyword: Option<i64>,
     /// `None` if the name is NULL.
     name: Option<String>,
+    /// The name cell held bytes that are not valid UTF-8; `name` is `None`
+    /// then and the row is skipped instead of being altered.
+    name_invalid: bool,
 }
 
 /// One `AgLibraryKeyword` row.
@@ -85,6 +88,9 @@ struct KeywordRow {
     id: i64,
     /// `None` if the name is NULL.
     name: Option<String>,
+    /// The name cell held bytes that are not valid UTF-8; `name` is `None`
+    /// then and the keyword is skipped instead of being altered.
+    name_invalid: bool,
     parent: Option<i64>,
     /// `id_global` if it is text; any other value counts as missing.
     global_id: Option<String>,
@@ -192,9 +198,11 @@ impl Catalog {
             .map_err(ReadError::Query)?;
         let rows = stmt
             .query_map([], |row| {
+                let (name, name_invalid) = value_as_text(row.get(1)?);
                 Ok(KeywordRow {
                     id: row.get(0)?,
-                    name: value_as_text(row.get(1)?),
+                    name,
+                    name_invalid,
                     parent: row.get(2)?,
                     global_id: match row.get(7)? {
                         Value::Text(t) => Some(t),
@@ -221,10 +229,12 @@ impl Catalog {
             .map_err(ReadError::Query)?;
         let rows = stmt
             .query_map([], |row| {
+                let (name, name_invalid) = value_as_text(row.get(2)?);
                 Ok(SynonymRow {
                     id: row.get(0)?,
                     keyword: row.get(1)?,
-                    name: value_as_text(row.get(2)?),
+                    name,
+                    name_invalid,
                 })
             })
             .map_err(ReadError::Query)?;
@@ -253,7 +263,9 @@ impl Catalog {
 fn value_as_id(value: &Value) -> Option<i64> {
     match value {
         Value::Integer(n) => Some(*n),
-        Value::Real(f) if f.fract() == 0.0 => Some(*f as i64),
+        // Below the exactly representable integer range, so the cast cannot
+        // saturate; the same guard as `collections::as_id`.
+        Value::Real(f) if f.fract() == 0.0 && f.abs() < 9.0e15 => Some(*f as i64),
         Value::Text(t) => t.trim().parse().ok(),
         _ => None,
     }
@@ -280,14 +292,20 @@ fn value_as_type(value: &Value) -> KeywordType {
     }
 }
 
-/// Reads a name column; NULL becomes `None`.
-fn value_as_text(value: Value) -> Option<String> {
+/// Reads a name column. Returns the text and whether the cell held bytes that
+/// are not valid UTF-8. A name is never altered: invalid bytes are reported
+/// (and the row skipped) instead of being replaced by U+FFFD, so a name that
+/// does not survive as text is never written under a made-up spelling.
+fn value_as_text(value: Value) -> (Option<String>, bool) {
     match value {
-        Value::Null => None,
-        Value::Text(t) => Some(t),
-        Value::Integer(n) => Some(n.to_string()),
-        Value::Real(f) => Some(f.to_string()),
-        Value::Blob(b) => Some(String::from_utf8_lossy(&b).into_owned()),
+        Value::Null => (None, false),
+        Value::Text(t) => (Some(t), false),
+        Value::Integer(n) => (Some(n.to_string()), false),
+        Value::Real(f) => (Some(f.to_string()), false),
+        Value::Blob(b) => match String::from_utf8(b) {
+            Ok(t) => (Some(t), false),
+            Err(_) => (None, true),
+        },
     }
 }
 
@@ -435,6 +453,12 @@ fn global_ids(rows: &[KeywordRow], root: Option<i64>) -> HashMap<i64, Result<Str
 
 /// The keyword's own name, or the reason it cannot be used.
 fn own_name(row: &KeywordRow) -> Result<String, Skipped> {
+    if row.name_invalid {
+        return Err(Skipped::new(
+            SkipCode::NameInvalid,
+            format!("keyword {}: name is not valid UTF-8", row.id),
+        ));
+    }
     match row.name.as_deref() {
         None => Err(name_empty(row.id)),
         Some(n) if n.trim().is_empty() => Err(name_empty(row.id)),
@@ -472,9 +496,15 @@ fn group_synonyms(
         report.read();
         let keyword = id_text(row.keyword);
         match row.keyword {
-            Some(k) if converted.contains(&k) => match row.name.as_deref() {
-                Some(n) if !n.trim().is_empty() => out.entry(k).or_default().push(n.to_owned()),
-                _ => report.skip(
+            Some(k) if converted.contains(&k) => match (row.name_invalid, row.name.as_deref()) {
+                (true, _) => report.skip(
+                    SkipCode::NameInvalid,
+                    format!("synonym {}: name is not valid UTF-8", row.id),
+                ),
+                (false, Some(n)) if !n.trim().is_empty() => {
+                    out.entry(k).or_default().push(n.to_owned());
+                }
+                (false, _) => report.skip(
                     SkipCode::NameEmpty,
                     format!("synonym {}: name is empty", row.id),
                 ),
@@ -541,6 +571,7 @@ mod tests {
         KeywordRow {
             id,
             name: name.map(str::to_owned),
+            name_invalid: false,
             parent,
             global_id: Some(format!("g{id}")),
             attributes: Attributes::default(),
@@ -891,6 +922,7 @@ mod tests {
             id,
             keyword,
             name: name.map(str::to_owned),
+            name_invalid: false,
         }
     }
 
@@ -951,6 +983,62 @@ mod tests {
                 assert!(!reason.contains(text), "{reason}");
             }
         }
+    }
+
+    #[test]
+    fn out_of_range_real_is_not_an_id() {
+        assert_eq!(value_as_id(&Value::Real(1.0)), Some(1));
+        assert_eq!(value_as_id(&Value::Real(-7.0)), Some(-7));
+        // An integral real outside the exactly representable integer range
+        // must not saturate to i64::MAX.
+        assert_eq!(value_as_id(&Value::Real(1.0e16)), None);
+        assert_eq!(value_as_id(&Value::Real(-1.0e16)), None);
+        assert_eq!(value_as_id(&Value::Real(f64::INFINITY)), None);
+        assert_eq!(value_as_id(&Value::Real(f64::NAN)), None);
+    }
+
+    #[test]
+    fn invalid_utf8_keyword_name_is_skipped() {
+        let mut bad = row(2, None, Some(1));
+        bad.name_invalid = true;
+        let resolved = resolve_keywords(&[row(1, None, None), bad], Some(1));
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(
+            resolved[0].1.as_ref().unwrap_err().reason,
+            "keyword 2: name is not valid UTF-8"
+        );
+        assert_eq!(
+            resolved[0].1.as_ref().unwrap_err().code,
+            SkipCode::NameInvalid
+        );
+    }
+
+    #[test]
+    fn valid_utf8_blob_name_is_kept_byte_for_byte() {
+        let (name, invalid) = value_as_text(Value::Blob(b"A\xc3\xa9".to_vec()));
+        assert_eq!(name.as_deref(), Some("Aé"));
+        assert!(!invalid);
+        let (name, invalid) = value_as_text(Value::Blob(vec![0xff, 0xfe]));
+        assert_eq!(name, None);
+        assert!(invalid, "invalid bytes must not be replaced by U+FFFD");
+    }
+
+    #[test]
+    fn invalid_utf8_synonym_name_is_skipped() {
+        let keyword_rows = [row(1, None, None), row(2, Some("A"), Some(1))];
+        let resolved = resolve_keywords(&keyword_rows, Some(1));
+        let known: HashSet<i64> = keyword_rows.iter().map(|r| r.id).collect();
+        let mut bad = synonym(1, Some(2), None);
+        bad.name_invalid = true;
+        let mut report = Report::new();
+        let out = group_synonyms(&[bad], &known, &resolved, &mut report);
+        assert!(out.is_empty());
+        assert_eq!(report.read_count(), 1);
+        assert_eq!(
+            report.skipped_items()[0].reason,
+            "synonym 1: name is not valid UTF-8"
+        );
+        assert_eq!(report.skipped_items()[0].code, SkipCode::NameInvalid);
     }
 
     #[test]
