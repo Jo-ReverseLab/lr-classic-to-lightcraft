@@ -13,9 +13,13 @@ Sources read for this proposal:
 - `crates/lr2lc/tests/performance.rs`, `crates/lr2lc/tests/performance_guard.rs`
 - one external page: GitHub Actions billing
   (<https://docs.github.com/en/billing/concepts/product-billing/github-actions>,
-  retrieved 2026-11-04)
+  retrieved and read 2026-11-04; the per-minute rates quoted below match the
+  table on that page)
 - one external page: Rust 1.85.0 release notes
   (<https://github.com/rust-lang/rust/releases/tag/1.85.0>, retrieved 2026-11-04)
+- `cargo-audit` source, for the exit codes of `cargo audit`
+  (<https://github.com/rustsec/rustsec/blob/main/cargo-audit/src/commands/audit.rs>,
+  read 2026-11-04)
 
 ## 1. What CI does today
 
@@ -33,7 +37,11 @@ lines:
 
 Not checked today: `--locked` builds, a minimum Rust version, dependency
 advisories, coverage, documentation links and prose, a release gate, and
-personal data in the diff. `PLAN.md:101-103` lists the same gaps as P4 item 15.
+personal data in the diff. This list overlaps with P4 item 15 (`PLAN.md:101-103`),
+but the two are not identical in either direction: PLAN also names the `large`
+fixture as a performance guard and a real LightCraft app, which this list does
+not; PLAN does not name a release gate or a personal-data scan, which this list
+adds.
 
 `Cargo.lock` is committed at the repository root, but the workflow does not
 pass `--locked`, and the toolchain is `stable` (`ci.yml:20`), so the tested
@@ -41,16 +49,29 @@ compiler moves over time.
 
 ## 2. Cost model
 
-All figures below are **billed Actions minutes**: Linux wall-clock minutes
-count 1×, Windows about 2×, macOS about 10×. This is the unit `PLAN.md` uses.
+Two different units appear below and must not be mixed:
+
+- **Billed Actions minutes** — GitHub's billing unit. A Linux wall-clock minute
+  counts 1, Windows ≈ 1.67 and macOS ≈ 10.33 (rounded to "about 2×" and
+  "about 10×" in prose). This is the unit `PLAN.md:38-39` uses.
+- **Dollar rates** — Linux $0.006/min, Windows $0.010/min, macOS $0.062/min
+  for standard 2-core runners on a private repository.
+
+The billed-minute weights are the dollar rates divided by the Linux rate
+(0.010 / 0.006 ≈ 1.67; 0.062 / 0.006 ≈ 10.33). They are therefore ratios
+derived from the rates, not independent measurements. Because of that, one
+billed (Linux-equivalent) minute costs $0.006, and multiplying billed minutes
+by $0.006 gives the dollar figure. All dollar figures in this document apply
+only while the repository is private: the billing page states that standard
+GitHub-hosted runners are free in public repositories.
 
 | Input | Value | Source |
 | --- | --- | --- |
 | Last full matrix run on main (2026-10-28) | ubuntu passed in 6m34s, windows failed in 5m4s, macos cancelled after 15m | `PLAN.md:9-11` |
-| Full matrix cost | roughly 170 Actions minutes | `PLAN.md:38-39` |
-| Private-repo rates (2026-11-04) | Linux $0.006/min, Windows $0.010/min, macOS $0.062/min | GitHub billing page, retrieved 2026-11-04 |
-| Relative multiplier | Windows ≈ 1.7×, macOS ≈ 10.3× Linux | derived from the rates |
-| Check against PLAN | 6.57 + 1.7×5.07 + 10.3×15 ≈ 170 | estimate; consistent with `PLAN.md:38-39` |
+| Full matrix cost | roughly 170 billed minutes | `PLAN.md:38-39` |
+| Private-repo rates (2026-11-04), standard 2-core runners | Linux $0.006/min, Windows $0.010/min, macOS $0.062/min | GitHub billing page, retrieved and read 2026-11-04 |
+| Billed-minute weight (rounded prose form) | Windows ≈ 1.67× (≈ 2×), macOS ≈ 10.33× (≈ 10×) Linux | derived from the rates above |
+| Check against PLAN | 6.57 + 1.67×5.07 + 10.33×15 ≈ 170 | estimate; consistent with `PLAN.md:38-39` |
 
 Consequences:
 
@@ -62,15 +83,28 @@ Consequences:
   (`ci.yml:3-5`), a push to a branch with an open pull request starts two runs
   of the same matrix: about **340 billed minutes ≈ $2.04 per update**
   (inference from GitHub event semantics, not measured).
-- The macOS job dominates every number: it is about 150 of the 170 billed
-  minutes. Linux-only additions are rounding errors by comparison.
+- The macOS job dominates every number: at the derived weight it is about 155
+  of the 170 billed minutes. Linux-only additions are rounding errors against
+  it, but they are still real dollars (see the table in section 4).
 - `PLAN.md:121-122` warns that Actions minutes are paid and that CI silently
   stops proving anything when the allowance runs out. The plan and the monthly
   allowance are not documented in the repository (owner question).
 
-The monthly scenarios below use **40 CI runs per month** purely as an example
-(20 branch updates × 2 because of the double trigger). That number is a
-guess, not a measurement; the real volume is not in the repository.
+Monthly figures are given for two explicitly stated scenarios; the frequency
+matters because it changes every sum:
+
+- **S1 – 40 CI runs per month**: 20 branch updates × 2 runs each, because the
+  workflow listens to both `push` and `pull_request` (`ci.yml:3-5`). This is
+  the baseline **before C10**.
+- **S2 – 20 CI runs per month**: the same 20 branch updates **after C10**
+  removes the duplicate trigger.
+- **Weekly jobs** (C3, C4 on its proposed weekly schedule, C5) are counted as
+  **4 runs per month**. C4 "daily on main" is counted as **30 runs per month**.
+- Per-push jobs (C2) scale with S1 or S2. Weekly and daily jobs do not scale
+  with them.
+
+The 20 branch updates are a guess, not a measurement; the real volume is not
+in the repository. All figures are Linux billed minutes at $0.006/min.
 
 ## 3. Candidates
 
@@ -114,8 +148,8 @@ cannot be lower than 1.85.0. No `rust-version` is declared in any
 `cargo check --workspace --all-targets --locked`: about 4–6 minutes
 (estimate; the full ubuntu job took 6m34s, `PLAN.md:9`).
 
-**Cost.** About 4–6 billed minutes per run, about 160–240 billed minutes per
-month at 40 runs (estimate).
+**Cost.** About 4–6 billed minutes per run; about 160–240 billed minutes per
+month at S1 (40 runs) or 80–120 at S2 (20 runs) (estimates).
 
 **Risk.** A second compiler to maintain; a feature that is stable but newer
 than the MSRV breaks the job. Someone must decide whether the MSRV covers
@@ -155,8 +189,9 @@ about 4–8 billed minutes per month (estimate).
 
 **Risk.** This needs a **new third-party tool or action and the owner's
 approval**, as the task text says. The advisory database is fetched over the
-network. Advisories for unmaintained crates can turn into red CI even when the
-project is not affected. The workflow-level `contents: read` permission
+network. Advisories for unmaintained crates can create noise even when the
+project is not affected; with the `continue-on-error` below they mark the step
+in the UI but do not turn the run red. The workflow-level `contents: read` permission
 (`ci.yml:7-8`) is not enough for actions that open issues; prefer report-only,
 or grant the narrow extra permission deliberately.
 
@@ -164,18 +199,30 @@ or grant the narrow extra permission deliberately.
 
 ```yaml
   audit:
-    name: cargo audit
+    name: cargo audit (report-only)
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: taiki-e/install-action@cargo-audit
-      - run: cargo audit
+      - name: cargo audit
+        continue-on-error: true
+        run: cargo audit
 
 # add to the top-level `on:` block
 #   schedule:
 #     - cron: '0 3 * * 1'
 ```
+
+"Report-only" needs one explicit step: plain `cargo audit` exits with **1**
+when it finds vulnerabilities or denied findings and with **2** on operational
+errors (`cargo-audit/src/commands/audit.rs`, `should_exit_with_failure` and
+`exit(1)`/`exit(2)`; source read 2026-11-04). Without `continue-on-error` the
+job would turn red on every advisory, which is the opposite of reporting only.
+With `continue-on-error: true` the step is marked failed in the UI and keeps
+its log, but the job and the workflow run stay green; the scheduled run is not
+a merge gate. If the owner wants a gate instead, delete `continue-on-error`
+(candidate for section 5, decision 5).
 
 `cargo deny` would replace the two steps with `EmbarkStudios/cargo-deny-action@v2`
 and a `deny.toml`; both are third-party and need the same approval.
@@ -266,7 +313,7 @@ measurement runs to the schedule.
 
 **Benefit.** `README.md` has no external Markdown links (grep for `](http`
 returns zero), only relative links such as `LICENSE-APACHE` and `LICENSE-MIT`
-(`README.md:667-668`) and in-page anchors; `CHANGELOG.md` has one external
+(`README.md:713-714`) and in-page anchors; `CHANGELOG.md` has one external
 link (`CHANGELOG.md:5`). A relative-file check catches a missing license file
 or a renamed document. A prose check (vale) could enforce English and the
 "Lightroom as compatibility statement only" rule (`CLAUDE.md:21`, principle
@@ -394,8 +441,10 @@ right place is the existing matrix.
 (estimate: 40–60 % of compile time).
 
 **Cost.** 0 extra minutes. Expected saving (estimate, not measured): about
-2–4 billed minutes per Linux run, about 2–4 per Windows run, about 5–10 per
-macOS run.
+2–4 billed minutes for the Linux run, about 2–4 for the Windows run and about
+5–10 for the macOS run — roughly **9–18 billed minutes per full matrix**
+(these are billed minutes as defined in section 2, so they already include the
+per-OS weight).
 
 **Risk.** Third-party action (pin it to a commit SHA). Stale caches after a
 toolchain change — the action keys the cache on `Cargo.lock` and the
@@ -427,7 +476,8 @@ that a newer push has superseded.
 **Run time.** Unchanged per run.
 
 **Cost.** Saves about 170 billed minutes per branch update (estimate: half of
-about 340).
+about 340), i.e. at S1's 20 branch updates about **3,400 billed minutes ≈
+$20 per month** while the repository is private.
 
 **Risk.** A direct push to a non-main branch without a pull request gets no
 CI. If branch pushes must keep running on their own, keep `push:` bare and
@@ -452,18 +502,18 @@ concurrency:
 
 Ranking by benefit per billed minute, with the risk above:
 
-| Rank | Candidate | Benefit | Extra cost per run | Risk | Recommendation |
+| Rank | Candidate | Benefit | Cost effect per trigger (estimate) | Risk | Recommendation |
 | --- | --- | --- | --- | --- | --- |
-| 1 | C10 no duplicate runs | halves the bill of every update | saves ≈170 billed min | low; trigger policy | adopt now |
+| 1 | C10 no duplicate runs | halves the bill of every update | saves ≈170 billed min per branch update | low; trigger policy | adopt now |
 | 2 | C1 `--locked` | reproducible builds, stale lockfile fails | 0 | very low | adopt now |
-| 3 | C9 cache | cuts compile time, biggest on macOS | saves ≈2–10 billed min | third-party action, stale cache | adopt after C10 |
-| 4 | C7 `tasks/` release gate | protects the first release | ≈0 | tag convention | adopt now |
-| 5 | C8 personal-data scan | enforces principle 11 | 0 | false positives, allowlist needed | adopt with allowlist |
-| 6 | C2 MSRV | concrete compiler promise | ≈4–6 billed min (Linux) | version choice, maintenance | adopt after the owner picks 1.85 |
-| 7 | C5 scheduled measurements | catches scale regressions | ≈3–6 billed min/week | noise, no threshold | adopt weekly |
-| 8 | C3 cargo audit | advisory and license signal | ≈1–2 billed min/week | new tool, owner approval | adopt once approved |
+| 3 | C9 cache | cuts compile time, biggest on macOS | saves ≈9–18 billed min per matrix run | third-party action, stale cache | adopt after C10 |
+| 4 | C7 `tasks/` release gate | protects the first release | ≈0 (tags only) | tag convention | adopt now |
+| 5 | C8 personal-data scan | enforces principle 11 | 0 (inside the Linux job) | false positives, allowlist needed | adopt with allowlist |
+| 6 | C2 MSRV | concrete compiler promise | ≈4–6 billed min per run | version choice, maintenance | adopt after the owner picks 1.85 |
+| 7 | C5 scheduled measurements | catches scale regressions | ≈3–6 billed min per weekly run | noise, no threshold | adopt weekly |
+| 8 | C3 cargo audit | advisory and license signal | ≈1–2 billed min per weekly run | new tool, owner approval | adopt once approved |
 | 9 | C6 links/prose | catches broken docs | ≈0 for the script | third-party tools, noise | adopt the script; defer lychee/vale |
-| 10 | C4 coverage | shows untested paths | ≈6–9 billed min (Linux) | vanity metric, no upload | defer until after the release |
+| 10 | C4 coverage | shows untested paths | ≈6–9 billed min per run | vanity metric, no upload | defer until after the release |
 
 **Recommendation.**
 
@@ -479,18 +529,40 @@ Ranking by benefit per billed minute, with the risk above:
    relative-link check can go in immediately at no cost.
 
 If only the zero-cost items are adopted (C1, C7, C8, C10, plus the C6 script),
-the monthly bill drops instead of rising. With C2, C3, C4 and C5 all enabled,
-the added Linux cost stays around 2.5–4 USD per month at the 40-run scenario
-(estimate: 416–632 billed Linux minutes at $0.006); the macOS minutes remain
-the dominant cost.
+the monthly bill drops instead of rising. The paid checks depend on frequency,
+so the arithmetic is spelled out rather than compressed into one headline
+figure. All values are billed Linux minutes at **S1 (40 runs/month)**; weekly
+jobs count 4 runs, C4 daily on main counts 30 runs:
+
+| Set | C2 (per run) | C3 (weekly) | C4 (coverage) | C5 (weekly) | Total billed min/month | ≈ USD/month |
+| --- | --- | --- | --- | --- | --- | --- |
+| Recommended: C2 + C3 + C5, C4 deferred | 160–240 | 4–8 | — | 13–26 | 177–274 | 1.06–1.64 |
+| All four, C4 weekly (as proposed in C4) | 160–240 | 4–8 | 24–36 | 13–26 | 201–310 | 1.21–1.86 |
+| All four, C4 daily on main | 160–240 | 4–8 | 180–270 | 13–26 | 357–544 | 2.14–3.26 |
+
+After C10 (**S2, 20 runs/month**) the C2 line halves: the recommended set costs
+97–154 billed minutes ≈ $0.58–0.92; all four with C4 weekly costs 121–190
+≈ $0.73–1.14. An earlier draft of this section said "416–632 billed minutes,
+2.5–4 USD" for C2 + C3 + C4 + C5; that silently assumed C4 on all 40 runs,
+which contradicts both the weekly proposal in C4 and its deferral in the
+recommendation above. The table replaces that figure.
+
+For scale, the existing matrix at S1 (40 runs × ≈170 billed minutes) is about
+**6,800 billed minutes ≈ $41/month** while private, uncached and before C10;
+C10 alone removes half of it (≈3,400 billed minutes ≈ $20/month at 20 branch
+updates). The added Linux jobs above are therefore small next to the matrix,
+and the macOS share of it (≈155 of 170 billed minutes per run) remains the
+dominant cost. If the repository becomes public, standard runners are free
+(the billing page), so this whole model describes the private phase only.
 
 ## 5. Decisions for the owner
 
 1. **Trigger policy (C10).** May `push` be restricted to `main`? If branch
    pushes without a pull request must keep running, only `concurrency` can be
    added.
-2. **Budget.** What is the monthly Actions allowance, and is 40 runs per
-   month realistic? The repository does not document either (`PLAN.md:121-122`).
+2. **Budget.** What is the monthly Actions allowance, and is S1 (40 runs per
+   month) or S2 (20, after C10) realistic? The repository does not document
+   either (`PLAN.md:121-122`).
 3. **Third-party tools/actions.** May `cargo-audit`, `cargo-llvm-cov`,
    `Swatinem/rust-cache`, lychee and vale be introduced, and must every action
    be pinned to a commit SHA? The repository already uses `dtolnay/rust-toolchain`
@@ -516,13 +588,16 @@ the dominant cost.
 
 - Is the repository on a plan where every Actions minute is paid, or are
   included minutes available? The repository only says "Actions minutes are
-  paid" (`PLAN.md:121-122`).
+  paid" (`PLAN.md:121-122`). The billing page also states that standard hosted
+  runners are free in public repositories; the cost model here therefore
+  applies only while the repository is private.
 - Was the 15-minute macOS run a manual cancel or a runner shortage?
   `PLAN.md:17-19` records both possibilities; the cost estimate assumes a
   normal 15-minute job and is therefore a lower bound.
 - Does the GitHub organisation/repository policy allow third-party actions,
   and does it require SHA pinning?
-- What is the real CI volume per month? The 40-run scenario is a guess.
+- What is the real CI volume per month? S1 (40 runs) and S2 (20 runs) are
+  guesses.
 - `cargo test --workspace` does not use `--all-targets`, while clippy does
   (`ci.yml:25-28`). Is that intentional, or are some test targets never
   compiled by the test step?
