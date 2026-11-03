@@ -3,6 +3,8 @@
 //! Everything written here is invented. Paths use the user name `example`.
 //! Output is deterministic.
 
+pub mod hostile;
+
 use rusqlite::{Connection, Result, params};
 use std::path::{Path, PathBuf};
 
