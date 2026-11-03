@@ -499,11 +499,11 @@ below carry Lightroom ids only, never names or paths.
   mapping file keeps the path of the first import as the comparison base, so
   a later change of the `--map` prefix also makes a photo appear as moved, and
   the move is reported on every later run.
-- A keyword whose global id stayed but whose name changed in Lightroom is
-  counted in `keywords_renamed` and listed in `renamed_keywords`; no keyword
-  is created or renamed, and the new name is never added to a photo. A renamed
-  parent also changes the path text of its descendants, so those are reported
-  too.
+- A keyword whose global id stayed but whose path text changed in Lightroom
+  (renamed, or moved under a different parent keyword) is counted in
+  `keywords_renamed` and listed in `renamed_keywords`; no keyword is created
+  or renamed, and the new name is never added to a photo. A renamed parent
+  also changes the path text of its descendants, so those are reported too.
 
 After all photos, lr2lc creates the missing album folders (for collection
 sets, parents first) and albums (for collections) with `album.create`,
