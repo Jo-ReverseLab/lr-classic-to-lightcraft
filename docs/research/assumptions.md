@@ -11,7 +11,8 @@ Every statement in `docs/research/` that is marked as an assumption, "not
 verified", "open", "unverified", "presumably", "inference" or "not read" was
 collected with `grep`, read in context and listed **once**. Statements that
 appear in more than one file are merged into one row; the row names the primary
-location and adds the other location in the statement cell. File-header notes
+location, and a second location is added in the statement cell where it adds
+information. File-header notes
 of the form "anything without a file:line is an assumption" are the rule of the
 notes, not an assumption themselves, and are not rows. Pure design suggestions
 (`*(design suggestion)*`) are decisions, not assumptions; they are not rows
