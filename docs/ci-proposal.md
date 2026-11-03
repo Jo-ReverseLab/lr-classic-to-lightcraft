@@ -277,8 +277,8 @@ minute including catalog generation (`tasks/reports/t20-performance.md:89-92`).
 measurements (about 1–2 minutes, estimate, based on the T20 numbers; the CI
 runner may differ from the Pi).
 
-**Cost.** About 3–6 billed minutes per weekly run, about 13–26 per month
-(estimate).
+**Cost.** About 3–6 billed minutes per weekly run, about 12–24 per month
+(estimate; 4 runs per month, see section 2).
 
 **Risk.** Shared runners are noisy, so absolute times are not comparable with
 the Pi measurements. The ignored tests deliberately have no time limit
@@ -536,13 +536,13 @@ jobs count 4 runs, C4 daily on main counts 30 runs:
 
 | Set | C2 (per run) | C3 (weekly) | C4 (coverage) | C5 (weekly) | Total billed min/month | ≈ USD/month |
 | --- | --- | --- | --- | --- | --- | --- |
-| Recommended: C2 + C3 + C5, C4 deferred | 160–240 | 4–8 | — | 13–26 | 177–274 | 1.06–1.64 |
-| All four, C4 weekly (as proposed in C4) | 160–240 | 4–8 | 24–36 | 13–26 | 201–310 | 1.21–1.86 |
-| All four, C4 daily on main | 160–240 | 4–8 | 180–270 | 13–26 | 357–544 | 2.14–3.26 |
+| Recommended: C2 + C3 + C5, C4 deferred | 160–240 | 4–8 | — | 12–24 | 176–272 | 1.06–1.63 |
+| All four, C4 weekly (as proposed in C4) | 160–240 | 4–8 | 24–36 | 12–24 | 200–308 | 1.20–1.85 |
+| All four, C4 daily on main | 160–240 | 4–8 | 180–270 | 12–24 | 356–542 | 2.14–3.25 |
 
 After C10 (**S2, 20 runs/month**) the C2 line halves: the recommended set costs
-97–154 billed minutes ≈ $0.58–0.92; all four with C4 weekly costs 121–190
-≈ $0.73–1.14. An earlier draft of this section said "416–632 billed minutes,
+96–152 billed minutes ≈ $0.58–0.91; all four with C4 weekly costs 120–188
+≈ $0.72–1.13. An earlier draft of this section said "416–632 billed minutes,
 2.5–4 USD" for C2 + C3 + C4 + C5; that silently assumed C4 on all 40 runs,
 which contradicts both the weekly proposal in C4 and its deferral in the
 recommendation above. The table replaces that figure.
