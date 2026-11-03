@@ -121,17 +121,32 @@ fn pick(hits: &[&Node], wanting: usize) -> Decision {
     }
 }
 
+/// Deepest `children` nesting accepted from `albums.list`. The app's album
+/// tree is only a few levels deep; a hostile or broken answer must not drive
+/// the recursive walk into a stack overflow.
+const MAX_ALBUM_DEPTH: usize = 64;
+
 /// The nodes of an `albums.list` answer, parents before children.
 pub(crate) fn parse_album_list(value: &Value) -> Result<Vec<Node>, WriteError> {
     let Value::Array(items) = value else {
         return Err(list_error());
     };
     let mut out = Vec::new();
-    collect(items, None, &mut out)?;
+    collect(items, None, 0, &mut out)?;
     Ok(out)
 }
 
-fn collect(items: &[Value], parent: Option<&Value>, out: &mut Vec<Node>) -> Result<(), WriteError> {
+fn collect(
+    items: &[Value],
+    parent: Option<&Value>,
+    depth: usize,
+    out: &mut Vec<Node>,
+) -> Result<(), WriteError> {
+    if depth > MAX_ALBUM_DEPTH {
+        return Err(WriteError::Protocol(
+            "albums.list is nested too deeply".into(),
+        ));
+    }
     for item in items {
         let Value::Object(map) = item else {
             return Err(list_error());
@@ -171,7 +186,7 @@ fn collect(items: &[Value], parent: Option<&Value>, out: &mut Vec<Node>) -> Resu
         });
         match map.get("children") {
             None | Some(Value::Null) => {}
-            Some(Value::Array(children)) => collect(children, Some(&id), out)?,
+            Some(Value::Array(children)) => collect(children, Some(&id), depth + 1, out)?,
             Some(_) => return Err(list_error()),
         }
     }
@@ -288,6 +303,30 @@ mod tests {
         assert_eq!(nodes[0], node(1, "F", true, None));
         assert_eq!(nodes[1], node(2, "A", false, Some(1)));
         assert!(nodes[2].smart);
+    }
+
+    /// A tree nested `levels` deep: each level wraps the previous array in
+    /// one folder node with a `children` array.
+    fn nested(levels: usize) -> Value {
+        let mut value = json!([{"id": 0, "name": "leaf", "folder": false}]);
+        for i in 1..=levels {
+            value = json!([{"id": i, "name": "n", "folder": true, "children": value}]);
+        }
+        value
+    }
+
+    #[test]
+    fn nesting_up_to_the_limit_is_accepted() {
+        assert!(parse_album_list(&nested(MAX_ALBUM_DEPTH)).is_ok());
+    }
+
+    #[test]
+    fn deeply_nested_answer_is_rejected() {
+        let deep = nested(MAX_ALBUM_DEPTH + 1);
+        assert!(
+            matches!(parse_album_list(&deep), Err(WriteError::Protocol(_))),
+            "a stack-overflowing answer must be a protocol error"
+        );
     }
 
     #[test]

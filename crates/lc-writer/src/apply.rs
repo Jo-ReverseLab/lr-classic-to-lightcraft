@@ -1725,15 +1725,26 @@ pub(crate) fn parse_keyword_list(value: &Value) -> Result<BTreeSet<String>, Writ
         _ => return Err(list_error()),
     };
     let mut out = BTreeSet::new();
-    collect_keywords(items, None, &mut out)?;
+    collect_keywords(items, None, 0, &mut out)?;
     Ok(out)
 }
+
+/// Deepest keyword nesting accepted from `keyword.list`. The app's keyword
+/// tree is only a few levels deep; a hostile or broken answer must not drive
+/// the recursive walk into a stack overflow.
+const MAX_KEYWORD_DEPTH: usize = 64;
 
 fn collect_keywords(
     items: &[Value],
     prefix: Option<&str>,
+    depth: usize,
     out: &mut BTreeSet<String>,
 ) -> Result<(), WriteError> {
+    if depth > MAX_KEYWORD_DEPTH {
+        return Err(WriteError::Protocol(
+            "keyword.list is nested too deeply".into(),
+        ));
+    }
     for item in items {
         match (item, prefix) {
             (Value::String(text), None) => {
@@ -1751,7 +1762,7 @@ fn collect_keywords(
                 match map.get("children") {
                     None | Some(Value::Null) => {}
                     Some(Value::Array(children)) => {
-                        collect_keywords(children, Some(&text), out)?;
+                        collect_keywords(children, Some(&text), depth + 1, out)?;
                     }
                     Some(_) => return Err(list_error()),
                 }
@@ -1785,6 +1796,29 @@ mod tests {
     fn keyword_list_of_trees_without_children() {
         let v = json!({"keywords": [{"name": "a", "children": [{"name": "b"}]}]});
         assert_eq!(parse_keyword_list(&v).unwrap(), set(&["a", "a|b"]));
+    }
+
+    /// A `keyword.list` tree nested `levels` deep.
+    fn nested_keywords(levels: usize) -> Value {
+        let mut value = json!([{"name": "leaf"}]);
+        for i in 1..=levels {
+            value = json!([{"name": format!("n{i}"), "children": value}]);
+        }
+        json!({"keywords": value})
+    }
+
+    #[test]
+    fn keyword_nesting_up_to_the_limit_is_accepted() {
+        assert!(parse_keyword_list(&nested_keywords(MAX_KEYWORD_DEPTH)).is_ok());
+    }
+
+    #[test]
+    fn deeply_nested_keyword_answer_is_rejected() {
+        let deep = nested_keywords(MAX_KEYWORD_DEPTH + 1);
+        assert!(
+            matches!(parse_keyword_list(&deep), Err(WriteError::Protocol(_))),
+            "a stack-overflowing answer must be a protocol error"
+        );
     }
 
     #[test]
