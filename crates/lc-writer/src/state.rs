@@ -91,6 +91,12 @@ pub struct PhotoEntry {
     pub lightcraft_id: Value,
     /// The field values last written.
     pub fields: PhotoFields,
+    /// The master photo's global id if this entry is a virtual copy, or
+    /// `None` for a master. A copy is created once with `photo.virtualCopy`
+    /// from the master's LightCraft id and afterwards behaves like a normal
+    /// photo: only its fields are updated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy_of: Option<String>,
 }
 
 /// One keyword created in the library, with the attributes it was created
@@ -287,12 +293,38 @@ impl State {
     }
 
     /// Records a photo as written with the given field values, replacing an
-    /// earlier entry for the same global id.
+    /// earlier entry for the same global id. Used for masters and for the
+    /// field refresh of an already recorded copy (the existing `copy_of` is
+    /// kept).
     pub fn record(
         &mut self,
         global_id: impl Into<String>,
         lightroom_id: i64,
         lightcraft_id: Value,
+        fields: PhotoFields,
+    ) {
+        let global_id = global_id.into();
+        let copy_of = self.photos.get(&global_id).and_then(|e| e.copy_of.clone());
+        self.photos.insert(
+            global_id,
+            PhotoEntry {
+                lightroom_id,
+                lightcraft_id,
+                fields,
+                copy_of,
+            },
+        );
+    }
+
+    /// Records a virtual copy right after it was created with
+    /// `photo.virtualCopy`, with the global id of its master so a later run
+    /// never creates the copy again.
+    pub fn record_copy(
+        &mut self,
+        global_id: impl Into<String>,
+        lightroom_id: i64,
+        lightcraft_id: Value,
+        master_global_id: impl Into<String>,
         fields: PhotoFields,
     ) {
         self.photos.insert(
@@ -301,6 +333,7 @@ impl State {
                 lightroom_id,
                 lightcraft_id,
                 fields,
+                copy_of: Some(master_global_id.into()),
             },
         );
     }

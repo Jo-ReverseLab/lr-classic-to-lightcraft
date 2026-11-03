@@ -123,6 +123,11 @@ pub struct Photo {
     pub creator: Option<String>,
     /// Title, kept byte for byte. `None` if the photo has none.
     pub title: Option<String>,
+    /// `lightroom_id` of the master photo this is a virtual copy of, or
+    /// `None` for a master. A virtual copy shares the master's file but has
+    /// its own rating, label, flag and keywords; the writer creates it once
+    /// with `photo.virtualCopy` and records it in the mapping file.
+    pub master: Option<i64>,
 }
 
 impl Photo {
@@ -139,6 +144,7 @@ impl Photo {
             copyright: None,
             creator: None,
             title: None,
+            master: None,
         }
     }
 
@@ -181,6 +187,13 @@ impl Photo {
     /// Returns the photo with its title set, kept byte for byte.
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
+        self
+    }
+
+    /// Returns the photo with its master set: the `lightroom_id` of the
+    /// photo this is a virtual copy of.
+    pub fn with_master(mut self, master: i64) -> Self {
+        self.master = Some(master);
         self
     }
 }

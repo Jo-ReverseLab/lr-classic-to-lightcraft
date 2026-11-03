@@ -470,6 +470,19 @@ impl Run<'_> {
                 });
                 self.import(global_id, path)
             }
+            Step::VirtualCopy {
+                global_id,
+                master_global_id,
+            } => {
+                self.finish_photo()?;
+                self.current = Some(Current {
+                    global_id: global_id.clone(),
+                    ok: true,
+                    selected: false,
+                    uncounted_update: false,
+                });
+                self.virtual_copy(global_id, master_global_id)
+            }
             Step::Update {
                 global_id,
                 command,
@@ -1245,6 +1258,92 @@ impl Run<'_> {
         Ok(())
     }
 
+    /// Creates one virtual copy from its master with `photo.virtualCopy`.
+    ///
+    /// The copy is created at most once: this is only called for a copy that
+    /// is not yet in the mapping file. The master's LightCraft id is read
+    /// from the mapping file; if the master has none (it was not imported or
+    /// its import failed) the copy is skipped with a reason and never retried
+    /// in the same run. `photo.virtualCopy` is not idempotent, so on an
+    /// ambiguous answer (applied but not saved) nothing is recorded and the
+    /// copy is reported, not created blindly.
+    fn virtual_copy(&mut self, global_id: &str, master_global_id: &str) -> Result<(), WriteError> {
+        let Some(photo) = self.photos.get(global_id).copied() else {
+            // Not reachable: the plan only creates copies of input photos.
+            self.fail_current();
+            return Ok(());
+        };
+        // Already created by an earlier run: the plan would not have issued
+        // the step. Kept defensive so a damaged mapping file never leads to a
+        // second copy.
+        if self.state.photo(global_id).is_some() {
+            self.summary.photos_existing += 1;
+            return Ok(());
+        }
+        let skip = |summary: &mut ApplySummary, code: SkipCode, why: &str| {
+            summary.photos_skipped.push(Skipped::new(
+                code,
+                format!("photo {}: {why}", photo.lightroom_id),
+            ));
+        };
+        let Some(master) = self.state.photo(master_global_id) else {
+            skip(
+                &mut self.summary,
+                SkipCode::VirtualCopy,
+                "virtual copy of the master cannot be created, the master has no LightCraft id yet",
+            );
+            self.fail_current();
+            return Ok(());
+        };
+        let master_id = master.lightcraft_id.clone();
+        match self
+            .client
+            .execute("photo.virtualCopy", json!({"ids": [master_id]}))
+        {
+            Ok(Outcome::Applied(result)) => match virtual_copy_id(&result) {
+                Some(id) => {
+                    self.summary.photos_imported += 1;
+                    self.state.record_copy(
+                        global_id,
+                        photo.lightroom_id,
+                        id,
+                        master_global_id,
+                        PhotoFields::imported_default(),
+                    );
+                    self.state.save(self.state_file)?;
+                }
+                None => {
+                    skip(
+                        &mut self.summary,
+                        SkipCode::NoIdReturned,
+                        "`photo.virtualCopy` returned no id for the copy",
+                    );
+                    self.fail_current();
+                }
+            },
+            Ok(Outcome::AppliedNotSaved(_)) => {
+                self.summary.not_saved += 1;
+                skip(
+                    &mut self.summary,
+                    SkipCode::AppliedNotSaved,
+                    "`photo.virtualCopy` was applied but not saved and returned no id; \
+                     run again to find the copy",
+                );
+                self.fail_current();
+            }
+            Err(WriteError::Command { command, .. }) => {
+                skip(
+                    &mut self.summary,
+                    SkipCode::Rejected,
+                    &format!("LightCraft rejected `{command}`"),
+                );
+                self.fail_current();
+            }
+            Err(e) => return Err(e),
+        }
+        Ok(())
+    }
+
     /// Selects the running photo before its first update. A select is
     /// sent even right after an import, which selects as a side effect.
     fn select(&mut self, global_id: &str) -> Result<(), WriteError> {
@@ -1421,6 +1520,16 @@ fn wanted_keywords(input: &WriteInput) -> BTreeMap<String, Keyword> {
         out.entry(keyword_text(&a)).or_insert(a);
     }
     out
+}
+
+/// Reads the id of the one copy from a `photo.virtualCopy` result
+/// (`{ids: [new ids]}`). Accepts a plain id, or an `{id}` / `{photoId}`
+/// object like `library.import`.
+fn virtual_copy_id(result: &Value) -> Option<Value> {
+    let item = result.get("ids").and_then(Value::as_array)?.first()?;
+    valid_id(item)
+        .or_else(|| item.get("id").and_then(valid_id))
+        .or_else(|| item.get("photoId").and_then(valid_id))
 }
 
 /// What `library.import` reported for one file.

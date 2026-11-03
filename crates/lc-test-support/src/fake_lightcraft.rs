@@ -744,6 +744,41 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             }
             Ok(json!({}))
         }
+        "photo.virtualCopy" => {
+            // `photo.virtualCopy {ids: [master id]}` -> `{ids: [new id]}`.
+            // Every call makes a new copy (not idempotent), like the real app.
+            // The copy shares the master's file but gets its own id, so it is
+            // known to `library.select`, `photo.rate` and friends.
+            let ids = params
+                .get("ids")
+                .and_then(Value::as_array)
+                .ok_or("ids is missing")?;
+            let master_ids: Vec<i64> = ids.iter().filter_map(Value::as_i64).collect();
+            if master_ids.len() != ids.len() {
+                return Err("ids must be numbers".into());
+            }
+            let mut new_ids: Vec<Value> = Vec::new();
+            for master_id in master_ids {
+                let master_path = lib
+                    .photos
+                    .iter()
+                    .find(|(_, v)| **v == master_id)
+                    .map(|(p, _)| p.clone())
+                    .ok_or("unknown photo id")?;
+                let id = lib.next_id;
+                lib.next_id += 1;
+                // Distinct path key so the master keeps its own entry.
+                lib.photos.insert(format!("{master_path}#vc{id}"), id);
+                if config.selection_gate {
+                    lib.selection = vec![id];
+                }
+                new_ids.push(json!(id));
+            }
+            if config.not_saved_creates {
+                return Err("saved in memory but not written to disk: disk full".into());
+            }
+            Ok(json!({"ids": new_ids}))
+        }
         other => Err(format!("unknown command {other}")),
     }
 }
