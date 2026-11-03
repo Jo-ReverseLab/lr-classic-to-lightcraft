@@ -749,7 +749,7 @@ fn wanted_keywords(input: &WriteInput) -> BTreeMap<Vec<String>, Wanted> {
 /// text map and the report entries. A renamed ancestor also changes the
 /// path text of its descendants, so those are reported too. Keyword names
 /// never leave this function.
-fn renamed_keywords(
+pub(crate) fn renamed_keywords(
     input: &WriteInput,
     state: &State,
 ) -> (BTreeMap<String, String>, Vec<RenamedKeyword>) {
@@ -777,8 +777,12 @@ fn renamed_keywords(
         };
         if *old_path != text {
             paths.insert(text, (*old_path).to_string());
-            if let Some(id) = id {
-                report.push(RenamedKeyword { keyword: *id });
+            // An older mapping file may carry the global id but no
+            // Lightroom id. The reader always sets the id on the model
+            // keyword, so the rename can still be reported by id; the
+            // mapping entry itself is left as it is.
+            if let Some(id) = id.or(w.keyword.lightroom_id) {
+                report.push(RenamedKeyword { keyword: id });
             }
         }
     }
@@ -981,7 +985,7 @@ fn plan_photos(
 /// recorded path of a keyword renamed in Lightroom. A rename then looks like
 /// no membership change at all: the new name is never added and the old one
 /// is not counted as removed.
-fn snapshot_with_renames(
+pub(crate) fn snapshot_with_renames(
     photo: &Photo,
     keywords: &[Keyword],
     renamed: &BTreeMap<String, String>,
@@ -1927,5 +1931,64 @@ mod tests {
             p.steps
         );
         assert_eq!(p.keywords_removed(), 0);
+    }
+
+    #[test]
+    fn a_rename_in_an_older_mapping_file_is_reported_by_the_model_id() {
+        let mut state = State::default();
+        // A mapping file from before the Lightroom id was recorded keeps the
+        // global id but no `lightroom_id`.
+        state.record_keyword(&kw(&["Old"]).with_global_id("kg-1"));
+        let mut last = PhotoFields::imported_default();
+        last.keywords = vec!["Old".into()];
+        state.record("g", 7, json!(1001), last);
+        let renamed = kw(&["New"]).with_global_id("kg-1").with_lightroom_id(13);
+        let mut photo_keywords = BTreeMap::new();
+        photo_keywords.insert(7, vec![renamed.clone()]);
+        let input = WriteInput {
+            photos: vec![Photo::new("a.jpg", 7, Rating::default()).with_global_id("g")],
+            keywords: vec![renamed],
+            photo_keywords,
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &state, &BTreeSet::new());
+        // The id comes from the model keyword the reader filled.
+        assert_eq!(p.renamed_keywords(), [RenamedKeyword { keyword: 13 }]);
+        assert!(
+            !p.steps
+                .iter()
+                .any(|s| matches!(s, Step::CreateKeyword { .. })),
+            "{:?}",
+            p.steps
+        );
+        // The new name is never added to a photo.
+        let added_new = p.steps.iter().any(|s| match s {
+            Step::Update { params, .. } => params
+                .get("addKeywords")
+                .and_then(Value::as_array)
+                .is_some_and(|names| names.iter().any(|n| n.as_str() == Some("New"))),
+            _ => false,
+        });
+        assert!(!added_new, "{:?}", p.steps);
+    }
+
+    #[test]
+    fn a_renamed_parent_reports_its_descendants_too() {
+        let mut state = State::default();
+        state.record_keyword(&kw(&["A"]).with_global_id("kg-a").with_lightroom_id(1));
+        state.record_keyword(&kw(&["A", "B"]).with_global_id("kg-b").with_lightroom_id(2));
+        let parent = kw(&["A2"]).with_global_id("kg-a").with_lightroom_id(1);
+        let child = kw(&["A2", "B"]).with_global_id("kg-b").with_lightroom_id(2);
+        let input = WriteInput {
+            keywords: vec![parent, child],
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &state, &BTreeSet::new());
+        // The child kept its name but its path text changed with the parent.
+        assert_eq!(
+            p.renamed_keywords(),
+            [RenamedKeyword { keyword: 1 }, RenamedKeyword { keyword: 2 }]
+        );
+        assert!(p.steps.is_empty(), "{:?}", p.steps);
     }
 }
