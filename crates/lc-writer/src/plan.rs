@@ -1617,4 +1617,45 @@ mod tests {
         assert_eq!(commands[4].1, json!(["lr:b"]));
         assert_eq!(commands[6].1, json!(["lr:c"]));
     }
+
+    #[test]
+    fn live_state_is_only_needed_when_lightroom_changed() {
+        let photo =
+            |rating: u8| Photo::new("a.jpg", 7, Rating::new(rating).unwrap()).with_global_id("g1");
+        let mut state = State::default();
+        state.record("g1", 7, json!(1001), PhotoFields::imported_default());
+
+        let unchanged = WriteInput {
+            photos: vec![photo(0)],
+            ..WriteInput::default()
+        };
+        assert!(!needs_live(&unchanged, &state));
+
+        let changed = WriteInput {
+            photos: vec![photo(3)],
+            ..WriteInput::default()
+        };
+        assert!(needs_live(&changed, &state));
+
+        // A keyword that left the photo needs no live read: it is only
+        // counted. A keyword new in Lightroom does, as LightCraft may have
+        // it already.
+        let mut last = PhotoFields::imported_default();
+        last.keywords = vec!["K".into()];
+        state.record("g1", 7, json!(1001), last);
+        let fewer = WriteInput {
+            photos: vec![photo(0)],
+            ..WriteInput::default()
+        };
+        assert!(!needs_live(&fewer, &state));
+        state.record("g1", 7, json!(1001), PhotoFields::imported_default());
+        let mut photo_keywords = BTreeMap::new();
+        photo_keywords.insert(7, vec![kw(&["K"])]);
+        let more = WriteInput {
+            photos: vec![photo(0)],
+            photo_keywords,
+            ..WriteInput::default()
+        };
+        assert!(needs_live(&more, &state));
+    }
 }
