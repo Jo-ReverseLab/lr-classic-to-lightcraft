@@ -97,6 +97,53 @@ up to 50 assignments.
 folders, with 200 keywords and one assignment per photo. Large catalogs are
 written to a temporary directory and never committed.
 
+## Performance catalogs (task T20)
+
+`write_performance_catalog(path, shape)` and
+`write_performance_catalog_with_files(dir, shape)` write a catalog of an
+explicit `CatalogShape` (`photos`, `folders`, `keywords`, `collections`). The
+shape is deterministic; `CatalogShape::proportional(photos)` derives it from the
+photo count with fixed proportions (constants in the `performance` module):
+
+| Element | Proportion | Cap |
+| --- | --- | --- |
+| folders | 1 per 20 photos | 10 000 |
+| keywords | 1 per 10 photos | 50 000 |
+| collections | 1 per 500 photos | 1 000 |
+| collection members | every 10th photo in a plain album | |
+
+The collections are a set (1), an album inside it (2), a smart collection
+without rules (3, skipped by the reader as `smart_unreadable`), the Quick
+Collection (4) and further top-level albums. Every original in a
+`*_with_files` catalog is a tiny placeholder file (not a real image) below
+`dir/pictures/`; the catalog is `dir/performance.lrcat`.
+
+The generated schema contains no indexes, like every other generated fixture.
+A timing therefore includes the reader's own query shape: a catalog without
+indexes is valid input, and the tool must not become quadratic on it. Do not
+make a measurement faster by adding indexes to the fixture unless the real
+catalog is known to have them.
+
+The 2 000-photo guard runs in the normal test suite
+(`crates/lr2lc/tests/performance_guard.rs`, limit 180 s). The measurement runs
+for 10 000, 100 000 and 500 000 photos are ignored by default. Run them with:
+
+```text
+cargo test --release -p lr2lc --test performance -- --ignored --nocapture
+```
+
+## Golden report (task T20)
+
+`golden/report-medium.json` is the complete `report.json` of a dry run over a
+generated catalog of 1 000 photos (50 folders, 100 keywords, 4 collections).
+It contains generated data only and is compared by
+`crates/lr2lc/tests/report_golden.rs`; `tool_version` is normalised. Regenerate
+it after an intentional report change with:
+
+```text
+UPDATE_GOLDEN=1 cargo test -p lr2lc --test report_golden
+```
+
 ## Known gaps
 
 - Missing originals are modelled only by `write_small_catalog_with_files`;

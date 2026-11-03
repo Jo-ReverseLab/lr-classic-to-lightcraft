@@ -1,0 +1,152 @@
+{
+  "catalog_unchanged": true,
+  "catalog_version": "1500000",
+  "collection_members": {
+    "by_code": {},
+    "converted": 100,
+    "read": 100,
+    "skipped": []
+  },
+  "collections": {
+    "albums": 1,
+    "by_code": {
+      "smart_unreadable": 1
+    },
+    "converted": 3,
+    "duplicate_names": 0,
+    "folders": 1,
+    "quick": 1,
+    "read": 4,
+    "skipped": [
+      {
+        "code": "smart_unreadable",
+        "reason": "collection 3: smart collection is not converted (unreadable rules)"
+      }
+    ],
+    "smart": 0
+  },
+  "dry_run": true,
+  "folders": {
+    "by_code": {},
+    "converted": 50,
+    "read": 50,
+    "skipped": []
+  },
+  "keyword_assignments": {
+    "by_code": {},
+    "converted": 1000,
+    "read": 1000,
+    "skipped": []
+  },
+  "keyword_synonyms": {
+    "by_code": {},
+    "converted": 0,
+    "read": 0,
+    "skipped": []
+  },
+  "keywords": {
+    "by_code": {},
+    "converted": 100,
+    "no_parents_on_export": 0,
+    "no_synonyms_on_export": 0,
+    "not_exported": 0,
+    "persons": 0,
+    "read": 100,
+    "skipped": [],
+    "unknown_type": 0,
+    "unused": 0
+  },
+  "photos": {
+    "by_code": {},
+    "captions": 0,
+    "converted": 1000,
+    "copyrights": 0,
+    "creators": 0,
+    "flags": {
+      "none": 1000,
+      "pick": 0,
+      "reject": 0,
+      "unknown": 0
+    },
+    "labels": {
+      "blue": 0,
+      "custom": 0,
+      "custom_reasons": [],
+      "green": 0,
+      "label_set": "auto",
+      "matched_sets": [],
+      "none": 1000,
+      "purple": 0,
+      "red": 0,
+      "yellow": 0
+    },
+    "read": 1000,
+    "skipped": [],
+    "titles": 0,
+    "titles_unreadable": 0,
+    "videos": 0
+  },
+  "ratings": {
+    "0": 275,
+    "1": 145,
+    "2": 143,
+    "3": 138,
+    "4": 143,
+    "5": 156
+  },
+  "skipped_by_code": {
+    "smart_unreadable": 1
+  },
+  "stack_members": {
+    "by_code": {},
+    "converted": 0,
+    "read": 0,
+    "skipped": []
+  },
+  "stacks": {
+    "by_code": {},
+    "collapsed": 0,
+    "converted": 0,
+    "no_top": 0,
+    "read": 0,
+    "skipped": []
+  },
+  "tool_version": "normalized",
+  "writer": {
+    "keywords_not_created": [],
+    "keywords_not_created_by_code": {},
+    "members_skipped": [],
+    "members_skipped_by_code": {},
+    "photos_skipped": [],
+    "photos_skipped_by_code": {},
+    "planned": {
+      "albums": 1,
+      "collections_known": 0,
+      "collections_removed": 0,
+      "folders": 1,
+      "keywords": 100,
+      "members_added": 100,
+      "members_removed": 0,
+      "photos": 1000,
+      "photos_unchanged": 0,
+      "photos_updated": 0,
+      "quick_add": 0,
+      "quick_already": 0,
+      "quick_removed": 0,
+      "smart_albums": 0,
+      "smart_known": 0,
+      "smart_no_longer_translatable": 0,
+      "smart_rules_changed": 0,
+      "stack_members_removed": 0,
+      "stacks": 0,
+      "stacks_known": 0,
+      "updates": 1725
+    },
+    "quick_skipped": [],
+    "quick_skipped_by_code": {},
+    "smart_skipped": [],
+    "smart_skipped_by_code": {},
+    "stacks_skipped": [],
+    "stacks_skipped_by_code": {}
+  }
+}
