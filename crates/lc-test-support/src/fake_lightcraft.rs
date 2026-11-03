@@ -713,6 +713,9 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             let id = lib.next_id;
             lib.next_id += 1;
             lib.photos.insert(path.to_string(), id);
+            // An imported photo starts with LightCraft's import defaults and
+            // is visible to the read side from now on.
+            lib.seeds.entry(id).or_insert_with(|| SeedPhoto::plain(id));
             if config.selection_gate {
                 lib.selection = vec![id];
             }
@@ -735,12 +738,52 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             }
             let id = photo_id.filter(|id| lib.photos.values().any(|p| p == id));
             let id = id.ok_or("unknown photo id")?;
-            if command == "photo.rate" {
-                lib.ratings
-                    .insert(id, params["rating"].as_i64().unwrap_or(-1));
-            }
             if config.not_saved_updates {
+                // The app lost the change on restart: the next run must not
+                // see it through the read side either.
                 return Err("saved in memory but not written to disk: disk full".into());
+            }
+            // Keep the read side (`catalog.query`, `photo.inspect`) in sync
+            // with what was applied, so a later run sees the live values.
+            let seed = lib.seeds.entry(id).or_insert_with(|| SeedPhoto::plain(id));
+            match command {
+                "photo.rate" => {
+                    let rating = params["rating"].as_i64().unwrap_or(-1);
+                    lib.ratings.insert(id, rating);
+                    seed.rating = rating;
+                }
+                "photo.flag" => {
+                    if let Some(flag) = params["flag"].as_str() {
+                        seed.flag = flag.to_string();
+                    }
+                }
+                "photo.label" => {
+                    seed.label = params["label"]
+                        .as_str()
+                        .filter(|label| *label != "none")
+                        .map(str::to_string);
+                }
+                _ => {
+                    if let Some(title) = params["title"].as_str() {
+                        seed.title = title.to_string();
+                    }
+                    for (key, field) in [
+                        ("caption", &mut seed.caption),
+                        ("copyright", &mut seed.copyright),
+                        ("creator", &mut seed.creator),
+                    ] {
+                        if let Some(text) = params[key].as_str() {
+                            *field = (!text.is_empty()).then(|| text.to_string());
+                        }
+                    }
+                    if let Some(added) = params["addKeywords"].as_array() {
+                        for keyword in added.iter().filter_map(Value::as_str) {
+                            if !seed.keywords.iter().any(|have| have == keyword) {
+                                seed.keywords.push(keyword.to_string());
+                            }
+                        }
+                    }
+                }
             }
             Ok(json!({}))
         }
@@ -769,6 +812,13 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                 lib.next_id += 1;
                 // Distinct path key so the master keeps its own entry.
                 lib.photos.insert(format!("{master_path}#vc{id}"), id);
+                // A virtual copy starts with the master's fields.
+                let seed = lib
+                    .seeds
+                    .get(&master_id)
+                    .cloned()
+                    .unwrap_or_else(|| SeedPhoto::plain(id));
+                lib.seeds.insert(id, SeedPhoto { id, ..seed });
                 if config.selection_gate {
                     lib.selection = vec![id];
                 }
