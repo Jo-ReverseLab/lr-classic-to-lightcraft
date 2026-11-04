@@ -689,8 +689,10 @@ mod tests {
     fn empty_and_blank_text_is_an_empty_develop() {
         for text in ["", "   \n\t"] {
             let develop = parse(text);
-            let mut expected = Develop::default();
-            expected.source_hash = develop.source_hash;
+            let expected = Develop {
+                source_hash: develop.source_hash,
+                ..Develop::default()
+            };
             assert_eq!(develop, expected);
             assert!(develop.source_hash.is_some());
         }
