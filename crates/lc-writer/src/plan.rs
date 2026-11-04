@@ -546,7 +546,6 @@ impl Plan {
     pub fn develop_white_balance_not_carried(&self) -> usize {
         self.develop_white_balance_not_carried
     }
-    }
 
     /// The plan as a script: one JSON line per step, each an
     /// `engine.execute` request, plus one `library.select` line before the
