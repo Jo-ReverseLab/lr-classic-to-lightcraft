@@ -2,11 +2,12 @@
 //! `AgLibraryFolder` and `AgLibraryRootFolder`).
 
 use crate::catalog::{Catalog, ReadError, TextCell, text_cell, value_or_blob};
+use crate::develop::parse_develop;
 use crate::folders::join_folder_path;
 use crate::xmp::{Unreadable, title_from_blob};
-use model::{Flag, Photo, Rating, Report, SkipCode, Skipped};
+use model::{Develop, Flag, Photo, Rating, Report, SkipCode, Skipped};
 use rusqlite::types::Value;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 /// One joined row; `None` means the referenced row does not exist.
 struct Row {
@@ -58,6 +59,15 @@ pub struct PhotoData {
     /// decides the title) cannot be read: too short, not zlib, too large or
     /// not UTF-8. These photos have no title. Ascending.
     pub title_unreadable: Vec<i64>,
+    /// Catalog ids of the returned photos whose development-settings text is
+    /// missing, broken or larger than the reader accepts. These photos are
+    /// still returned, without settings. Ascending. They are not skipped and
+    /// do not change the report's balance.
+    pub develop_invalid: Vec<i64>,
+    /// Catalog ids of the returned photos whose settings text contained the
+    /// `-999999` sentinel. They keep their settings, with `deferred` set.
+    /// Ascending.
+    pub develop_deferred: Vec<i64>,
 }
 
 impl Catalog {
@@ -96,6 +106,52 @@ impl Catalog {
         Ok(present == 3)
     }
 
+    /// Whether the optional table `Adobe_imageDevelopSettings` exists with
+    /// the columns `id_local`, `image` and `text`. Without it no photo has
+    /// development settings.
+    fn has_develop_table(&self) -> Result<bool, ReadError> {
+        let present: i64 = self
+            .conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('Adobe_imageDevelopSettings') \
+                 WHERE name IN ('id_local', 'image', 'text')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(ReadError::Query)?;
+        Ok(present == 3)
+    }
+
+    /// The stored settings text per image, grouped once by image.
+    ///
+    /// One row per image is expected; if several exist, the one with the
+    /// smallest `id_local` wins, like the other optional tables. A NULL
+    /// `text` counts as no settings. The rows are read without touching the
+    /// report: a settings row is not a photo.
+    fn develop_texts(&self) -> Result<BTreeMap<i64, Value>, ReadError> {
+        let mut texts = BTreeMap::new();
+        if !self.has_develop_table()? {
+            return Ok(texts);
+        }
+        let mut stmt = self
+            .conn
+            .prepare("SELECT image, text FROM Adobe_imageDevelopSettings ORDER BY id_local")
+            .map_err(ReadError::Query)?;
+        let rows = stmt
+            .query_map([], |row| {
+                let image: Option<i64> = row.get(0)?;
+                Ok((image, value_or_blob(row.get_ref(1)?)))
+            })
+            .map_err(ReadError::Query)?;
+        for row in rows {
+            let (image, text) = row.map_err(ReadError::Query)?;
+            if let Some(image) = image {
+                texts.entry(image).or_insert(text);
+            }
+        }
+        Ok(texts)
+    }
+
     /// Reads all photos, ordered by their catalog id.
     ///
     /// Same as [`Catalog::photo_data`] without the extra facts.
@@ -119,6 +175,9 @@ impl Catalog {
     /// count the same). Any other value also gives [`Flag::None`]; the photo
     /// is kept and its id is listed in [`PhotoData::unknown_flag`].
     pub fn photo_data(&self, report: &mut Report) -> Result<PhotoData, ReadError> {
+        // Read the optional settings table once, grouped by image, instead of
+        // querying it per photo.
+        let mut develops = self.develop_texts()?;
         // The optional tables are joined only when present. Each one is
         // grouped once (`image`, smallest `id_local`) instead of being
         // queried per photo: a correlated scalar subquery would scan the
@@ -211,7 +270,7 @@ impl Catalog {
             let title = title_from_value(&row.xmp);
             match photo_from_row(row, &mut used, &mut converted) {
                 Ok(photo) => {
-                    let photo = match title {
+                    let mut photo = match title {
                         Ok(Some(title)) => photo.with_title(title),
                         Ok(None) => photo,
                         Err(Unreadable) => {
@@ -219,6 +278,18 @@ impl Catalog {
                             photo
                         }
                     };
+                    if let Some(value) = develops.remove(&photo.lightroom_id) {
+                        match develop_from_value(value) {
+                            Ok(Some(develop)) => {
+                                if develop.deferred {
+                                    data.develop_deferred.push(photo.lightroom_id);
+                                }
+                                photo = photo.with_develop(develop);
+                            }
+                            Ok(None) => {}
+                            Err(()) => data.develop_invalid.push(photo.lightroom_id),
+                        }
+                    }
                     if unknown_flag {
                         data.unknown_flag.push(photo.lightroom_id);
                     }
@@ -231,6 +302,19 @@ impl Catalog {
             }
         }
         Ok(data)
+    }
+}
+
+/// Parses one stored settings value.
+///
+/// `Ok(None)` means the column is NULL, so the photo has no settings row
+/// value. Any other non-text value, and any text the parser rejects, is an
+/// error and makes the photo unreadable, not skipped.
+fn develop_from_value(value: Value) -> Result<Option<Develop>, ()> {
+    match value {
+        Value::Null => Ok(None),
+        Value::Text(text) => parse_develop(&text).map(Some).map_err(|_| ()),
+        _ => Err(()),
     }
 }
 
