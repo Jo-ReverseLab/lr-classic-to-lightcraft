@@ -46,10 +46,10 @@
 
 use crate::live::{LivePhoto, LiveState};
 use crate::smart::{convertible, translate};
-use crate::state::{EntryKind, PhotoFields, State, keyword_text, snapshot};
+use crate::state::{EntryKind, PhotoFields, State, hex_hash, keyword_text, snapshot};
 use model::{
-    Collection, CollectionKind, Keyword, Photo, QuickCollection, SkipCode, Skipped,
-    SmartCollection, Stack,
+    Collection, CollectionKind, Develop, Keyword, MergeValue, Photo, QuickCollection, SkipCode,
+    Skipped, SmartCollection, Stack, WhiteBalanceHint,
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -123,6 +123,10 @@ pub struct WriteInput {
     /// before an apply run has read the library; the plan then compares only
     /// Lightroom with the mapping file.
     pub live: Option<LiveState>,
+    /// Write development settings of a known photo again although they
+    /// changed in Lightroom since the last run. Without it such a photo is
+    /// only counted (`develop_not_applied`), never silently overwritten.
+    pub overwrite_develop: bool,
 }
 
 /// One command of the plan.
@@ -161,6 +165,22 @@ pub enum Step {
         command: String,
         /// The command parameters without `ids`.
         params: Value,
+    },
+    /// Set slider values of one photo (`develop.set`) by its LightCraft id;
+    /// no `library.select` precedes it.
+    DevelopSet {
+        /// Lightroom global id of the photo.
+        global_id: String,
+        /// LightCraft control id to value.
+        values: BTreeMap<String, f64>,
+    },
+    /// Merge structured development settings of one photo (`library.select`,
+    /// then `develop.merge` without `ids`, which acts on the selection).
+    DevelopMerge {
+        /// Lightroom global id of the photo.
+        global_id: String,
+        /// Nested settings object of `develop.merge`.
+        settings: Value,
     },
     /// Group photos into a stack (`library.select`, then `stack.group`
     /// with `collapsed: false`); the first photo is the top.
@@ -280,6 +300,19 @@ pub struct Plan {
     /// Global ids of the recorded photos missing from the input; they are
     /// taken out of the albums the mapping file records.
     removed_gids: BTreeSet<String>,
+    /// Converted photos that carry development settings (`Develop` is
+    /// `Some`), whether or not a command was needed.
+    develop_photos: usize,
+    /// Photos the plan sends develop commands for.
+    develop_planned: usize,
+    /// Known photos whose development settings changed in Lightroom and were
+    /// left alone because `overwrite_develop` was not given.
+    develop_not_applied: usize,
+    /// Photos written because `overwrite_develop` was given.
+    develop_overwritten: usize,
+    /// Distinct names of catalog fields that could not be carried over,
+    /// sorted, without duplicates. Only names, never values.
+    develop_unmapped: Vec<String>,
 }
 
 impl Plan {
@@ -446,6 +479,34 @@ impl Plan {
         self.stack_members_removed
     }
 
+    /// Converted photos that carry development settings (`Develop` is
+    /// `Some`), whether or not a command was needed.
+    pub fn develop_photos(&self) -> usize {
+        self.develop_photos
+    }
+
+    /// Photos the plan sends develop commands for.
+    pub fn develop_planned(&self) -> usize {
+        self.develop_planned
+    }
+
+    /// Known photos whose development settings changed in Lightroom and were
+    /// left alone because `overwrite_develop` was not given.
+    pub fn develop_not_applied(&self) -> usize {
+        self.develop_not_applied
+    }
+
+    /// Photos written because `overwrite_develop` was given.
+    pub fn develop_overwritten(&self) -> usize {
+        self.develop_overwritten
+    }
+
+    /// Distinct names of catalog fields that could not be carried over,
+    /// sorted. Only names, never values.
+    pub fn develop_unmapped(&self) -> &[String] {
+        &self.develop_unmapped
+    }
+
     /// The plan as a script: one JSON line per step, each an
     /// `engine.execute` request, plus one `library.select` line before the
     /// updates of each photo (LightCraft runs photo commands only on a
@@ -542,6 +603,20 @@ impl Plan {
                         map.insert("ids".to_string(), json!([id]));
                     }
                     push(command, params);
+                }
+                Step::DevelopSet { global_id, values } => {
+                    selected = None;
+                    let id = photo_ref(state, global_id);
+                    push("develop.set", json!({"values": values, "ids": [id]}));
+                }
+                Step::DevelopMerge {
+                    global_id,
+                    settings,
+                } => {
+                    let id = photo_ref(state, global_id);
+                    selected = Some(global_id);
+                    push("library.select", select_params(&id));
+                    push("develop.merge", json!({"settings": settings}));
                 }
             }
         }
@@ -895,6 +970,11 @@ fn plan_photos(
 
     for gid in order {
         let p = by_gid[gid];
+        if let Some(develop) = &p.develop {
+            out.develop_photos += 1;
+            out.develop_unmapped
+                .extend(develop.unmapped.iter().cloned());
+        }
         let keywords = input
             .photo_keywords
             .get(&p.lightroom_id)
@@ -986,10 +1066,126 @@ fn plan_photos(
                 params,
             });
         }
+        if let Some(develop) = &p.develop {
+            plan_develop(gid, state.photo(gid), develop, input.overwrite_develop, out);
+        }
     }
+    out.develop_unmapped.sort();
+    out.develop_unmapped.dedup();
     // Deterministic report order: by photo, then by the fixed field order.
     out.conflicts
         .sort_by_key(|c| (c.photo, field_order(&c.field)));
+}
+
+/// The development commands of one photo, in the order they must run:
+/// `develop.set` for slider values, then `develop.merge` for the structured
+/// parts, after the photo's field updates.
+///
+/// A known photo whose recorded hash equals the source hash needs nothing.
+/// A different hash is only reported (`develop_not_applied`) unless
+/// `overwrite` is given, so a Lightroom change never overwrites silently. A
+/// mapping file without a hash plans one write.
+fn plan_develop(
+    global_id: &str,
+    known: Option<&crate::state::PhotoEntry>,
+    develop: &Develop,
+    overwrite: bool,
+    out: &mut Plan,
+) {
+    if !has_develop_content(develop) {
+        return;
+    }
+    if let Some(entry) = known {
+        match entry.develop_hash.as_deref() {
+            Some(recorded)
+                if develop
+                    .source_hash
+                    .is_some_and(|source| hex_hash(&source) == recorded) =>
+            {
+                return;
+            }
+            None => {}
+            Some(_) => {
+                if !overwrite {
+                    out.develop_not_applied += 1;
+                    return;
+                }
+                out.develop_overwritten += 1;
+            }
+        }
+    }
+    if !develop.controls.is_empty() {
+        out.steps.push(Step::DevelopSet {
+            global_id: global_id.to_string(),
+            values: develop.controls.clone(),
+        });
+    }
+    if let Some(settings) = develop_settings(develop) {
+        out.steps.push(Step::DevelopMerge {
+            global_id: global_id.to_string(),
+            settings,
+        });
+    }
+    out.develop_planned += 1;
+}
+
+/// Whether the settings hold anything the writer can send. The source hash,
+/// the unmapped names and the deferred flag alone do not.
+fn has_develop_content(develop: &Develop) -> bool {
+    !develop.controls.is_empty()
+        || !develop.partial.is_empty()
+        || develop.white_balance.mode.is_some()
+}
+
+/// The nested `settings` object of `develop.merge`: dotted `partial` paths
+/// are nested (`hdr.enabled` -> `{"hdr": {"enabled": ...}}`), the
+/// white-balance mode becomes `wb.mode`, and a Kelvin hint adds
+/// `wb.scale: "kelvin"`. Temperature and tint never appear: they stay in
+/// `unmapped` only.
+fn develop_settings(develop: &Develop) -> Option<Value> {
+    let mut settings = Map::new();
+    for (path, value) in &develop.partial {
+        let value = match value {
+            MergeValue::Bool(on) => json!(on),
+            MergeValue::Text(text) => json!(text),
+        };
+        insert_path(&mut settings, path, value);
+    }
+    if let Some(mode) = &develop.white_balance.mode {
+        object_entry(&mut settings, "wb").insert("mode".to_string(), json!(mode));
+    }
+    if develop.white_balance.hint == WhiteBalanceHint::Kelvin {
+        object_entry(&mut settings, "wb").insert("scale".to_string(), json!("kelvin"));
+    }
+    (!settings.is_empty()).then_some(Value::Object(settings))
+}
+
+/// Inserts `value` below a dotted path, creating intermediate objects.
+fn insert_path(map: &mut Map<String, Value>, path: &str, value: Value) {
+    match path.split_once('.') {
+        None => {
+            map.insert(path.to_string(), value);
+        }
+        Some((head, rest)) => {
+            let entry = object_entry(map, head);
+            insert_path(entry, rest, value);
+        }
+    }
+}
+
+/// The nested object stored under `key`, creating or replacing it if it is
+/// not an object yet.
+fn object_entry<'a>(map: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
+    let entry = map
+        .entry(key.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !entry.is_object() {
+        *entry = Value::Object(Map::new());
+    }
+    match entry {
+        Value::Object(inner) => inner,
+        _ => unreachable!("the entry was just made an object"),
+    }
 }
 
 /// The field values of a photo with its keyword paths rewritten to the

@@ -102,6 +102,12 @@ pub struct PhotoEntry {
     /// photo: only its fields are updated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy_of: Option<String>,
+    /// Lowercase hex SHA-256 of the development-settings text last written,
+    /// if any. Missing in files of older versions; `None` means the next run
+    /// writes the settings once. It is recorded only after every develop
+    /// command of the photo succeeded, never after a failed one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub develop_hash: Option<String>,
 }
 
 /// One keyword created in the library, with the attributes it was created
@@ -315,10 +321,10 @@ impl State {
         fields: PhotoFields,
     ) {
         let global_id = global_id.into();
-        let (copy_of, path) = self
-            .photos
-            .get(&global_id)
-            .map_or((None, None), |e| (e.copy_of.clone(), e.path.clone()));
+        let (copy_of, path, develop_hash) =
+            self.photos.get(&global_id).map_or((None, None, None), |e| {
+                (e.copy_of.clone(), e.path.clone(), e.develop_hash.clone())
+            });
         self.photos.insert(
             global_id,
             PhotoEntry {
@@ -327,6 +333,7 @@ impl State {
                 fields,
                 path,
                 copy_of,
+                develop_hash,
             },
         );
     }
@@ -342,6 +349,20 @@ impl State {
         match self.photos.get_mut(global_id) {
             Some(entry) if entry.path.is_none() => {
                 entry.path = Some(text.to_string());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Records the lowercase hex SHA-256 of the development-settings text
+    /// that was written, replacing an earlier value. Returns whether the
+    /// entry changed. Only called after every develop command of the photo
+    /// succeeded, so an incomplete photo is written again by the next run.
+    pub fn record_develop_hash(&mut self, global_id: &str, hash: Option<String>) -> bool {
+        match self.photos.get_mut(global_id) {
+            Some(entry) if entry.develop_hash != hash => {
+                entry.develop_hash = hash;
                 true
             }
             _ => false,
@@ -367,6 +388,7 @@ impl State {
                 fields,
                 path: None,
                 copy_of: Some(master_global_id.into()),
+                develop_hash: None,
             },
         );
     }
@@ -454,6 +476,12 @@ pub fn state_path(library: &Path) -> PathBuf {
             PathBuf::from(file)
         }
     }
+}
+
+/// The lowercase hex spelling of a SHA-256 hash, as the mapping file stores
+/// it.
+pub fn hex_hash(hash: &[u8; 32]) -> String {
+    hash.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The field values of a photo with its keywords, as the plan compares
@@ -703,6 +731,49 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut s = State::default();
         assert!(!s.remember_path("missing", &dir.path().join("a.jpg")));
+    }
+
+    #[test]
+    fn the_develop_hash_round_trips_and_record_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.lr2lc.json");
+        let mut s = State::default();
+        s.record("g", 1, Value::from(1), PhotoFields::imported_default());
+        assert!(s.record_develop_hash("g", Some(hex_hash(&[0xab; 32]))));
+        assert!(!s.record_develop_hash("g", Some(hex_hash(&[0xab; 32]))));
+        // Recording new field values keeps the hash, like the base path.
+        s.record("g", 1, Value::from(1), PhotoFields::imported_default());
+        assert_eq!(
+            s.photo("g").unwrap().develop_hash.as_deref(),
+            Some(hex_hash(&[0xab; 32]).as_str())
+        );
+        s.save(&path).unwrap();
+        let loaded = State::load(&path).unwrap();
+        assert_eq!(
+            loaded.photo("g").unwrap().develop_hash.as_deref(),
+            Some(hex_hash(&[0xab; 32]).as_str())
+        );
+    }
+
+    #[test]
+    fn an_entry_without_a_develop_hash_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.lr2lc.json");
+        let text = r#"{"version":1,"photos":{"g":{"lightroom_id":1,"lightcraft_id":2,
+            "fields":{"rating":0,"flag":"none","label":null,"title":null,
+            "caption":null,"copyright":null,"creator":null,"keywords":[]}}},
+            "keywords":{}}"#;
+        std::fs::write(&path, text).unwrap();
+        let loaded = State::load(&path).unwrap();
+        assert_eq!(loaded.photo("g").unwrap().develop_hash, None);
+    }
+
+    #[test]
+    fn hex_hash_is_lowercase_and_64_characters() {
+        let text = hex_hash(&[0xab; 32]);
+        assert_eq!(text.len(), 64);
+        assert!(text.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(!text.chars().any(|c| c.is_ascii_uppercase()));
     }
 
     #[test]
