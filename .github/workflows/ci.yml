@@ -44,7 +44,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sh scripts/check-links.sh
       - name: Scan added lines for personal data
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && runner.os == 'Linux'
         run: |
           git diff --unified=0 \
             "origin/${{ github.event.pull_request.base.ref }}...HEAD" -- . \
