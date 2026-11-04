@@ -131,6 +131,100 @@ pub mod edge {
     pub const BALANCE_DEFERRED: i64 = 8;
 }
 
+/// Tone-curve fixtures (P6-3). All point lists are invented and use
+/// Lightroom's stored 0..255 scale, as pairs `x, y`.
+pub mod curve {
+    /// Master curve only (`ToneCurvePV2012`).
+    pub const MASTER_PHOTO: i64 = 4;
+    /// Master curve plus one channel curve (`ToneCurvePV2012Red`).
+    pub const ONE_CHANNEL_PHOTO: i64 = 5;
+    /// Master curve plus all three channel curves.
+    pub const ALL_CHANNELS_PHOTO: i64 = 6;
+    /// A straight 0→255 identity line: no curve.
+    pub const IDENTITY_PHOTO: i64 = 7;
+    /// Old `ToneCurve` without a 2012 key.
+    pub const OLD_PHOTO: i64 = 8;
+    /// Old `ToneCurve` plus `ToneCurvePV2012`: the 2012 curve wins.
+    pub const OLD_AND_NEW_PHOTO: i64 = 9;
+    /// A list with an odd number of values: the row is invalid.
+    pub const ODD_LIST_PHOTO: i64 = 10;
+    /// A list with a string where a number belongs: the row is invalid.
+    pub const BROKEN_POINT_PHOTO: i64 = 11;
+    /// All three channel curves but no master: no channel curve is read.
+    pub const CHANNELS_WITHOUT_MASTER_PHOTO: i64 = 12;
+
+    /// Master points in stored coordinates, `x1, y1, x2, y2, …`.
+    pub const MASTER_255: [i64; 8] = [0, 0, 64, 96, 192, 240, 255, 255];
+    /// Red channel points.
+    pub const RED_255: [i64; 6] = [0, 0, 128, 120, 255, 255];
+    /// Green channel points.
+    pub const GREEN_255: [i64; 4] = [0, 0, 255, 240];
+    /// Blue channel points.
+    pub const BLUE_255: [i64; 4] = [0, 30, 255, 255];
+    /// Old `ToneCurve` points (different from [`NEW_255`]).
+    pub const OLD_255: [i64; 6] = [0, 0, 128, 140, 255, 255];
+    /// `ToneCurvePV2012` points of the old-and-new fixture.
+    pub const NEW_255: [i64; 6] = [0, 10, 128, 150, 255, 240];
+    /// The identity line `(0,0)–(255,255)`.
+    pub const IDENTITY_255: [i64; 4] = [0, 0, 255, 255];
+}
+
+/// Crop fixtures (P6-3). The rectangle is invented; the orientation codes are
+/// Lightroom's two-letter codes (`AB` upright, `BA` mirrored horizontally).
+pub mod crop {
+    /// Upright photo with a stored crop and angle 0. Its `orientation` stays
+    /// NULL, which must be read as upright.
+    pub const PLAIN_PHOTO: i64 = 4;
+    /// Upright photo with a positive stored angle.
+    pub const ANGLE_POSITIVE_PHOTO: i64 = 5;
+    /// Upright photo with a negative stored angle.
+    pub const ANGLE_NEGATIVE_PHOTO: i64 = 6;
+    /// Only `CropAngle`, no edges: a crop with the unit rectangle.
+    pub const ANGLE_ONLY_PHOTO: i64 = 7;
+    /// No crop field at all.
+    pub const NONE_PHOTO: i64 = 8;
+    /// Mirrored horizontally (`BA`) with a stored angle.
+    pub const FLIP_H_ANGLE_PHOTO: i64 = 9;
+    /// Quarter turn clockwise (`BC`) with angle 0.
+    pub const ROTATE90_PHOTO: i64 = 10;
+    /// Mirrored horizontally (`BA`) with angle 0.
+    pub const FLIP_H_PHOTO: i64 = 11;
+    /// Crop plus the unverified aspect/flip keys, which are reported.
+    pub const ASSUMPTIONS_PHOTO: i64 = 12;
+
+    /// Stored edges of [`PLAIN_PHOTO`].
+    pub const LEFT: f64 = 0.1;
+    pub const TOP: f64 = 0.2;
+    pub const RIGHT: f64 = 0.9;
+    pub const BOTTOM: f64 = 0.8;
+    /// Stored edges of the orientation fixtures. Chosen so that the reference
+    /// rule (`lightroom_catalog.rs:737-765`) gives clean expected values.
+    pub const ORIENT_LEFT: f64 = 0.1;
+    pub const ORIENT_TOP: f64 = 0.2;
+    pub const ORIENT_RIGHT: f64 = 0.6;
+    pub const ORIENT_BOTTOM: f64 = 0.9;
+    /// `fileWidth` / `fileHeight` of the oriented fixtures.
+    pub const STORED_WIDTH: i64 = 1500;
+    pub const STORED_HEIGHT: i64 = 1000;
+    /// Stored `CropAngle` values.
+    pub const POSITIVE_ANGLE: f64 = 5.0;
+    pub const NEGATIVE_ANGLE: f64 = -3.5;
+    pub const ANGLE_ONLY: f64 = -1.5;
+    pub const FLIP_ANGLE: f64 = 2.0;
+    /// Keys that stay assumptions and are reported, never mapped.
+    pub const UNMAPPED_ASSUMPTIONS: [&str; 3] = [
+        "CropConstrainAspectRatio",
+        "CropFlipHorizontal",
+        "CropFlipVertical",
+    ];
+}
+
+/// A Lua positional array of numbers: `{ 0, 0, 255, 255 }`.
+pub fn lua_list(values: &[i64]) -> String {
+    let items: Vec<String> = values.iter().map(|v| v.to_string()).collect();
+    format!("{{ {} }}", items.join(", "))
+}
+
 /// One value of the generated Lua table.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Field {
@@ -462,8 +556,8 @@ pub fn old_process_fields() -> Vec<(&'static str, f64)> {
 }
 
 /// Expected controls of the old-process fields, with the formulas of section
-/// 4.1. The old point curve (`ToneCurve`) is not part of P6-1 and is reported
-/// as unmapped instead.
+/// 4.1. The old point curve (`ToneCurve`) is read since P6-3; this fixture
+/// stores it as the straight identity line, so it stays empty.
 pub fn old_process_expected() -> Vec<(&'static str, f64)> {
     vec![
         ("light.exposure", edge::OLD_EXPOSURE),
@@ -741,6 +835,240 @@ pub fn write_balance_catalog_with_files(dir: &Path) -> Result<PathBuf> {
         rows.push((photo, text));
     }
     write_develop_catalog_with_files(dir, "develop-balance.lrcat", &rows)
+}
+
+/// Sets `Adobe_images.orientation`, `fileWidth` and `fileHeight` for one
+/// image. The small fixture leaves all three NULL.
+pub fn set_image_geometry(
+    path: &Path,
+    image: i64,
+    orientation: &str,
+    width: i64,
+    height: i64,
+) -> Result<()> {
+    let c = Connection::open(path)?;
+    c.execute(
+        "UPDATE Adobe_images SET orientation = ?1, fileWidth = ?2, fileHeight = ?3 \
+         WHERE id_local = ?4",
+        params![orientation, width, height, image],
+    )?;
+    Ok(())
+}
+
+/// Curve fixtures: master only, master plus one channel, master plus all three
+/// channels, an identity line, an old curve, an old curve beside a 2012 one,
+/// channel curves without a master, and two broken lists.
+pub fn write_curves_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let list = lua_list;
+    let rows = vec![
+        (
+            crate::develop::curve::MASTER_PHOTO,
+            settings()
+                .raw("ToneCurvePV2012", &list(&crate::develop::curve::MASTER_255))
+                .build(),
+        ),
+        (
+            crate::develop::curve::ONE_CHANNEL_PHOTO,
+            settings()
+                .raw("ToneCurvePV2012", &list(&crate::develop::curve::MASTER_255))
+                .raw("ToneCurvePV2012Red", &list(&crate::develop::curve::RED_255))
+                .build(),
+        ),
+        (
+            crate::develop::curve::ALL_CHANNELS_PHOTO,
+            settings()
+                .raw("ToneCurvePV2012", &list(&crate::develop::curve::MASTER_255))
+                .raw("ToneCurvePV2012Red", &list(&crate::develop::curve::RED_255))
+                .raw(
+                    "ToneCurvePV2012Green",
+                    &list(&crate::develop::curve::GREEN_255),
+                )
+                .raw(
+                    "ToneCurvePV2012Blue",
+                    &list(&crate::develop::curve::BLUE_255),
+                )
+                .build(),
+        ),
+        (
+            crate::develop::curve::IDENTITY_PHOTO,
+            settings()
+                .raw(
+                    "ToneCurvePV2012",
+                    &list(&crate::develop::curve::IDENTITY_255),
+                )
+                .build(),
+        ),
+        (
+            crate::develop::curve::OLD_PHOTO,
+            settings()
+                .raw("ToneCurve", &list(&crate::develop::curve::OLD_255))
+                .build(),
+        ),
+        (
+            crate::develop::curve::OLD_AND_NEW_PHOTO,
+            settings()
+                .raw("ToneCurve", &list(&crate::develop::curve::OLD_255))
+                .raw("ToneCurvePV2012", &list(&crate::develop::curve::NEW_255))
+                .build(),
+        ),
+        (
+            crate::develop::curve::ODD_LIST_PHOTO,
+            settings().raw("ToneCurvePV2012", "{ 0, 0, 128 }").build(),
+        ),
+        (
+            crate::develop::curve::BROKEN_POINT_PHOTO,
+            settings()
+                .raw("ToneCurvePV2012", "{ 0, 0, \"ZyxNotANumber\", 255 }")
+                .build(),
+        ),
+        (
+            crate::develop::curve::CHANNELS_WITHOUT_MASTER_PHOTO,
+            settings()
+                .raw("ToneCurvePV2012Red", &list(&crate::develop::curve::RED_255))
+                .raw(
+                    "ToneCurvePV2012Green",
+                    &list(&crate::develop::curve::GREEN_255),
+                )
+                .raw(
+                    "ToneCurvePV2012Blue",
+                    &list(&crate::develop::curve::BLUE_255),
+                )
+                .build(),
+        ),
+    ];
+    write_develop_catalog_with_files(dir, "develop-curves.lrcat", &rows)
+}
+
+/// Crop fixtures: upright and oriented crops, an angle-only crop, a photo
+/// without crop fields, and one with the unverified aspect/flip keys.
+pub fn write_crop_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    let edges = |left: f64, top: f64, right: f64, bottom: f64| {
+        settings()
+            .number("CropLeft", left)
+            .number("CropTop", top)
+            .number("CropRight", right)
+            .number("CropBottom", bottom)
+    };
+    use crate::develop::crop as c;
+    let rows = vec![
+        (
+            c::PLAIN_PHOTO,
+            edges(c::LEFT, c::TOP, c::RIGHT, c::BOTTOM)
+                .number("CropAngle", 0.0)
+                .build(),
+        ),
+        (
+            c::ANGLE_POSITIVE_PHOTO,
+            edges(
+                c::ORIENT_LEFT,
+                c::ORIENT_TOP,
+                c::ORIENT_RIGHT,
+                c::ORIENT_BOTTOM,
+            )
+            .number("CropAngle", c::POSITIVE_ANGLE)
+            .build(),
+        ),
+        (
+            c::ANGLE_NEGATIVE_PHOTO,
+            edges(
+                c::ORIENT_LEFT,
+                c::ORIENT_TOP,
+                c::ORIENT_RIGHT,
+                c::ORIENT_BOTTOM,
+            )
+            .number("CropAngle", c::NEGATIVE_ANGLE)
+            .build(),
+        ),
+        (
+            c::ANGLE_ONLY_PHOTO,
+            settings().number("CropAngle", c::ANGLE_ONLY).build(),
+        ),
+        (
+            c::NONE_PHOTO,
+            settings().number("Exposure2012", 0.5).build(),
+        ),
+        (
+            c::FLIP_H_ANGLE_PHOTO,
+            edges(
+                c::ORIENT_LEFT,
+                c::ORIENT_TOP,
+                c::ORIENT_RIGHT,
+                c::ORIENT_BOTTOM,
+            )
+            .number("CropAngle", c::FLIP_ANGLE)
+            .build(),
+        ),
+        (
+            c::ROTATE90_PHOTO,
+            edges(
+                c::ORIENT_LEFT,
+                c::ORIENT_TOP,
+                c::ORIENT_RIGHT,
+                c::ORIENT_BOTTOM,
+            )
+            .number("CropAngle", 0.0)
+            .build(),
+        ),
+        (
+            c::FLIP_H_PHOTO,
+            edges(
+                c::ORIENT_LEFT,
+                c::ORIENT_TOP,
+                c::ORIENT_RIGHT,
+                c::ORIENT_BOTTOM,
+            )
+            .number("CropAngle", 0.0)
+            .build(),
+        ),
+        (
+            c::ASSUMPTIONS_PHOTO,
+            edges(
+                c::ORIENT_LEFT,
+                c::ORIENT_TOP,
+                c::ORIENT_RIGHT,
+                c::ORIENT_BOTTOM,
+            )
+            .boolean("CropConstrainAspectRatio", true)
+            .boolean("CropFlipHorizontal", true)
+            .boolean("CropFlipVertical", false)
+            .number("CropAngle", 0.0)
+            .build(),
+        ),
+    ];
+    let catalog = write_develop_catalog_with_files(dir, "develop-crop.lrcat", &rows)?;
+    let upright =
+        |photo| set_image_geometry(&catalog, photo, "AB", c::STORED_WIDTH, c::STORED_HEIGHT);
+    for photo in [
+        c::ANGLE_POSITIVE_PHOTO,
+        c::ANGLE_NEGATIVE_PHOTO,
+        c::ANGLE_ONLY_PHOTO,
+        c::NONE_PHOTO,
+        c::ASSUMPTIONS_PHOTO,
+    ] {
+        upright(photo)?;
+    }
+    set_image_geometry(
+        &catalog,
+        c::FLIP_H_ANGLE_PHOTO,
+        "BA",
+        c::STORED_WIDTH,
+        c::STORED_HEIGHT,
+    )?;
+    set_image_geometry(
+        &catalog,
+        c::ROTATE90_PHOTO,
+        "BC",
+        c::STORED_WIDTH,
+        c::STORED_HEIGHT,
+    )?;
+    set_image_geometry(
+        &catalog,
+        c::FLIP_H_PHOTO,
+        "BA",
+        c::STORED_WIDTH,
+        c::STORED_HEIGHT,
+    )?;
+    Ok(catalog)
 }
 
 /// The byte length [`oversized_text`] produces: one byte above the reader's
