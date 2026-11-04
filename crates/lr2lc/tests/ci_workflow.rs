@@ -130,23 +130,36 @@ fn ci_keeps_format_clippy_and_test_steps() {
     }
 }
 
+/// `cargo fmt` is exempt: it does not build and rejects `--locked`. Every
+/// command that resolves or builds dependencies must be locked, and clippy and
+/// test must be covered explicitly.
 #[test]
 fn ci_cargo_commands_use_locked() {
     let text = read(CI);
-    let commands = ["cargo fmt", "cargo clippy", "cargo test"];
-    let mut seen = 0;
+    let commands = ["cargo clippy", "cargo test", "cargo check", "cargo build"];
+    let mut clippy_locked = 0;
+    let mut test_locked = 0;
     for line in text.lines() {
         if commands.iter().any(|command| line.contains(command)) {
-            seen += 1;
             assert!(
                 line.contains("--locked"),
                 "{CI}: this command must use `--locked`: {line}"
             );
+            if line.contains("cargo clippy") {
+                clippy_locked += 1;
+            }
+            if line.contains("cargo test") {
+                test_locked += 1;
+            }
         }
     }
     assert!(
-        seen >= commands.len(),
-        "{CI}: expected at least one fmt, clippy and test invocation"
+        clippy_locked > 0,
+        "{CI}: expected a `cargo clippy` invocation with `--locked`"
+    );
+    assert!(
+        test_locked > 0,
+        "{CI}: expected a `cargo test` invocation with `--locked`"
     );
 }
 
