@@ -7,11 +7,15 @@
 use std::fmt;
 use std::path::PathBuf;
 
+pub mod develop;
 pub mod label;
 pub mod mapping;
 pub mod skip;
 pub mod smart;
 
+pub use develop::{
+    CropGeometry, CurvePoint, Curves, Develop, MergeValue, WhiteBalance, WhiteBalanceHint,
+};
 pub use label::{ColorLabel, LabelSet};
 pub use mapping::{MappedPath, PathMapping, PathMappings};
 pub use skip::{SkipCode, Skipped};
@@ -99,7 +103,10 @@ pub enum Flag {
 }
 
 /// A photo, referenced by the path of its original file.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Equality includes the development settings. `Photo` is not `Eq` because
+/// those settings hold floating-point values.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Photo {
     /// Path of the original file. The file itself is never touched.
     pub path: PathBuf,
@@ -128,6 +135,9 @@ pub struct Photo {
     /// its own rating, label, flag and keywords; the writer creates it once
     /// with `photo.virtualCopy` and records it in the mapping file.
     pub master: Option<i64>,
+    /// Development settings from the catalog. `None` if the catalog has no
+    /// readable settings for this photo.
+    pub develop: Option<Develop>,
 }
 
 impl Photo {
@@ -145,6 +155,7 @@ impl Photo {
             creator: None,
             title: None,
             master: None,
+            develop: None,
         }
     }
 
@@ -194,6 +205,12 @@ impl Photo {
     /// photo this is a virtual copy of.
     pub fn with_master(mut self, master: i64) -> Self {
         self.master = Some(master);
+        self
+    }
+
+    /// Returns the photo with its development settings set.
+    pub fn with_develop(mut self, develop: Develop) -> Self {
+        self.develop = Some(develop);
         self
     }
 }
