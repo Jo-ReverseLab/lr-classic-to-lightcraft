@@ -19,17 +19,17 @@ their hierarchy, synonyms and attributes and their assignments to photos, star
 ratings, pick/reject flags, colour labels, titles, captions, copyright and
 creator, collections as albums and collection sets as album folders (with
 their members), smart collections, folder stacks, the Quick Collection and
-development settings (sliders and the white-balance mode; the stored Lua
-table is parsed, never executed).
+development settings (sliders, tone curves, crop geometry and the
+white-balance mode; the stored Lua table is parsed, never executed).
 
 What `--apply` writes into a LightCraft library, through the control port of
 the running LightCraft app: keywords, photos (as references to the existing
 files), ratings, flags, labels, titles, captions, copyright and creator,
 albums and album folders with their members, smart albums (only when the rule
 translates exactly), stacks (always written expanded), the Quick
-Collection (only adding photos) and development settings (sliders and the
-white-balance mode; tone curves and crop follow in a later change, masks and
-spots in another).
+Collection (only adding photos) and development settings (sliders, tone
+curves, crop geometry and the white-balance mode; masks and spots follow in a
+later change).
 
 Without `--apply`, lr2lc only reports what it would do. Everything that is
 not converted is listed with a reason in the summary and in `report.json`.
@@ -450,6 +450,16 @@ White balance is written only when the mode is known. A Kelvin hint becomes
 Temperature and tint themselves are never written, and neither is any value
 of an unmapped field: those are collected and reported by name.
 
+Tone curves and crop go in the same `develop.merge`. The 2012 curve fields
+become `curve.master`, `curve.red`, `curve.green` and `curve.blue` as arrays
+of `{"x", "y"}` points in 0..1; a channel list is written only when all three
+channels and the master exist, and a straight identity line counts as no
+curve. The legacy `ToneCurve` is used only when no 2012 curve is present.
+The crop becomes `crop.geometry` with its rectangle and angle, transformed
+into the displayed frame through the stored orientation and image size the
+same way LightCraft's catalog import does. The angle appears only inside
+`crop.geometry`, never as a control.
+
 The mapping file records `develop_hash`, the SHA-256 of the settings text
 last written for a photo. On a later run the settings are compared by that
 hash:
@@ -470,7 +480,7 @@ fields N (N listed), changed and not applied N, overwritten N`, and
 distinct field names, sorted; `unmapped_count` is the full count. Neither
 the report nor the summary ever holds a value.
 
-Tone curves and crop follow in a later change, masks and spots in another.
+Masks and spots follow in a later change.
 
 ### `--apply`
 
@@ -731,10 +741,11 @@ counts the smart collections converted as smart albums.
   reported, with a code.
 - The collapsed or expanded state of stacks is only counted, not written;
   stacks are always written expanded.
-- Development settings are written as sliders and the white-balance mode.
-  Tone curves and crop follow in a later change, masks and spots in another.
-  Temperature and tint and the other unmapped fields are reported, never
-  written.
+- Development settings are written as sliders, tone curves, crop geometry and
+  the white-balance mode. Masks and spots follow in a later change. The
+  camera profile and look are only reported by name, never written, as are
+  temperature, tint and the other unmapped fields. Temperature and tint wait
+  for a probe of the original file because their stored scale is ambiguous.
 - A known photo whose development settings changed in Lightroom is left alone
   unless `--overwrite-develop` is given (see
   [Development settings](#development-settings)).

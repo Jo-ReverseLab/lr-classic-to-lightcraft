@@ -32,14 +32,18 @@ The project has not made a release yet.
   Light, HDR/SDR, tone-curve, colour-grading, colour, mixer, effects,
   vignette, grain, detail, optics, geometry and calibration controls, the
   old-process fields with LightCraft's approximation, the merge-only
-  switches and the white-balance mode. The stored Lua table is parsed
-  without executing it; unknown fields, unreadable entries and Lightroom's
-  `-999999` sentinel are recorded for the report.
+  switches, the white-balance mode, the 2012 tone curves and the crop
+  geometry. The stored Lua table is parsed without executing it; unknown
+  fields, unreadable entries and Lightroom's `-999999` sentinel are recorded
+  for the report. The crop is transformed into LightCraft's oriented frame
+  through the stored orientation and image size; a broken curve list follows
+  the unreadable-row path.
 - Writing of development settings (phase 6a): slider values as
-  `develop.set`, the structured parts and the white-balance mode as
-  `develop.merge` after a selection. Temperature, tint and the other
-  unmapped fields are reported by name and never written; tone curves and
-  crop follow in a later change, masks and spots in another.
+  `develop.set`, the structured parts, the white-balance mode, the tone
+  curves and the crop geometry as `develop.merge` after a selection.
+  Temperature, tint, the camera profile and the other unmapped fields are
+  reported by name and never written; masks and spots follow in a later
+  change.
 - `develop_hash` in the mapping file keeps the develop writes idempotent. A
   known photo whose settings changed in Lightroom is only rewritten with the
   new `--overwrite-develop`.
