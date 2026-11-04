@@ -38,9 +38,9 @@ Source roots used below:
   - docs are under `docs/`.
 - **lr2lc repository**, branch `main`, commit `04ee6f5` (the state this
   document was re-checked against in P6-0). The repository is not published
-  yet, so these citations have no public URL. Section 0 lists every lr2lc
-  citation, whether it still matches, and the corrected line range where it
-  does not.
+  yet, so these citations have no public URL. Section 0 lists the lr2lc
+  citations checked in P6-0, with the corrected line range where a citation
+  had drifted.
 - **lrcat-extractor 0.6.0** — commit
   `a3a59b37a1081a03f69b06648210c65a53aeb482`, public at
   https://github.com/hfiguiere/lrcat-extractor (§10). Only read, no code copied
@@ -54,26 +54,32 @@ names and invented numbers.
 
 ## 0. Citation check against lr2lc `04ee6f5` (P6-0)
 
-P6-0 re-checked every lr2lc path in this document. All cited files exist at
-`04ee6f5`; one line range had drifted, the rest still match. Changes since
-T12 are recorded in the table rather than assumed away.
+The lr2lc citations in this document were corrected against `04ee6f5`; the
+table below lists the checked sites with their current ranges. Every cited
+lr2lc file exists at that commit. Changes since T12 are recorded here rather
+than assumed away.
 
 | Citation in this document | State at `04ee6f5` | Where it is now |
 | --- | --- | --- |
-| `crates/lc-writer/src/plan.rs:401-416` (the `library.select` + command pattern) | **stale** | `Step::Update` is declared at `crates/lc-writer/src/plan.rs:130-139`; the plan emits `library.select` and the command at `crates/lc-writer/src/plan.rs:530-546`. |
-| `crates/model/src/skip.rs:13-...`, `:1-6` | valid | `SkipCode` starts at `crates/model/src/skip.rs:13`; it now holds 58 codes, with `SkipCode::ALL` at `crates/model/src/skip.rs:129`. New develop codes append to both lists. |
-| `crates/lc-writer/src/state.rs` (prose, §6.4) | exists | The per-photo record is `PhotoEntry` (`crates/lc-writer/src/state.rs:87-109`); it already has optional, serde-defaulted fields (`:97`, `:103`, `:116`), so a develop hash can be added without a format break. The file version is `1` (`:23`) and is compared exactly (`:258`); no serde `deny_unknown_fields`, so older readers ignore a new field. |
+| `crates/lc-writer/src/plan.rs:401-416` (the `library.select` + command pattern) | **stale** | The plan emits `library.select` and the command at `crates/lc-writer/src/plan.rs:530-546`. `Step::Update` itself is declared at `crates/lc-writer/src/plan.rs:157-164`; the `Step` enum starts at `:130` (first variants `CreateKeyword`, `Import`). |
+| `crates/lc-writer/src/plan.rs:530-546` (cited at §1.3, §6.3) | valid | `Step::Update` injects `ids` into the command parameters at `crates/lc-writer/src/plan.rs:536-544`. |
+| `crates/lc-writer/src/plan.rs:155-160` (cited at §1.3) | valid | The `Step::Update` doc comment names only `photo.*` commands at `crates/lc-writer/src/plan.rs:155-160`. |
+| `crates/model/src/skip.rs:13-...`, `:1-6` | valid | `SkipCode` starts at `crates/model/src/skip.rs:13`; it now holds 58 codes, with `SkipCode::ALL` at `crates/model/src/skip.rs:102` (`:129` is a single variant, `CollectionUnknown`). New develop codes append to both lists. |
+| `crates/lc-writer/src/state.rs` (prose, §6.4) | exists | The per-photo record is `PhotoEntry` (`crates/lc-writer/src/state.rs:87-105`); it already has two optional fields (`path` at `:98`, `copy_of` at `:104`), serde-defaulted at `:97` and `:103`. `KeywordEntry.lightroom_id` (`:116`, serde attribute; declaration `:117`) is a third such field. A develop hash can be added without a format break. The file version is `1` (`:23`) and is compared exactly (`:258`); no serde `deny_unknown_fields`, so older readers ignore a new field. |
+| `crates/lc-writer/src/state.rs:258` (cited at §6.4) | valid | The loader compares `version` exactly at `crates/lc-writer/src/state.rs:258`. |
 | `crates/lc-test-support/src/fake_lightcraft.rs` (§7.3 item 9) | exists | The file is present; it was not re-read in P6-0. |
 | `tests/fixtures/README.md:1-4`, `:6-9` | valid | Generated-only rule at `tests/fixtures/README.md:3-4`; generator and layout at `:6-9`. |
 | `tests/fixtures/generator` (§7) | valid | Workspace crate `lrcat-fixtures` (`tests/fixtures/generator/Cargo.toml:2`). |
 | `docs/research/lightcraft-develop.md:20`, `:22-29`, `:27`, `:32` | valid | Storage, command list, `develop.merge` line and importer flow are at those lines. |
 | `docs/research/lrcat-schema-lrc15.md:18-33` | valid | The `Adobe_images` column table starts at `:18`. |
-| `crates/model/src/lib.rs` (`Photo`, §6.2) | exists, no develop field | `Photo` is at `crates/model/src/lib.rs:103-132` and has no `develop` field. No `Develop` type exists anywhere under `crates/` (grep, P6-0). |
+| `crates/model/src/lib.rs` (`Photo`, §6.2) | exists, no develop field | `Photo` is at `crates/model/src/lib.rs:103-131` and has no `develop` field. No `Develop` type exists anywhere under `crates/` (grep, P6-0). |
+| `crates/lr2lc/src/output.rs:11-40` (cited at §8, decision 6) | valid | `ReportJson` with one area per kind and `skipped_by_code` is at `crates/lr2lc/src/output.rs:11-35`; `AreaJson` is declared at `:39`. |
+| `docs/research/reconciliation.md:1-10` (cited at §6.4) | valid | The status note at `docs/research/reconciliation.md:3` marks the default-only overwrite rule as planned, not implemented. |
 | `crates/catalog/src/model.rs:248-254` (§1.1) | valid, but **LightCraft** path | Not an lr2lc path: it is `Photo.develop` in the LightCraft tree at the cited commit. The document says so at the point of use. |
 
 For the new field-name list (section 4.12) the LightCraft commands and control
-table were re-read at the same commit: `develop.set` (`develop.rs:166-233`),
-`develop.merge` (`develop.rs:256-262`), the merge implementation
+table were re-read at the same commit: `develop.set` (`develop.rs:167-233`),
+`develop.merge` (`develop.rs:256-263`), the merge implementation
 (`crates/develop/src/lib.rs:45-57`), the control table and its accessors
 (`controls.rs:144-166`), the 122 entries (`controls.rs:171-292`) and the
 indexed controls (`controls.rs:296-414`). Other LightCraft citations
@@ -144,7 +150,7 @@ Two facts matter for a writer:
 
 - `develop.set` accepts `ids` and can update several selected photos in one
   undo step (`develop.rs:211-224`).
-- `develop.merge` has **no** `ids` parameter (`develop.rs:256-262`); it edits
+- `develop.merge` has **no** `ids` parameter (`develop.rs:256-263`); it edits
   the active photo. A per-photo `library.select` is therefore needed before
   every merge. That the command accepts an arbitrary partial is confirmed
   (P6-0) by `DevelopSettings::merged` (`crates/develop/src/lib.rs:45-57`),
@@ -492,9 +498,10 @@ LightCraft has **two spellings** for the same value:
   non-slider fields.
 
 `develop.set` accepts numbers only (`develop.rs:177-190`); booleans, strings,
-curves, crop, masks and spots go through `develop.merge` (section 4.12 marks
-those "merge only"). A "JSON path" below is **nested objects**, not a flattened
-dotted key: `{"detail": {"sharpen_amount": 40}}`, not
+curves, crop geometry (the crop rectangle; `crop.angle` is itself a control,
+`controls.rs:292`), masks and spots go through `develop.merge` (section 4.12
+marks those "merge only"). A "JSON path" below is **nested objects**, not a
+flattened dotted key: `{"detail": {"sharpen_amount": 40}}`, not
 `{"detail.sharpen_amount": 40}`. `develop.merge` deep-merges the object
 (`crates/develop/src/lib.rs:46-48`) and ignores unknown keys silently
 (`settings.rs:1-3`), so a flattened key and a typo behave the same: the
@@ -519,8 +526,8 @@ Yellow, Green, Aqua, Blue, Purple, Magenta` (`crs.rs:60`;
 | `light.blacks` | `light.blacks` | `Blacks2012`; old `Shadows` | `controls.rs:179`; `crs.rs:215`, `:240` |
 | — (merge only) | `hdr.enabled` (bool) | `HDREditMode` | `crs.rs:217-220`; `settings.rs:1126-1127` |
 | `hdr.maxEv` | `hdr.max_ev` | **(assumption)** key not verified | `controls.rs:180`; `settings.rs:1126-1137`; no `crs.rs` mapping |
-| `hdr.sdrBrightness` | `hdr.sdr_brightness` | **(assumption)** key not verified | `controls.rs:181`; `settings.rs:1131-1132`; no `crs.rs` mapping |
-| `hdr.sdrContrast` | `hdr.sdr_contrast` | **(assumption)** key not verified | `controls.rs:182`; `settings.rs:1133`; no `crs.rs` mapping |
+| `hdr.sdrBrightness` | `hdr.sdr_brightness` | **(assumption)** key not verified | `controls.rs:181`; `settings.rs:1131`; no `crs.rs` mapping |
+| `hdr.sdrContrast` | `hdr.sdr_contrast` | **(assumption)** key not verified | `controls.rs:182`; `settings.rs:1132`; no `crs.rs` mapping |
 | `hdr.sdrHighlights` | `hdr.sdr_highlights` | **(assumption)** key not verified | `controls.rs:183`; `settings.rs:1133`; no `crs.rs` mapping |
 | `hdr.sdrShadows` | `hdr.sdr_shadows` | **(assumption)** key not verified | `controls.rs:184`; `settings.rs:1134`; no `crs.rs` mapping |
 | `hdr.sdrWhites` | `hdr.sdr_whites` | **(assumption)** key not verified | `controls.rs:185`; `settings.rs:1135`; no `crs.rs` mapping |
@@ -610,7 +617,7 @@ Yellow, Green, Aqua, Blue, Purple, Magenta` (`crs.rs:60`;
 | — (merge only) | `crop.aspect`, `crop.flip_h`, `crop.flip_v` | **(assumption)** derived from `fileWidth`/`fileHeight` and `orientation`; no direct key verified | `settings.rs:815-822`; `lightroom_catalog.rs:737-765` |
 | — (merge only) | `treatment` (`color`, `bw`) | `ConvertToGrayscale` | `crs.rs:310-312`; `settings.rs:182-188` |
 | `pointColor.<i>.hueShift` etc. | `point_colors[i].hue_shift`, `sat_shift`, `lum_shift`, `variance`, `range`, `hue_range`, `sat_range`, `lum_range` | `PointColors` exists, but LightCraft's importer does not map it (reported only); **(assumption)** on the catalog key shape | `controls.rs:296-414`; `crs.rs:498-508`; `settings.rs:426-469` |
-| `redEye.<i>.pupilSize`, `.darken` | `red_eye[i].pupil_size`, `.darken` | **(assumption)** Lightroom key (possibly `RedEyeInfo`) not verified | `controls.rs:296-414`; `settings.rs:1075-1097`; `xmp-interop.md:191-192` |
+| `redEye.<i>.pupilSize`, `.darken` | `red_eye[i].pupil_size`, `.darken` | **(assumption)** Lightroom key (possibly `RedEyeInfo`) not verified | `controls.rs:296-414`; `settings.rs:1075-1087`; `xmp-interop.md:191-192` |
 | — (merge only) | `masks[]` | `MaskGroupBasedCorrections`, `GradientBasedCorrections`, `CircularGradientBasedCorrections`, `PaintBasedCorrections` | `crs_masks.rs:23-24`, `:252-296`; `settings.rs:1015-1037` |
 | — (merge only) | `spots[]` | `RetouchAreas`, `RetouchInfo` | `crs_masks.rs:298-431`; `settings.rs:1053-1073` |
 | — (merge only) | `lens_blur` (`enabled`, `amount`, `focal_distance`, `focal_range`) | **(assumption)** Lightroom key not verified | `settings.rs:1096-1103`; `xmp-interop.md:191-192` |
@@ -812,8 +819,10 @@ need one more rule:
 The mapping file should store the source settings hash next to the existing
 identity records, so the third case is distinguishable from the second
 without reading the library's develop state. P6-0 verified that the format
-has room for it: `PhotoEntry` (`crates/lc-writer/src/state.rs:87-109`)
-already carries optional, serde-defaulted fields (`:97`, `:103`, `:116`), and
+has room for it: `PhotoEntry` (`crates/lc-writer/src/state.rs:87-105`)
+already carries optional, serde-defaulted fields (`path` at `:98`, `copy_of`
+at `:104`, serde attributes at `:97`/`:103`; `KeywordEntry.lightroom_id` at
+`:117`, serde attribute at `:116`), and
 the loader does not reject unknown fields (`crates/lc-writer/src/state.rs:258`
 checks the version, `VERSION = 1` at `:23`). No format bump is needed for an
 optional field.
@@ -831,11 +840,12 @@ Two limits are worth stating:
   field names as `develop.merge`; the struct has no `rename_all`, so this
   follows from `settings.rs:1-3`, but it was not run.)
 - "Only adds" also means the first run must not overwrite a photo the library
-  already had with its own edits. Re-using the existing rule (a photo that
-  LightCraft already had is only overwritten where its value is still the
-  default; otherwise it is a reported conflict,
-  `docs/research/reconciliation.md:1-10`) keeps develop consistent with the
-  other fields.
+  already had with its own edits. The same protection is **planned, not
+  implemented**, for the photo fields: only values still at their default may
+  be overwritten, any other difference is a reported conflict
+  (`docs/research/reconciliation.md:1-10`; the status note at `:3` says
+  "Planned, not implemented yet"). Develop settings should follow that planned
+  rule in P6-2 rather than invent a different one.
 
 ### 6.5 Alternatives considered
 
@@ -970,23 +980,24 @@ as expected (`docs/lightroom-catalog-import.md:100-107`).
 
 ## 8. Decisions (settled 2026-11-04)
 
-The eight questions T12 left open are settled. "Lead" means a decision the
-team may take under the project rules; "user" means the owner must decide
-(licence, architecture, a new dependency, or something irreversible). The
-"decision" column is what P6-1…P6-7 implement.
+The eight questions T12 left open are settled. The phase-6 scope and all eight
+decisions were **released by the owner on 2026-11-04**; the lead only carried
+that release out. "User" in the Owner column marks such an owner decision;
+"Lead" would mark a decision the team may take under the project rules — no
+row here is of that kind. The "decision" column is what P6-1…P6-7 implement.
 
 | # | Question | Facts today (evidence) | Decision | Owner |
 | --- | --- | --- | --- | --- |
-| 1 | Which route takes the develop settings? | `develop.set` and `develop.merge` exist and cover sliders and a partial settings object (`develop.rs:166-262`; `crates/develop/src/lib.rs:45-57`). `library.importLightroom` always imports a whole catalog (`lightroom_catalog.rs:481`, `:1096`), so it cannot be a develop-only call. | **Own mapper.** lr2lc reads `Adobe_imageDevelopSettings.text` itself and writes through `develop.set` / `develop.merge`. `library.importLightroom` is not used for develop settings. | Lead (approved) |
-| 2 | White balance on raws. | Kelvin handling needs source info from the original file (`crs.rs:250-306`, `:40-57`); lr2lc must not touch originals (principle 2). | **Probe originals read-only only when original paths are released; otherwise do not map `Temperature`/`Tint` and report them as not carried.** The mode (`WhiteBalance`) is always mapped. This is the approved default; enabling the probe is the one residual user question (see 8.1). | Lead for the default, user for enabling |
-| 3 | Scope of phase 6. | Masks and spots are the bulk (`crs_masks.rs:23-24`, `:252-431`); sliders, curves and crop are bounded and testable from generated fixtures. | **6a = sliders, tone curves and crop. 6b = masks and spots, and 6b must not delay the import** (P6-7 runs last). | Lead (approved) |
-| 4 | Model shape. | 122 controls would duplicate a table LightCraft owns (`controls.rs:144-166`, `:171-292`); curves, crop, masks and spots have no slider (`settings.rs:332-374`, `:815-822`, `:1015-1073`). | **Hybrid:** a generic control-id map for sliders, typed fields for curves, crop, masks and spots. | Lead (approved) |
-| 5 | Re-sync policy for changed edits. | The plan only adds; the mapping file records the base values (`state.rs:87-109`); `develop.merge` can overwrite. | **Report changed settings by default; overwrite only with explicit `--overwrite-develop`.** | Lead (approved) |
-| 6 | Report size. | `report.json` has one area per kind plus `skipped_by_code` (`crates/lr2lc/src/output.rs:11-40`); per-field entries can explode. | **Capped detail per field and per photo in `report.json`, plus a counter; the readable summary aggregates.** | Lead (approved) |
-| 7 | Fields that are assumed. | Red eye, lens blur, AI denoise and the HDR SDR sliders are not mapped by LightCraft's importer (`xmp-interop.md:191-192`), and their catalog key names are unverified (section 4.12). | **Confirm the names read-only on a catalog copy in P6-6 before implementing them; until then they stay assumptions and are reported, never silently dropped.** | Lead + katalog-tester; no user decision (read-only copy already allowed) |
-| 8 | Camera profile handling. | The profile name is metadata only and carries no rendering data (`crs.rs:522-526`); LightCraft does not apply Adobe profiles. | **Do not rebuild profiles.** Report the name and aggregate by profile name; a profile/LUT converter is a separate research project. | Lead (approved) |
+| 1 | Which route takes the develop settings? | `develop.set` and `develop.merge` exist and cover sliders and a partial settings object (`develop.rs:167-263`; `crates/develop/src/lib.rs:45-57`). `library.importLightroom` always imports a whole catalog (`lightroom_catalog.rs:481`, `:1096`), so it cannot be a develop-only call. | **Own mapper.** lr2lc reads `Adobe_imageDevelopSettings.text` itself and writes through `develop.set` / `develop.merge`. `library.importLightroom` is not used for develop settings. | User (released 2026-11-04) |
+| 2 | White balance on raws. | Kelvin handling needs source info from the original file (`crs.rs:250-306`, `:40-57`); lr2lc must not touch originals (principle 2). | **Probe originals read-only only when original paths are released; otherwise do not map `Temperature`/`Tint` and report them as not carried.** The mode (`WhiteBalance`) is always mapped. Enabling the probe is the one residual question (see 8.2). | User (released 2026-11-04); enabling the probe still needs the answer in 8.2 |
+| 3 | Scope of phase 6. | Masks and spots are the bulk (`crs_masks.rs:23-24`, `:252-431`); sliders, curves and crop are bounded and testable from generated fixtures. | **6a = sliders, tone curves and crop. 6b = masks and spots, and 6b must not delay the import** (P6-7 runs last). | User (released 2026-11-04) |
+| 4 | Model shape. | 122 controls would duplicate a table LightCraft owns (`controls.rs:144-166`, `:171-292`); tone curves, the crop rectangle, masks and spots have no slider (`settings.rs:332-374`, `:815-822`, `:1015-1073`), though `crop.angle` is a control (`controls.rs:292`). | **Hybrid:** a generic control-id map for sliders (including `crop.angle`), typed fields for tone curves, the crop rectangle, masks and spots. | User (released 2026-11-04) |
+| 5 | Re-sync policy for changed edits. | The plan only adds; the mapping file records the base values (`state.rs:87-105`); `develop.merge` can overwrite. | **Report changed settings by default; overwrite only with explicit `--overwrite-develop`.** | User (released 2026-11-04) |
+| 6 | Report size. | `report.json` has one area per kind plus `skipped_by_code` (`crates/lr2lc/src/output.rs:11-40`); per-field entries can explode. | **Capped detail per field and per photo in `report.json`, plus a counter; the readable summary aggregates.** | User (released 2026-11-04) |
+| 7 | Fields that are assumed. | These catalog key names are unverified (section 4.12): the whole `hdr.*` SDR group (`hdr.max_ev`, `hdr.sdr_brightness`, `hdr.sdr_contrast`, `hdr.sdr_highlights`, `hdr.sdr_shadows`, `hdr.sdr_whites`, `hdr.sdr_clarity`), red eye, lens blur, AI denoise (`enhance.*`), Point Color (`point_colors`), the manual CA sliders (`optics.ca_red`, `optics.ca_blue`) and the crop flip fields. Some of these are also not mapped by LightCraft's importer (`xmp-interop.md:191-192`). | **Confirm the names read-only on a catalog copy in P6-6 (including Point Color and CA) before implementing them; until then they stay assumptions and are reported, never silently dropped.** | User (released 2026-11-04); katalog-tester confirms the names read-only in P6-6 |
+| 8 | Camera profile handling. | The profile name is metadata only and carries no rendering data (`crs.rs:522-526`); LightCraft does not apply Adobe profiles. | **Do not rebuild profiles.** Report the name and aggregate by profile name; a profile/LUT converter is a separate research project. | User (released 2026-11-04) |
 
-### 8.1 Recorded as approved on 2026-11-04
+### 8.1 Recorded as released by the owner on 2026-11-04
 
 1. Own mapper: read the catalog, write through `develop.set` / `develop.merge`;
    no `library.importLightroom` for develop settings.
