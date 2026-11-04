@@ -69,9 +69,10 @@ pub struct PhotoData {
     /// not UTF-8. These photos have no title. Ascending.
     pub title_unreadable: Vec<i64>,
     /// Catalog ids of the returned photos whose development-settings text is
-    /// missing, broken or larger than the reader accepts. These photos are
-    /// still returned, without settings. Ascending. They are not skipped and
-    /// do not change the report's balance.
+    /// unreadable: broken, of an unexpected type or larger than the reader
+    /// accepts. A row without text is not listed. These photos are still
+    /// returned, with `develop = None` (no settings, no hash). Ascending. They
+    /// are not skipped and do not change the report's balance.
     pub develop_invalid: Vec<i64>,
     /// Catalog ids of the returned photos whose settings text contained the
     /// `-999999` sentinel. They keep their settings, with `deferred` set.
