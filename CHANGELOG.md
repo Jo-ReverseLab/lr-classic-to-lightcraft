@@ -60,6 +60,12 @@ The project has not made a release yet.
   photos with a camera profile and the converted photos with masks and with
   spots. Profiles
   are grouped by name (sorted, capped at 20) with the full distinct count.
+  The counter `white_balance_not_carried` counts photos whose temperature or
+  tint pair was not carried over; only the number is reported.
+- `--probe-white-balance` is reserved for reading an original file to derive
+  a white-balance scale. It is not released (F-032) and a run given it stops
+  with exit code 2 before the catalog is opened. Without it lr2lc never opens
+  an original photo; temperature and tint are only reported.
 - Dry run by default. The summary and `--report FILE` (`report.json`) list
   everything that is not converted, each with a reason and a fixed code
   (such as `missing`, `video` or `smart_untranslatable`); read equals

@@ -45,6 +45,7 @@ CI runs formatting, lint and tests on Linux, macOS and Windows.
 | `--port N` | Control port of the running LightCraft app (default 7980) |
 | `--allow-xmp` | Write even if the library writes XMP sidecars next to the originals |
 | `--overwrite-develop` | Also rewrite the development settings of known photos that changed in Lightroom |
+| `--probe-white-balance` | Read an original file to derive the white-balance scale (not released: the run stops with exit code 2) |
 | `--map OLD=NEW` | Replace a path prefix, repeatable |
 | `--label-set SET` | Names of the colour labels: `en`, `de`, `auto` (default) or a JSON file |
 | `--report FILE` | Write `report.json` |
@@ -450,6 +451,15 @@ White balance is written only when the mode is known. A Kelvin hint becomes
 Temperature and tint themselves are never written, and neither is any value
 of an unmapped field: those are collected and reported by name.
 
+Deriving the scale of a stored temperature needs the original file. That
+probe is not released yet (open question F-032) and never runs implicitly:
+`--probe-white-balance` exists as an explicit opt-in, but a run given it
+stops with exit code 2 before the catalog is opened or anything is written.
+Without it lr2lc never opens an original photo. The `develop` area therefore
+counts the converted photos whose white balance holds an absolute or
+incremental temperature/tint pair in `white_balance_not_carried`; only the
+number is reported, never a value or a photo id.
+
 Tone curves and crop go in the same `develop.merge`. The 2012 curve fields
 become `curve.master`, `curve.red`, `curve.green` and `curve.blue` as arrays
 of `{"x", "y"}` points in 0..1; a channel list is written only when all three
@@ -505,11 +515,12 @@ hash:
 The dry run plans the same commands. The summary has one line
 `develop: photos with settings N, commands planned N, written N, unmapped
 fields N (N listed), changed and not applied N, overwritten N, photos with
-camera profile N, photos with masks N, photos with spots N`, and `report.json`
+camera profile N, photos with masks N, photos with spots N, white balance not
+carried N`, and `report.json`
 carries the same numbers in its top-level `develop` area (`photos`, `planned`,
 `written`, `unmapped`, `unmapped_count`, `not_applied`, `overwritten`,
 `camera_profiles`, `camera_profiles_count`, `photos_with_profile`, `masks`,
-`spots`). `written` is 0 in a
+`spots`, `white_balance_not_carried`). `written` is 0 in a
 dry run.
 `unmapped` lists at most 20 distinct field names, sorted; `unmapped_count`
 is the full count. `camera_profiles` maps each profile name to the number of
@@ -784,6 +795,8 @@ counts the smart collections converted as smart albums.
   camera profile and look are only reported by name, never written, as are
   temperature, tint and the other unmapped fields. Temperature and tint wait
   for a probe of the original file because their stored scale is ambiguous.
+  That probe is not released (F-032); `--probe-white-balance` is refused with
+  exit code 2 before the catalog is opened.
 - A known photo whose development settings changed in Lightroom is left alone
   unless `--overwrite-develop` is given (see
   [Development settings](#development-settings)).
