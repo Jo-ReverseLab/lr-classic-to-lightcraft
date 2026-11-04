@@ -86,7 +86,7 @@ Missing:
 
 | Item | State today | Needed |
 |---|---|---|
-| Photos removed from the Lightroom catalog | **done (T11):** detected and reported, nothing deleted (`plan.rs:1017-1048`, `:1224-1253`); was "not detected" | optional later prune via `photo.delete` (recoverable, `docs/research/lightcraft-albums.md` C5) |
+| Photos removed from the Lightroom catalog | **done (T11):** detected and reported, nothing deleted (`plan.rs:1017-1048`, `:1224-1260`); was "not detected" | optional later prune via `photo.delete` (recoverable, `docs/research/lightcraft-albums.md` C5) |
 | Photo files moved/renamed | **done (T11):** compared with the recorded `PhotoEntry.path` and reported, not imported again (`plan.rs:1034-1043`, `state.rs:94-98`); was "not detected" and "`PhotoEntry` has no path" | LightCraft cannot re-point via any command found *(assumption, `lightcraft-albums.md` C5)*; report only |
 | Photo's membership removed from a collection | `members_removed` counts the photos; `album.removePhotos` is sent only for recorded members lr2lc had added and that are no longer wanted, nothing else is touched (`plan.rs:1224-1240`, `:1242-1260`, `apply.rs:602-608`, `:1091-1113`); members lr2lc did not add are never removed | report per album (needs the live-members comparison of §3) |
 | Keywords removed from the catalog | keyword stays in state; no report | report `keywords_removed` (state keys without a Lightroom keyword) |
