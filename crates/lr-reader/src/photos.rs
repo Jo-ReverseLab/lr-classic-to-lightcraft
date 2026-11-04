@@ -2,7 +2,7 @@
 //! `AgLibraryFolder` and `AgLibraryRootFolder`).
 
 use crate::catalog::{Catalog, ReadError, TextCell, text_cell, value_or_blob};
-use crate::develop::parse_develop;
+use crate::develop::{StoredGeometry, parse_develop_with_geometry};
 use crate::folders::join_folder_path;
 use crate::xmp::{Unreadable, title_from_blob};
 use model::{Develop, Flag, Photo, Rating, Report, SkipCode, Skipped};
@@ -34,6 +34,15 @@ struct Row {
     /// `Adobe_AdditionalMetadata.xmp` of the row with the smallest
     /// `id_local` for this image, as stored.
     xmp: Value,
+    /// `Adobe_images.orientation` if it is text; `None` when the column is
+    /// missing.
+    orientation: Option<String>,
+    /// `Adobe_images.fileWidth` if it is a number; `None` when the column is
+    /// missing.
+    file_width: Option<f64>,
+    /// `Adobe_images.fileHeight` if it is a number; `None` when the column
+    /// is missing.
+    file_height: Option<f64>,
     file: Option<(TextCell, TextCell)>,
     folder: Option<TextCell>,
     root_row: bool,
@@ -115,6 +124,22 @@ impl Catalog {
             .query_row(
                 "SELECT count(*) FROM pragma_table_info('Adobe_imageDevelopSettings') \
                  WHERE name IN ('id_local', 'image', 'text')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(ReadError::Query)?;
+        Ok(present == 3)
+    }
+
+    /// Whether `Adobe_images` has the optional orientation and pixel-size
+    /// columns. Without all three every photo counts as upright with no known
+    /// stored size.
+    fn has_image_geometry(&self) -> Result<bool, ReadError> {
+        let present: i64 = self
+            .conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('Adobe_images') \
+                 WHERE name IN ('orientation', 'fileWidth', 'fileHeight')",
                 [],
                 |row| row.get(0),
             )
@@ -207,6 +232,13 @@ impl Catalog {
         } else {
             "NULL"
         };
+        // The orientation and pixel-size columns are optional in a minimal
+        // catalog; they are selected as NULL there.
+        let (orientation, file_width, file_height) = if self.has_image_geometry()? {
+            ("i.orientation", "i.fileWidth", "i.fileHeight")
+        } else {
+            ("NULL", "NULL", "NULL")
+        };
         // Both `AgLibraryIPTC` columns come from the same row: the one with
         // the smallest `id_local` for the image.
         let sql = format!(
@@ -214,7 +246,8 @@ impl Catalog {
                     f.id_local, f.baseName, f.extension, \
                     d.id_local, d.pathFromRoot, \
                     r.id_local, r.absolutePath, i.id_global, i.pick, i.colorLabels, \
-                    c.caption, c.copyright, {creator}, {xmp} \
+                    c.caption, c.copyright, {creator}, {xmp}, \
+                    {orientation}, {file_width}, {file_height} \
              FROM Adobe_images i \
              LEFT JOIN (SELECT image AS iptc_image, min(id_local) AS iptc_row \
                           FROM AgLibraryIPTC GROUP BY image) ic \
@@ -244,6 +277,9 @@ impl Catalog {
                         .filter(|t| !t.is_empty()),
                     creator: text_value(value_or_blob(row.get_ref(16)?)).filter(|t| !t.is_empty()),
                     xmp: value_or_blob(row.get_ref(17)?),
+                    orientation: text_value(value_or_blob(row.get_ref(18)?)),
+                    file_width: number_value(value_or_blob(row.get_ref(19)?)),
+                    file_height: number_value(value_or_blob(row.get_ref(20)?)),
                     file_format: text_value(value_or_blob(row.get_ref(3)?)),
                     global_id: text_value(value_or_blob(row.get_ref(11)?)),
                     file: match file_id {
@@ -268,6 +304,11 @@ impl Catalog {
             let unknown_flag = flag_from_value(&row.pick).is_none();
             let color_label = row.color_label.clone();
             let title = title_from_value(&row.xmp);
+            // The crop is stored on the unoriented image; the settings read
+            // needs the stored orientation and size to express it in the
+            // displayed frame.
+            let geometry =
+                StoredGeometry::new(row.orientation.as_deref(), row.file_width, row.file_height);
             match photo_from_row(row, &mut used, &mut converted) {
                 Ok(photo) => {
                     let mut photo = match title {
@@ -279,7 +320,7 @@ impl Catalog {
                         }
                     };
                     if let Some(value) = develops.remove(&photo.lightroom_id) {
-                        match develop_from_value(value) {
+                        match develop_from_value(value, geometry) {
                             Ok(Some(develop)) => {
                                 if develop.deferred {
                                     data.develop_deferred.push(photo.lightroom_id);
@@ -310,10 +351,12 @@ impl Catalog {
 /// `Ok(None)` means the column is NULL, so the photo has no settings row
 /// value. Any other non-text value, and any text the parser rejects, is an
 /// error and makes the photo unreadable, not skipped.
-fn develop_from_value(value: Value) -> Result<Option<Develop>, ()> {
+fn develop_from_value(value: Value, geometry: StoredGeometry) -> Result<Option<Develop>, ()> {
     match value {
         Value::Null => Ok(None),
-        Value::Text(text) => parse_develop(&text).map(Some).map_err(|_| ()),
+        Value::Text(text) => parse_develop_with_geometry(&text, geometry)
+            .map(Some)
+            .map_err(|_| ()),
         _ => Err(()),
     }
 }
@@ -502,6 +545,15 @@ fn text_value(value: Value) -> Option<String> {
     }
 }
 
+/// A stored value as a finite number if it is one; integer columns count.
+fn number_value(value: Value) -> Option<f64> {
+    match value {
+        Value::Integer(v) => Some(v as f64),
+        Value::Real(v) if v.is_finite() => Some(v),
+        _ => None,
+    }
+}
+
 /// Maps a stored rating to stars: NULL is 0; integers (or integral reals)
 /// 0..=5 are kept; anything else is `None`.
 fn rating_from_value(value: &Value) -> Option<Rating> {
@@ -571,6 +623,9 @@ mod tests {
             copyright: None,
             creator: None,
             xmp: Value::Null,
+            orientation: None,
+            file_width: None,
+            file_height: None,
             file: Some((text("IMG"), text("jpg"))),
             folder: Some(text("a/")),
             root_row: true,
