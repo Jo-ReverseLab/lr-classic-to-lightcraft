@@ -48,8 +48,8 @@ use crate::live::{LivePhoto, LiveState};
 use crate::smart::{convertible, translate};
 use crate::state::{EntryKind, PhotoFields, State, hex_hash, keyword_text, snapshot};
 use model::{
-    Collection, CollectionKind, Develop, Keyword, MergeValue, Photo, QuickCollection, SkipCode,
-    Skipped, SmartCollection, Stack, WhiteBalanceHint,
+    Collection, CollectionKind, CurvePoint, Curves, Develop, Keyword, MergeValue, Photo,
+    QuickCollection, SkipCode, Skipped, SmartCollection, Stack, WhiteBalanceHint,
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -1135,13 +1135,16 @@ fn has_develop_content(develop: &Develop) -> bool {
     !develop.controls.is_empty()
         || !develop.partial.is_empty()
         || develop.white_balance.mode.is_some()
+        || !curves_are_empty(&develop.curves)
+        || develop.crop.is_some()
 }
 
 /// The nested `settings` object of `develop.merge`: dotted `partial` paths
 /// are nested (`hdr.enabled` -> `{"hdr": {"enabled": ...}}`), the
 /// white-balance mode becomes `wb.mode`, and a Kelvin hint adds
-/// `wb.scale: "kelvin"`. Temperature and tint never appear: they stay in
-/// `unmapped` only.
+/// `wb.scale: "kelvin"`. The tone curves become `curve.master` and the three
+/// channel lists, and the crop becomes `crop.geometry` with its rectangle and
+/// angle. Temperature and tint never appear: they stay in `unmapped` only.
 fn develop_settings(develop: &Develop) -> Option<Value> {
     let mut settings = Map::new();
     for (path, value) in &develop.partial {
@@ -1157,7 +1160,57 @@ fn develop_settings(develop: &Develop) -> Option<Value> {
     if develop.white_balance.hint == WhiteBalanceHint::Kelvin {
         object_entry(&mut settings, "wb").insert("scale".to_string(), json!("kelvin"));
     }
+    add_curves(&mut settings, &develop.curves);
+    if let Some(crop) = develop.crop {
+        object_entry(&mut settings, "crop").insert(
+            "geometry".to_string(),
+            json!({
+                "rect": {
+                    "x0": crop.x0,
+                    "y0": crop.y0,
+                    "x1": crop.x1,
+                    "y1": crop.y1,
+                },
+                "angle": crop.angle,
+            }),
+        );
+    }
     (!settings.is_empty()).then_some(Value::Object(settings))
+}
+
+/// Whether every tone curve is empty.
+fn curves_are_empty(curves: &Curves) -> bool {
+    curves.master.is_empty()
+        && curves.red.is_empty()
+        && curves.green.is_empty()
+        && curves.blue.is_empty()
+}
+
+/// Adds the non-empty curves as LightCraft's `curve` object: one array of
+/// `{"x", "y"}` objects per present curve.
+fn add_curves(settings: &mut Map<String, Value>, curves: &Curves) {
+    let mut present = Map::new();
+    for (name, points) in [
+        ("master", &curves.master),
+        ("red", &curves.red),
+        ("green", &curves.green),
+        ("blue", &curves.blue),
+    ] {
+        if !points.is_empty() {
+            present.insert(name.to_string(), json!(curve_points(points)));
+        }
+    }
+    if !present.is_empty() {
+        settings.insert("curve".to_string(), Value::Object(present));
+    }
+}
+
+/// One curve as LightCraft's point objects.
+fn curve_points(points: &[CurvePoint]) -> Vec<Value> {
+    points
+        .iter()
+        .map(|point| json!({"x": point.x, "y": point.y}))
+        .collect()
 }
 
 /// Inserts `value` below a dotted path, creating intermediate objects.
@@ -1642,7 +1695,7 @@ fn reconcile(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::{ColorLabel, Flag, Rating};
+    use model::{ColorLabel, CropGeometry, Flag, Rating};
 
     fn kw(parts: &[&str]) -> Keyword {
         Keyword::new(parts.iter().map(|s| s.to_string()).collect()).unwrap()
@@ -2210,5 +2263,73 @@ mod tests {
             [RenamedKeyword { keyword: 1 }, RenamedKeyword { keyword: 2 }]
         );
         assert!(p.steps.is_empty(), "{:?}", p.steps);
+    }
+
+    #[test]
+    fn develop_content_counts_curves_and_crop_but_not_empty_curves() {
+        assert!(!has_develop_content(&Develop::default()));
+        let curved = Develop {
+            curves: Curves {
+                master: vec![CurvePoint { x: 0.0, y: 0.0 }],
+                ..Curves::default()
+            },
+            ..Develop::default()
+        };
+        assert!(has_develop_content(&curved));
+        let cropped = Develop {
+            crop: Some(CropGeometry::default()),
+            ..Develop::default()
+        };
+        assert!(has_develop_content(&cropped));
+    }
+
+    #[test]
+    fn develop_settings_write_only_present_curves_in_lightcraft_shape() {
+        let develop = Develop {
+            curves: Curves {
+                master: vec![
+                    CurvePoint { x: 0.0, y: 0.0 },
+                    CurvePoint { x: 0.25, y: 0.35 },
+                ],
+                blue: vec![CurvePoint { x: 1.0, y: 0.5 }],
+                ..Curves::default()
+            },
+            ..Develop::default()
+        };
+        let settings = develop_settings(&develop).expect("curve settings");
+        assert_eq!(
+            settings,
+            json!({
+                "curve": {
+                    "master": [{"x": 0.0, "y": 0.0}, {"x": 0.25, "y": 0.35}],
+                    "blue": [{"x": 1.0, "y": 0.5}],
+                }
+            })
+        );
+        assert!(
+            settings["curve"].get("red").is_none() && settings["curve"].get("green").is_none(),
+            "empty lists would add keys without a value"
+        );
+    }
+
+    #[test]
+    fn develop_settings_nests_the_crop_geometry_with_its_angle() {
+        let develop = Develop {
+            crop: Some(CropGeometry {
+                x0: 0.1,
+                y0: 0.2,
+                x1: 0.9,
+                y1: 0.8,
+                angle: -2.5,
+            }),
+            ..Develop::default()
+        };
+        assert_eq!(
+            develop_settings(&develop),
+            Some(json!({"crop": {"geometry": {
+                "rect": {"x0": 0.1, "y0": 0.2, "x1": 0.9, "y1": 0.8},
+                "angle": -2.5,
+            }}}))
+        );
     }
 }
