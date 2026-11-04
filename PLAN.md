@@ -121,7 +121,7 @@ high multiplier on private repositories), so small, single-purpose commits.
 - Actions minutes are paid. If the allowance runs out, CI silently stops
   proving anything; watch `gh run list`.
 - The token in this workspace holds **admin** on the repository
-  (`gh api repos/Ben-ReverseLab/lr2lc --jq .permissions`). Narrowing it to
+  (`gh api repos/<owner>/lr2lc --jq .permissions`). Narrowing it to
   *Contents: Read and write* limits the damage if it leaks.
 - The P1 items concern the **LightCraft library**, not the catalog: the
   read-only promise for Lightroom data holds in everything we read.
