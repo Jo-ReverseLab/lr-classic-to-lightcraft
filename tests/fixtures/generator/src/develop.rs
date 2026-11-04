@@ -1620,3 +1620,310 @@ pub mod masks {
         )
     }
 }
+
+/// Spot-removal fixtures (P6-7b): `RetouchAreas` and the legacy `RetouchInfo`.
+///
+/// Every name, value and coordinate is invented. The main fixture puts the
+/// current container on one photo (heal ellipse with an explicit source, clone
+/// brush, an unknown shape, an entry without a mask), the legacy container on
+/// another (explicit and automatic sources), both on a third (the current
+/// container must win), a mask next to a spot on a fourth, and size, feather
+/// and opacity clamps plus the same-position rule on a fifth.
+///
+/// Assumptions (checked against the LightCraft reference
+/// `crates/engine/src/crs_masks.rs`, not against a real catalog):
+/// - the brush `Radius` is the spot size as stored, without the aspect factor
+///   that the ellipse and circle shapes apply;
+/// - `Feather` and `Opacity` are multiplied by 100 and clamped to 0..100;
+/// - a missing `SourceState` counts as an explicit source;
+/// - the unknown-shape report drops the `Mask/` prefix (`Spot: Gradient`).
+pub mod spots {
+    use super::{
+        masks::{Component, Correction},
+        number_text, quote, set_image_geometry, settings, write_develop_catalog_with_files,
+    };
+    use rusqlite::Result;
+    use std::path::{Path, PathBuf};
+
+    /// Photo with two converted spots, one unknown shape and one entry without
+    /// a mask.
+    pub const AREAS_PHOTO: i64 = 1;
+    /// Photo with `RetouchInfo` only: heal and clone, explicit and automatic
+    /// source, plus one unreadable line.
+    pub const LEGACY_PHOTO: i64 = 4;
+    /// Photo with both containers: `RetouchAreas` wins.
+    pub const BOTH_PHOTO: i64 = 5;
+    /// Photo with a slider but no spot.
+    pub const NO_SPOT_PHOTO: i64 = 6;
+    /// Photo with one mask and one spot in the same settings text.
+    pub const MIXED_PHOTO: i64 = 7;
+    /// Photo whose only `RetouchAreas` entry is an empty brush.
+    pub const EMPTY_BRUSH_PHOTO: i64 = 8;
+    /// Photo with a size clamp, a feather/opacity clamp and a source at the
+    /// same position as the target.
+    pub const CLAMP_PHOTO: i64 = 10;
+
+    /// Converted photos that carry a settings row: 1, 4, 5, 6, 7, 8, 10.
+    pub const PHOTOS_WITH_SETTINGS: usize = 7;
+    /// Converted photos with at least one spot: 1, 4, 5, 7, 10.
+    pub const PHOTOS_WITH_SPOTS: usize = 5;
+    /// Converted photos with at least one mask: photo 7 only.
+    pub const PHOTOS_WITH_MASKS: usize = 1;
+    /// Photos the plan sends a develop command for: all but photo 8, whose
+    /// only spot is an empty brush.
+    pub const PLANNED_PHOTOS: usize = 6;
+    /// Photos with a `develop.merge` step: 1, 4, 5, 7, 10.
+    pub const MERGED_PHOTOS: usize = 5;
+
+    /// Distinct unsupported spot kinds, sorted as the report lists them.
+    pub const UNMAPPED: [&str; 4] = [
+        "Spot: Gradient",
+        "Spot: empty brush",
+        "Spot: legacy line",
+        "Spot: no mask",
+    ];
+
+    /// Geometry of the portrait photos (1 and 5): aspect 0.5.
+    pub const PORTRAIT_WIDTH: i64 = 1000;
+    pub const PORTRAIT_HEIGHT: i64 = 2000;
+    /// Geometry of the landscape photos (4, 7, 10): aspect 2.0.
+    pub const LANDSCAPE_WIDTH: i64 = 2000;
+    pub const LANDSCAPE_HEIGHT: i64 = 1000;
+
+    /// Name of the mask stored beside the spot on [`MIXED_PHOTO`].
+    pub const MIXED_MASK_NAME: &str = "Spot Mixed Mask";
+
+    /// Coordinates and values of the heal spot on [`AREAS_PHOTO`].
+    pub const HEAL_X: f64 = 0.4;
+    pub const HEAL_Y: f64 = 0.3;
+    pub const HEAL_SIZE_X: f64 = 0.08;
+    pub const HEAL_FEATHER: f64 = 0.5;
+    pub const HEAL_OPACITY: f64 = 0.8;
+    pub const HEAL_SOURCE_X: f64 = 0.6;
+    pub const HEAL_SOURCE_Y: f64 = 0.5;
+    /// Values of the clone brush on [`AREAS_PHOTO`].
+    pub const CLONE_DABS: [&str; 2] = ["d 0.1 0.2", "d 0.3 0.4"];
+    pub const CLONE_RADIUS: f64 = 0.05;
+    pub const CLONE_FEATHER: f64 = 0.25;
+    pub const CLONE_SOURCE_X: f64 = 0.4;
+    pub const CLONE_SOURCE_Y: f64 = 0.5;
+
+    /// The circle of [`BOTH_PHOTO`], stored as a box.
+    pub const CIRCLE_TOP: f64 = 0.2;
+    pub const CIRCLE_LEFT: f64 = 0.3;
+    pub const CIRCLE_BOTTOM: f64 = 0.6;
+    pub const CIRCLE_RIGHT: f64 = 0.7;
+
+    /// The ellipse of [`MIXED_PHOTO`].
+    pub const MIXED_X: f64 = 0.5;
+    pub const MIXED_Y: f64 = 0.5;
+    pub const MIXED_SIZE_X: f64 = 0.1;
+
+    /// Size inputs of [`CLAMP_PHOTO`]: one far above, one far below the range.
+    pub const CLAMP_HIGH_X: f64 = 0.2;
+    pub const CLAMP_HIGH_SIZE_X: f64 = 0.9;
+    pub const CLAMP_LOW_X: f64 = 0.8;
+    pub const CLAMP_LOW_SIZE_X: f64 = 0.0005;
+    pub const CLAMP_LOW_FEATHER: f64 = 1.5;
+    pub const CLAMP_LOW_OPACITY: f64 = -0.5;
+
+    /// One entry of `RetouchAreas`.
+    #[derive(Debug, Clone, Default)]
+    pub struct Area {
+        fields: Vec<(&'static str, String)>,
+        masks: Vec<Component>,
+    }
+
+    impl Area {
+        pub fn number(mut self, key: &'static str, value: f64) -> Self {
+            self.fields.push((key, number_text(value)));
+            self
+        }
+
+        pub fn text(mut self, key: &'static str, value: &str) -> Self {
+            self.fields.push((key, quote(value)));
+            self
+        }
+
+        /// Adds an entry of the correction's `Masks` list.
+        pub fn mask(mut self, mask: Component) -> Self {
+            self.masks.push(mask);
+            self
+        }
+
+        /// The entry as a Lua table. No `Masks` field is written when the
+        /// entry carries no mask.
+        pub fn lua(&self) -> String {
+            let mut fields: Vec<String> = self
+                .fields
+                .iter()
+                .map(|(key, value)| format!("{key} = {value}"))
+                .collect();
+            if !self.masks.is_empty() {
+                let items: Vec<String> = self.masks.iter().map(Component::lua).collect();
+                fields.push(format!("Masks = {{ {} }}", items.join(", ")));
+            }
+            format!("{{ {} }}", fields.join(", "))
+        }
+    }
+
+    fn area_list(items: &[Area]) -> String {
+        let items: Vec<String> = items.iter().map(Area::lua).collect();
+        format!("{{ {} }}", items.join(", "))
+    }
+
+    fn line_list(lines: &[&str]) -> String {
+        let items: Vec<String> = lines.iter().map(|line| quote(line)).collect();
+        format!("{{ {} }}", items.join(", "))
+    }
+
+    /// The main spot fixture, as `dir/develop-spots.lrcat`.
+    pub fn write_spots_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+        let areas = settings().raw(
+            "RetouchAreas",
+            &area_list(&[
+                // Heal ellipse with an explicit source.
+                Area::default()
+                    .mask(
+                        Component::new("Mask/Ellipse")
+                            .number("X", HEAL_X)
+                            .number("Y", HEAL_Y)
+                            .number("SizeX", HEAL_SIZE_X),
+                    )
+                    .number("Feather", HEAL_FEATHER)
+                    .number("Opacity", HEAL_OPACITY)
+                    .text("SourceState", "sourceSetExplicitly")
+                    .number("SourceX", HEAL_SOURCE_X)
+                    .number("OffsetY", HEAL_SOURCE_Y),
+                // Clone brush; the first token of every dab is skipped.
+                Area::default()
+                    .text("SpotType", "clone")
+                    .mask(
+                        Component::new("Mask/Paint")
+                            .text_list("Dabs", &CLONE_DABS)
+                            .number("Radius", CLONE_RADIUS),
+                    )
+                    .number("Feather", CLONE_FEATHER)
+                    .text("SourceState", "sourceSetExplicitly")
+                    .number("SourceX", CLONE_SOURCE_X)
+                    .number("OffsetY", CLONE_SOURCE_Y),
+                // An unsupported shape: `Spot: Gradient`.
+                Area::default().mask(Component::new("Mask/Gradient")),
+                // An entry without any mask: `Spot: no mask`.
+                Area::default().number("Feather", 0.1),
+            ]),
+        );
+
+        let legacy = settings().raw(
+            "RetouchInfo",
+            &line_list(&[
+                "centerX = 0.25, centerY = 0.75, radius = 0.04, \
+                 spotType = heal, sourceState = sourceSetExplicitly, \
+                 sourceX = 0.5, sourceY = 0.6, opacity = 0.5",
+                "centerX = 0.6, centerY = 0.2, radius = 0.1, spotType = clone, \
+                 sourceState = sourceAuto, sourceX = 0.9, sourceY = 0.9",
+                // No centerY: the line is unreadable and must be reported.
+                "centerX = 0.5, radius = 0.02",
+            ]),
+        );
+
+        let both = settings()
+            .raw(
+                "RetouchAreas",
+                &area_list(&[Area::default().mask(
+                    Component::new("Mask/CircularGradient")
+                        .number("Top", CIRCLE_TOP)
+                        .number("Left", CIRCLE_LEFT)
+                        .number("Bottom", CIRCLE_BOTTOM)
+                        .number("Right", CIRCLE_RIGHT),
+                )]),
+            )
+            // Older readers' copy: must be ignored while `RetouchAreas` has
+            // a converted spot.
+            .raw(
+                "RetouchInfo",
+                &line_list(&["centerX = 0.9, centerY = 0.9, radius = 0.01"]),
+            );
+
+        let mixed_correction = Correction::default().name(MIXED_MASK_NAME).component(
+            Component::new("Mask/Gradient")
+                .number("FullX", 0.0)
+                .number("FullY", 0.0)
+                .number("ZeroX", 1.0)
+                .number("ZeroY", 1.0),
+        );
+        let mixed = settings()
+            .raw(
+                "MaskGroupBasedCorrections",
+                &format!("{{ {} }}", mixed_correction.lua()),
+            )
+            .raw(
+                "RetouchAreas",
+                &area_list(&[Area::default().mask(
+                    Component::new("Mask/Ellipse")
+                        .number("X", MIXED_X)
+                        .number("Y", MIXED_Y)
+                        .number("SizeX", MIXED_SIZE_X),
+                )]),
+            );
+
+        let empty_brush = settings().raw(
+            "RetouchAreas",
+            &area_list(&[Area::default().mask(
+                Component::new("Mask/Paint")
+                    .text_list("Dabs", &[])
+                    .number("Radius", 0.05),
+            )]),
+        );
+
+        let clamp = settings().raw(
+            "RetouchAreas",
+            &area_list(&[
+                // Source at the target's own position: no offset.
+                Area::default()
+                    .mask(
+                        Component::new("Mask/Ellipse")
+                            .number("X", CLAMP_HIGH_X)
+                            .number("Y", CLAMP_HIGH_X)
+                            .number("SizeX", CLAMP_HIGH_SIZE_X),
+                    )
+                    .number("SourceX", CLAMP_HIGH_X)
+                    .number("OffsetY", CLAMP_HIGH_X),
+                // Size below the range; feather above and opacity below 0.
+                Area::default()
+                    .mask(
+                        Component::new("Mask/Ellipse")
+                            .number("X", CLAMP_LOW_X)
+                            .number("Y", CLAMP_LOW_X)
+                            .number("SizeX", CLAMP_LOW_SIZE_X),
+                    )
+                    .number("Feather", CLAMP_LOW_FEATHER)
+                    .number("Opacity", CLAMP_LOW_OPACITY),
+            ]),
+        );
+
+        let catalog = write_develop_catalog_with_files(
+            dir,
+            "develop-spots.lrcat",
+            &[
+                (AREAS_PHOTO, areas.build()),
+                (LEGACY_PHOTO, legacy.build()),
+                (BOTH_PHOTO, both.build()),
+                (
+                    NO_SPOT_PHOTO,
+                    settings().number("Exposure2012", 0.5).build(),
+                ),
+                (MIXED_PHOTO, mixed.build()),
+                (EMPTY_BRUSH_PHOTO, empty_brush.build()),
+                (CLAMP_PHOTO, clamp.build()),
+            ],
+        )?;
+        for photo in [AREAS_PHOTO, BOTH_PHOTO] {
+            set_image_geometry(&catalog, photo, "AB", PORTRAIT_WIDTH, PORTRAIT_HEIGHT)?;
+        }
+        for photo in [LEGACY_PHOTO, MIXED_PHOTO, CLAMP_PHOTO] {
+            set_image_geometry(&catalog, photo, "AB", LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT)?;
+        }
+        Ok(catalog)
+    }
+}
