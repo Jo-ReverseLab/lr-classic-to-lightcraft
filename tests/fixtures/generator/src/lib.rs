@@ -3,6 +3,7 @@
 //! Everything written here is invented. Paths use the user name `example`.
 //! Output is deterministic.
 
+pub mod develop;
 pub mod hostile;
 
 use rusqlite::{Connection, Result, params};
