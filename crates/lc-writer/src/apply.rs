@@ -238,6 +238,9 @@ pub struct ApplySummary {
     pub develop_masks: usize,
     /// Converted photos with at least one spot.
     pub develop_spots: usize,
+    /// Converted photos whose white balance holds a temperature or tint
+    /// (absolute or incremental) that was not carried over. Only counted.
+    pub develop_white_balance_not_carried: usize,
     /// `removed_photos.len()`, for the report.
     pub photos_removed: usize,
     /// `moved_photos.len()`, for the report.
@@ -350,6 +353,7 @@ pub fn apply_partial(
             develop_photos_with_profile: plan.develop_photos_with_profile(),
             develop_masks: plan.develop_masks(),
             develop_spots: plan.develop_spots(),
+            develop_white_balance_not_carried: plan.develop_white_balance_not_carried(),
             ..ApplySummary::default()
         },
         recorded: plan.recorded_fields_map(),
