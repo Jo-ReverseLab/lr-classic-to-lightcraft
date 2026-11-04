@@ -10,7 +10,7 @@
 //! subset does not cover is a parse error. Every error keeps the photo; the
 //! caller records it and continues.
 
-use model::{Develop, MergeValue, WhiteBalanceHint};
+use model::{CropGeometry, CurvePoint, Curves, Develop, MergeValue, WhiteBalanceHint};
 use sha2::{Digest, Sha256};
 
 /// The largest settings text the reader accepts. A larger text is treated as
@@ -34,6 +34,12 @@ pub enum DevelopError {
         /// What the parser expected.
         message: &'static str,
     },
+    /// A tone curve is not a list of x/y pairs of numbers.
+    #[error("invalid tone curve: {message}")]
+    Curve {
+        /// What is wrong with the list.
+        message: &'static str,
+    },
 }
 
 /// Parses one settings text into the neutral model.
@@ -41,6 +47,15 @@ pub enum DevelopError {
 /// Empty or whitespace-only text is an empty [`Develop`]. The returned value
 /// always carries the SHA-256 of `text` as its source hash.
 pub fn parse_develop(text: &str) -> Result<Develop, DevelopError> {
+    parse_develop_with_geometry(text, StoredGeometry::default())
+}
+
+/// Parses one settings text, using the image's stored orientation and pixel
+/// size to express its crop in LightCraft's oriented frame.
+pub(crate) fn parse_develop_with_geometry(
+    text: &str,
+    geometry: StoredGeometry,
+) -> Result<Develop, DevelopError> {
     if text.len() > DEVELOP_MAX_TEXT_BYTES {
         return Err(DevelopError::TooLarge);
     }
@@ -53,8 +68,124 @@ pub fn parse_develop(text: &str) -> Result<Develop, DevelopError> {
         source_hash: Some(source_hash(text.as_bytes())),
         ..Develop::default()
     };
-    map_table(&table, &mut develop);
+    map_table(&table, &mut develop, geometry)?;
     Ok(develop)
+}
+
+/// The stored orientation and pixel size of one image: the image as the file
+/// holds it, before Lightroom's orientation and any crop.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub(crate) struct StoredGeometry {
+    orientation: StoredOrientation,
+    width: Option<f64>,
+    height: Option<f64>,
+}
+
+impl StoredGeometry {
+    /// Reads the three optional catalog columns. A missing or unknown
+    /// orientation counts as upright, a missing or unusable size as 1:1.
+    pub(crate) fn new(orientation: Option<&str>, width: Option<f64>, height: Option<f64>) -> Self {
+        StoredGeometry {
+            orientation: orientation
+                .map(StoredOrientation::from_code)
+                .unwrap_or_default(),
+            width,
+            height,
+        }
+    }
+
+    /// Width divided by height of the stored image, or 1.0 when unknown.
+    fn aspect(self) -> f64 {
+        match (self.width, self.height) {
+            (Some(width), Some(height))
+                if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 =>
+            {
+                width / height
+            }
+            _ => 1.0,
+        }
+    }
+}
+
+/// Lightroom's `Adobe_images.orientation`, the eight EXIF orientations.
+///
+/// Lightroom stores where the stored image's top-left and top-right corners
+/// land in the displayed photo, naming the displayed corners A, B, C and D
+/// clockwise from the top left: `AB` upright, `BC` a quarter turn clockwise,
+/// `DA` a quarter turn counter-clockwise, `BA` mirrored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum StoredOrientation {
+    #[default]
+    Normal,
+    FlipH,
+    Rotate180,
+    FlipV,
+    Transpose,
+    Rotate90,
+    Transverse,
+    Rotate270,
+}
+
+impl StoredOrientation {
+    fn from_code(code: &str) -> Self {
+        match code {
+            "BA" => StoredOrientation::FlipH,
+            "CD" => StoredOrientation::Rotate180,
+            "DC" => StoredOrientation::FlipV,
+            "AD" => StoredOrientation::Transpose,
+            "BC" => StoredOrientation::Rotate90,
+            "CB" => StoredOrientation::Transverse,
+            "DA" => StoredOrientation::Rotate270,
+            _ => StoredOrientation::Normal,
+        }
+    }
+
+    /// Split into a horizontal flip and clockwise quarter turns applied after
+    /// it.
+    fn parts(self) -> (bool, u8) {
+        match self {
+            StoredOrientation::Normal => (false, 0),
+            StoredOrientation::Rotate90 => (false, 1),
+            StoredOrientation::Rotate180 => (false, 2),
+            StoredOrientation::Rotate270 => (false, 3),
+            StoredOrientation::FlipH => (true, 0),
+            StoredOrientation::Transverse => (true, 1),
+            StoredOrientation::FlipV => (true, 2),
+            StoredOrientation::Transpose => (true, 3),
+        }
+    }
+
+    fn mirrored(self) -> bool {
+        self.parts().0
+    }
+
+    fn swaps_axes(self) -> bool {
+        matches!(
+            self,
+            StoredOrientation::Transpose
+                | StoredOrientation::Rotate90
+                | StoredOrientation::Transverse
+                | StoredOrientation::Rotate270
+        )
+    }
+
+    /// Moves a point of the stored image into the displayed one, both
+    /// normalised to their own width and height.
+    fn map(self, x: f64, y: f64, width: f64, height: f64) -> (f64, f64) {
+        let (flip, turns) = self.parts();
+        let mut x = if flip { width - x } else { x };
+        let mut y = y;
+        let mut width = width;
+        let mut height = height;
+        for _ in 0..turns {
+            // A quarter turn clockwise: (x, y) -> (height - y, x).
+            let rotated_x = height - y;
+            y = x;
+            x = rotated_x;
+            std::mem::swap(&mut width, &mut height);
+        }
+        (x, y)
+    }
 }
 
 fn source_hash(bytes: &[u8]) -> [u8; 32] {
@@ -565,7 +696,203 @@ fn push_unmapped(unmapped: &mut Vec<String>, name: &str) {
     }
 }
 
-fn map_table(table: &Table, develop: &mut Develop) {
+fn as_number(value: &LuaValue) -> Option<f64> {
+    match value {
+        LuaValue::Number(number) => Some(*number),
+        _ => None,
+    }
+}
+
+/// Reads one numeric crop key. A present value of the wrong type makes the
+/// whole stored crop unreadable and is reported under its own name, so the
+/// geometry is never guessed from defaults.
+fn crop_number(
+    crop: &mut RawCrop,
+    unmapped: &mut Vec<String>,
+    name: &str,
+    value: &LuaValue,
+) -> Option<f64> {
+    let number = as_number(value);
+    if number.is_none() {
+        crop.unreadable = true;
+        push_unmapped(unmapped, name);
+    }
+    number
+}
+
+fn curve_error(message: &'static str) -> DevelopError {
+    DevelopError::Curve { message }
+}
+
+/// One stored tone-curve list as unit-range points.
+///
+/// `None` means the list holds fewer than two points and therefore no curve.
+/// `Some([])` is the straight identity line, which also means "no curve". An
+/// odd number of values, a non-number or a named field makes the whole
+/// settings row unreadable, like a broken settings text.
+fn curve_points(value: &LuaValue) -> Result<Option<Vec<CurvePoint>>, DevelopError> {
+    let LuaValue::Table(table) = value else {
+        return Err(curve_error("a tone curve must be a list of numbers"));
+    };
+    let mut numbers = Vec::new();
+    for (name, value) in &table.fields {
+        if name.is_some() {
+            return Err(curve_error("a tone curve must be a list of numbers"));
+        }
+        match value {
+            LuaValue::Number(number) => numbers.push(*number),
+            _ => return Err(curve_error("a tone curve point is not a number")),
+        }
+    }
+    if numbers.len() % 2 != 0 {
+        return Err(curve_error("a tone curve needs x/y pairs"));
+    }
+    let mut points: Vec<CurvePoint> = numbers
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|[x, y]| CurvePoint {
+            x: (x / 255.0).clamp(0.0, 1.0),
+            y: (y / 255.0).clamp(0.0, 1.0),
+        })
+        .collect();
+    if points.len() < 2 {
+        return Ok(None);
+    }
+    if points.len() == 2 && points.iter().all(|point| point.x == point.y) {
+        points.clear();
+    }
+    Ok(Some(points))
+}
+
+/// The crop fields of one settings text, before the orientation transform.
+#[derive(Debug, Clone, Copy, Default)]
+struct RawCrop {
+    /// At least one of the five crop keys is present.
+    present: bool,
+    /// One crop key is present but its value has the wrong type (or
+    /// `HasCrop` is not a flag). The caller reports the name, and no crop is
+    /// built from the remaining defaults.
+    unreadable: bool,
+    has_crop: Option<bool>,
+    left: Option<f64>,
+    top: Option<f64>,
+    right: Option<f64>,
+    bottom: Option<f64>,
+    angle: Option<f64>,
+}
+
+/// The stored crop in LightCraft's oriented, rotated frame.
+///
+/// Lightroom stores the edges on the unoriented image and a straighten angle
+/// that turns the other way; LightCraft wants the edges of the oriented image
+/// after that rotation, normalised to the oriented size. This mirrors the
+/// transform documented in `docs/research/develop-mapping.md` §4.9.
+fn crop_geometry(raw: &RawCrop, geometry: StoredGeometry) -> Option<CropGeometry> {
+    if raw.unreadable {
+        // A crop key that is present but not convertible is reported by the
+        // reader. Guessing the remaining edges from defaults would turn it
+        // into a wrong rectangle, so there is no crop at all.
+        return None;
+    }
+    if raw.has_crop == Some(false) {
+        // An explicitly disabled crop is the whole image.
+        return Some(CropGeometry {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 1.0,
+            y1: 1.0,
+            angle: 0.0,
+        });
+    }
+    if !raw.present && raw.has_crop.is_none() {
+        return None;
+    }
+    let left = raw.left.unwrap_or(0.0).clamp(0.0, 1.0);
+    let top = raw.top.unwrap_or(0.0).clamp(0.0, 1.0);
+    let right = raw.right.unwrap_or(1.0).clamp(0.0, 1.0);
+    let bottom = raw.bottom.unwrap_or(1.0).clamp(0.0, 1.0);
+    if right <= left || bottom <= top {
+        return None;
+    }
+    let stored_angle = raw.angle.unwrap_or(0.0).clamp(-45.0, 45.0);
+    if geometry.orientation == StoredOrientation::Normal && stored_angle == 0.0 {
+        return Some(CropGeometry {
+            x0: left,
+            y0: top,
+            x1: right,
+            y1: bottom,
+            angle: 0.0,
+        });
+    }
+    let stored_aspect = geometry.aspect();
+    let (oriented_width, oriented_height) = if geometry.orientation.swaps_axes() {
+        (1.0, stored_aspect)
+    } else {
+        (stored_aspect, 1.0)
+    };
+    // A mirror turns the straighten angle the other way as well.
+    let angle = if geometry.orientation.mirrored() {
+        stored_angle
+    } else {
+        -stored_angle
+    };
+    let (sin, cos) = angle.to_radians().sin_cos();
+    let (center_x, center_y) = (oriented_width / 2.0, oriented_height / 2.0);
+    let corner = |x: f64, y: f64| {
+        let (u, v) = geometry
+            .orientation
+            .map(x * stored_aspect, y, stored_aspect, 1.0);
+        let (du, dv) = (u - center_x, v - center_y);
+        (
+            center_x + du * cos - dv * sin,
+            center_y + du * sin + dv * cos,
+        )
+    };
+    let (ax, ay) = corner(left, top);
+    let (bx, by) = corner(right, bottom);
+    let (x0, x1) = if ax < bx { (ax, bx) } else { (bx, ax) };
+    let (y0, y1) = if ay < by { (ay, by) } else { (by, ay) };
+    let crop = CropGeometry {
+        x0: x0 / oriented_width,
+        y0: y0 / oriented_height,
+        x1: x1 / oriented_width,
+        y1: y1 / oriented_height,
+        angle,
+    };
+    (crop.x1 > crop.x0 && crop.y1 > crop.y0).then_some(crop)
+}
+
+/// The curves of one settings text: the 2012 master curve, its three channel
+/// curves only when all three exist, and the legacy curve only when no 2012
+/// curve key is present at all.
+fn curves_from_parts(
+    master: Option<Vec<CurvePoint>>,
+    red: Option<Vec<CurvePoint>>,
+    green: Option<Vec<CurvePoint>>,
+    blue: Option<Vec<CurvePoint>>,
+    has_2012_curve: bool,
+    old_master: Option<Vec<CurvePoint>>,
+) -> Curves {
+    let mut curves = Curves::default();
+    if let Some(master) = master {
+        curves.master = master;
+        if let (Some(red), Some(green), Some(blue)) = (red, green, blue) {
+            curves.red = red;
+            curves.green = green;
+            curves.blue = blue;
+        }
+    } else if !has_2012_curve && let Some(master) = old_master {
+        curves.master = master;
+    }
+    curves
+}
+
+fn map_table(
+    table: &Table,
+    develop: &mut Develop,
+    geometry: StoredGeometry,
+) -> Result<(), DevelopError> {
     // LightCraft ignores the whole old-process block as soon as the settings
     // hold any `*2012` key; presets of newer versions carry the old fields at
     // their defaults.
@@ -575,6 +902,13 @@ fn map_table(table: &Table, develop: &mut Develop) {
         .any(|(name, _)| name.as_deref().is_some_and(|n| n.ends_with("2012")));
     let mut has_absolute_temperature = false;
     let mut has_incremental_temperature = false;
+    let mut master_2012 = None;
+    let mut red_2012 = None;
+    let mut green_2012 = None;
+    let mut blue_2012 = None;
+    let mut old_master = None;
+    let mut has_2012_curve = false;
+    let mut crop = RawCrop::default();
 
     for (name, value) in &table.fields {
         // The parser guarantees named top-level fields.
@@ -664,6 +998,46 @@ fn map_table(table: &Table, develop: &mut Develop) {
                 has_incremental_temperature = true;
                 push_unmapped(&mut develop.unmapped, name);
             }
+            "ToneCurvePV2012" => {
+                has_2012_curve = true;
+                master_2012 = curve_points(value)?;
+            }
+            "ToneCurvePV2012Red" => red_2012 = curve_points(value)?,
+            "ToneCurvePV2012Green" => green_2012 = curve_points(value)?,
+            "ToneCurvePV2012Blue" => blue_2012 = curve_points(value)?,
+            "ToneCurve" => old_master = curve_points(value)?,
+            "CropLeft" => {
+                crop.present = true;
+                let number = crop_number(&mut crop, &mut develop.unmapped, name, value);
+                crop.left = number;
+            }
+            "CropTop" => {
+                crop.present = true;
+                let number = crop_number(&mut crop, &mut develop.unmapped, name, value);
+                crop.top = number;
+            }
+            "CropRight" => {
+                crop.present = true;
+                let number = crop_number(&mut crop, &mut develop.unmapped, name, value);
+                crop.right = number;
+            }
+            "CropBottom" => {
+                crop.present = true;
+                let number = crop_number(&mut crop, &mut develop.unmapped, name, value);
+                crop.bottom = number;
+            }
+            "CropAngle" => {
+                crop.present = true;
+                let number = crop_number(&mut crop, &mut develop.unmapped, name, value);
+                crop.angle = number;
+            }
+            "HasCrop" => match as_bool(value) {
+                Some(on) => crop.has_crop = Some(on),
+                None => {
+                    crop.unreadable = true;
+                    push_unmapped(&mut develop.unmapped, name);
+                }
+            },
             _ => push_unmapped(&mut develop.unmapped, name),
         }
     }
@@ -675,6 +1049,16 @@ fn map_table(table: &Table, develop: &mut Develop) {
     } else {
         WhiteBalanceHint::None
     };
+    develop.curves = curves_from_parts(
+        master_2012,
+        red_2012,
+        green_2012,
+        blue_2012,
+        has_2012_curve,
+        old_master,
+    );
+    develop.crop = crop_geometry(&crop, geometry);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -881,5 +1265,174 @@ mod tests {
         let c = parse("s = { Exposure2012 = 2.0 }");
         assert_eq!(a.source_hash, b.source_hash);
         assert_ne!(a.source_hash, c.source_hash);
+    }
+
+    #[test]
+    fn stored_orientation_codes_map_to_the_eight_orientations() {
+        for (code, orientation) in [
+            ("AB", StoredOrientation::Normal),
+            ("BA", StoredOrientation::FlipH),
+            ("CD", StoredOrientation::Rotate180),
+            ("DC", StoredOrientation::FlipV),
+            ("AD", StoredOrientation::Transpose),
+            ("BC", StoredOrientation::Rotate90),
+            ("CB", StoredOrientation::Transverse),
+            ("DA", StoredOrientation::Rotate270),
+            ("Zyx", StoredOrientation::Normal),
+        ] {
+            assert_eq!(StoredOrientation::from_code(code), orientation, "{code}");
+        }
+    }
+
+    #[test]
+    fn a_quarter_turn_swaps_the_corners() {
+        let rotate = StoredOrientation::Rotate90;
+        // The stored top-left lands on the displayed top-right.
+        assert_eq!(rotate.map(0.0, 0.0, 1.5, 1.0), (1.0, 0.0));
+        assert!(rotate.swaps_axes());
+        assert!(!rotate.mirrored());
+        assert!(StoredOrientation::FlipV.mirrored());
+        assert!(!StoredOrientation::FlipV.swaps_axes());
+    }
+
+    #[test]
+    fn an_empty_curve_list_is_no_curve() {
+        let develop = parse("s = { ToneCurvePV2012 = {} }");
+        assert!(develop.curves.master.is_empty());
+        assert!(develop.unmapped.is_empty());
+    }
+
+    #[test]
+    fn a_broken_curve_is_an_error_not_an_unmapped_name() {
+        for text in [
+            "s = { ToneCurvePV2012 = { 0, 0, 128 } }",
+            "s = { ToneCurvePV2012 = { 0, 0, \"Zyx\", 255 } }",
+            "s = { ToneCurvePV2012 = { x = 1, y = 1 } }",
+            "s = { ToneCurvePV2012Red = 5 }",
+        ] {
+            assert!(
+                matches!(parse_develop(text), Err(DevelopError::Curve { .. })),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_curve_alone_is_develop_content_without_a_control() {
+        let develop = parse("s = { ToneCurvePV2012 = { 0, 0, 255, 255 } }");
+        assert!(develop.curves.master.is_empty(), "identity, not a curve");
+        let curved = parse("s = { ToneCurvePV2012 = { 0, 0, 128, 200, 255, 255 } }");
+        assert_eq!(curved.curves.master.len(), 3);
+        assert!(curved.controls.is_empty());
+        assert!(curved.unmapped.is_empty());
+    }
+
+    #[test]
+    fn crop_fields_become_a_crop_and_never_an_unmapped_name() {
+        let develop = parse(
+            "s = { CropLeft = 0.1, CropTop = 0.2, CropRight = 0.9, \
+                   CropBottom = 0.8, CropAngle = 0 }",
+        );
+        let crop = develop.crop.expect("crop");
+        assert_eq!((crop.x0, crop.y0, crop.x1, crop.y1), (0.1, 0.2, 0.9, 0.8));
+        assert_eq!(crop.angle, 0.0);
+        assert!(develop.unmapped.is_empty());
+        assert!(!develop.controls.contains_key("crop.angle"));
+
+        let turned = parse(
+            "s = { CropLeft = 0.1, CropTop = 0.2, CropRight = 0.9, \
+                             CropBottom = 0.8, CropAngle = 2.0 }",
+        );
+        assert_eq!(
+            turned.crop.expect("crop").angle,
+            -2.0,
+            "upright photos turn the other way"
+        );
+        assert!(turned.unmapped.is_empty());
+    }
+
+    #[test]
+    fn a_disabled_crop_is_the_unit_rectangle() {
+        let develop = parse("s = { HasCrop = false, CropLeft = 0.4 }");
+        let crop = develop.crop.expect("unit crop");
+        assert_eq!((crop.x0, crop.y0, crop.x1, crop.y1), (0.0, 0.0, 1.0, 1.0));
+        assert_eq!(crop.angle, 0.0);
+        assert!(develop.unmapped.is_empty());
+    }
+
+    #[test]
+    fn an_inverted_crop_rectangle_means_no_crop() {
+        // Numeric but inverted edges are the documented reference case for
+        // "no crop": nothing was unreadable, so nothing is reported.
+        let develop = parse("s = { CropLeft = 0.9, CropRight = 0.1 }");
+        assert_eq!(develop.crop, None);
+        assert!(develop.unmapped.is_empty());
+    }
+
+    #[test]
+    fn a_crop_value_with_the_wrong_type_is_reported_and_means_no_crop() {
+        let develop = parse(
+            "s = { CropLeft = \"Zyx\", CropTop = 0.2, CropRight = 0.9, \
+                   CropBottom = 0.8 }",
+        );
+        assert_eq!(
+            develop.crop, None,
+            "the remaining fields must not become a rectangle of defaults"
+        );
+        assert_eq!(develop.unmapped, ["CropLeft"]);
+    }
+
+    #[test]
+    fn a_crop_flag_with_the_wrong_type_is_reported_and_means_no_crop() {
+        let develop = parse(
+            "s = { HasCrop = \"Zyx\", CropLeft = 0.1, CropTop = 0.2, \
+                   CropRight = 0.9, CropBottom = 0.8 }",
+        );
+        assert_eq!(develop.crop, None);
+        assert_eq!(develop.unmapped, ["HasCrop"]);
+    }
+
+    #[test]
+    fn each_unreadable_crop_field_is_reported_once() {
+        let develop = parse("s = { CropLeft = \"Zyx\", CropAngle = true, CropRight = 0.9 }");
+        assert_eq!(develop.crop, None);
+        let mut names = develop.unmapped.clone();
+        names.sort();
+        assert_eq!(names, ["CropAngle", "CropLeft"]);
+    }
+
+    #[test]
+    fn the_crop_angle_is_clamped_like_lightcraft() {
+        let develop = parse("s = { CropAngle = 90 }");
+        assert_eq!(develop.crop.expect("crop").angle, -45.0);
+    }
+
+    #[test]
+    fn the_crop_transform_uses_the_stored_geometry() {
+        let geometry = StoredGeometry::new(Some("BC"), Some(1500.0), Some(1000.0));
+        let develop = parse_develop_with_geometry(
+            "s = { CropLeft = 0.1, CropTop = 0.2, CropRight = 0.6, CropBottom = 0.9 }",
+            geometry,
+        )
+        .expect("valid");
+        let crop = develop.crop.expect("crop");
+        for (actual, expected) in [
+            (crop.x0, 0.1),
+            (crop.y0, 0.1),
+            (crop.x1, 0.8),
+            (crop.y1, 0.6),
+            (crop.angle, 0.0),
+        ] {
+            assert!((actual - expected).abs() < 1e-9, "{actual} vs {expected}");
+        }
+    }
+
+    #[test]
+    fn a_missing_stored_size_falls_back_to_square() {
+        let geometry = StoredGeometry::new(None, None, None);
+        assert_eq!(geometry.aspect(), 1.0);
+        assert_eq!(geometry.orientation, StoredOrientation::Normal);
+        let geometry = StoredGeometry::new(Some("AB"), Some(0.0), Some(1000.0));
+        assert_eq!(geometry.aspect(), 1.0);
     }
 }

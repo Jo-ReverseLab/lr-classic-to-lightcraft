@@ -25,9 +25,11 @@ pub struct Develop {
     /// LightCraft's partial settings (for example `treatment`, `hdr.enabled`
     /// or `optics.remove_ca`).
     pub partial: BTreeMap<String, MergeValue>,
-    /// Tone curves. Filled by a later phase; empty here.
+    /// Tone curves, in LightCraft's unit-range coordinates. An empty list
+    /// means the photo has no such curve.
     pub curves: Curves,
-    /// Crop rectangle and angle. Filled by a later phase; `None` here.
+    /// Crop rectangle and angle in LightCraft's oriented, rotated frame,
+    /// or `None` when the photo has no crop.
     pub crop: Option<CropGeometry>,
     /// White-balance mode and what its scale would need.
     pub white_balance: WhiteBalance,

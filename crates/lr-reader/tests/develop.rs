@@ -155,10 +155,16 @@ fn old_process_fields_use_the_documented_formulas() {
         );
     }
 
-    // The old point curve is phase 6c; until then its name is reported.
+    // P6-3 reads the old point curve. The fixture stores the straight
+    // identity line, which means "no curve".
     assert!(
-        d.unmapped.iter().any(|name| name == "ToneCurve"),
-        "ToneCurve must be reported as unmapped, got {:?}",
+        d.curves.master.is_empty(),
+        "the identity ToneCurve must not become a curve: {:?}",
+        d.curves.master
+    );
+    assert!(
+        !d.unmapped.iter().any(|name| name == "ToneCurve"),
+        "a read ToneCurve is no longer unmapped, got {:?}",
         d.unmapped
     );
 }
