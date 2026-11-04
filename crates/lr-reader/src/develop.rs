@@ -703,6 +703,23 @@ fn as_number(value: &LuaValue) -> Option<f64> {
     }
 }
 
+/// Reads one numeric crop key. A present value of the wrong type makes the
+/// whole stored crop unreadable and is reported under its own name, so the
+/// geometry is never guessed from defaults.
+fn crop_number(
+    crop: &mut RawCrop,
+    unmapped: &mut Vec<String>,
+    name: &str,
+    value: &LuaValue,
+) -> Option<f64> {
+    let number = as_number(value);
+    if number.is_none() {
+        crop.unreadable = true;
+        push_unmapped(unmapped, name);
+    }
+    number
+}
+
 fn curve_error(message: &'static str) -> DevelopError {
     DevelopError::Curve { message }
 }
@@ -753,6 +770,10 @@ fn curve_points(value: &LuaValue) -> Result<Option<Vec<CurvePoint>>, DevelopErro
 struct RawCrop {
     /// At least one of the five crop keys is present.
     present: bool,
+    /// One crop key is present but its value has the wrong type (or
+    /// `HasCrop` is not a flag). The caller reports the name, and no crop is
+    /// built from the remaining defaults.
+    unreadable: bool,
     has_crop: Option<bool>,
     left: Option<f64>,
     top: Option<f64>,
@@ -768,6 +789,12 @@ struct RawCrop {
 /// after that rotation, normalised to the oriented size. This mirrors the
 /// transform documented in `docs/research/develop-mapping.md` §4.9.
 fn crop_geometry(raw: &RawCrop, geometry: StoredGeometry) -> Option<CropGeometry> {
+    if raw.unreadable {
+        // A crop key that is present but not convertible is reported by the
+        // reader. Guessing the remaining edges from defaults would turn it
+        // into a wrong rectangle, so there is no crop at all.
+        return None;
+    }
     if raw.has_crop == Some(false) {
         // An explicitly disabled crop is the whole image.
         return Some(CropGeometry {
@@ -981,25 +1008,36 @@ fn map_table(
             "ToneCurve" => old_master = curve_points(value)?,
             "CropLeft" => {
                 crop.present = true;
-                crop.left = as_number(value);
+                let number = crop_number(&mut crop, &mut develop.unmapped, name, value);
+                crop.left = number;
             }
             "CropTop" => {
                 crop.present = true;
-                crop.top = as_number(value);
+                let number = crop_number(&mut crop, &mut develop.unmapped, name, value);
+                crop.top = number;
             }
             "CropRight" => {
                 crop.present = true;
-                crop.right = as_number(value);
+                let number = crop_number(&mut crop, &mut develop.unmapped, name, value);
+                crop.right = number;
             }
             "CropBottom" => {
                 crop.present = true;
-                crop.bottom = as_number(value);
+                let number = crop_number(&mut crop, &mut develop.unmapped, name, value);
+                crop.bottom = number;
             }
             "CropAngle" => {
                 crop.present = true;
-                crop.angle = as_number(value);
+                let number = crop_number(&mut crop, &mut develop.unmapped, name, value);
+                crop.angle = number;
             }
-            "HasCrop" => crop.has_crop = as_bool(value),
+            "HasCrop" => match as_bool(value) {
+                Some(on) => crop.has_crop = Some(on),
+                None => {
+                    crop.unreadable = true;
+                    push_unmapped(&mut develop.unmapped, name);
+                }
+            },
             _ => push_unmapped(&mut develop.unmapped, name),
         }
     }
@@ -1324,17 +1362,43 @@ mod tests {
 
     #[test]
     fn an_inverted_crop_rectangle_means_no_crop() {
+        // Numeric but inverted edges are the documented reference case for
+        // "no crop": nothing was unreadable, so nothing is reported.
         let develop = parse("s = { CropLeft = 0.9, CropRight = 0.1 }");
         assert_eq!(develop.crop, None);
         assert!(develop.unmapped.is_empty());
     }
 
     #[test]
-    fn a_crop_value_that_is_not_a_number_is_ignored() {
-        let develop = parse("s = { CropLeft = \"Zyx\" }");
-        let crop = develop.crop.expect("unit crop");
-        assert_eq!((crop.x0, crop.y0, crop.x1, crop.y1), (0.0, 0.0, 1.0, 1.0));
-        assert!(develop.unmapped.is_empty());
+    fn a_crop_value_with_the_wrong_type_is_reported_and_means_no_crop() {
+        let develop = parse(
+            "s = { CropLeft = \"Zyx\", CropTop = 0.2, CropRight = 0.9, \
+                   CropBottom = 0.8 }",
+        );
+        assert_eq!(
+            develop.crop, None,
+            "the remaining fields must not become a rectangle of defaults"
+        );
+        assert_eq!(develop.unmapped, ["CropLeft"]);
+    }
+
+    #[test]
+    fn a_crop_flag_with_the_wrong_type_is_reported_and_means_no_crop() {
+        let develop = parse(
+            "s = { HasCrop = \"Zyx\", CropLeft = 0.1, CropTop = 0.2, \
+                   CropRight = 0.9, CropBottom = 0.8 }",
+        );
+        assert_eq!(develop.crop, None);
+        assert_eq!(develop.unmapped, ["HasCrop"]);
+    }
+
+    #[test]
+    fn each_unreadable_crop_field_is_reported_once() {
+        let develop = parse("s = { CropLeft = \"Zyx\", CropAngle = true, CropRight = 0.9 }");
+        assert_eq!(develop.crop, None);
+        let mut names = develop.unmapped.clone();
+        names.sort();
+        assert_eq!(names, ["CropAngle", "CropLeft"]);
     }
 
     #[test]
