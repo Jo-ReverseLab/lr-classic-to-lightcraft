@@ -33,6 +33,10 @@ pub struct Develop {
     pub crop: Option<CropGeometry>,
     /// White-balance mode and what its scale would need.
     pub white_balance: WhiteBalance,
+    /// The camera profile name the catalog stores, byte for byte, or `None`
+    /// when the row has no (or an empty) name. It is reported by name only
+    /// and never written; a profile alone is no develop command.
+    pub camera_profile: Option<String>,
     /// Names of catalog fields that could not be carried over, once each,
     /// in the order the settings text stores them. Only names, never values.
     pub unmapped: Vec<String>,
@@ -113,4 +117,20 @@ pub struct CropGeometry {
     pub y1: f64,
     /// Rotation angle in degrees.
     pub angle: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_profile_is_optional_and_keeps_its_bytes() {
+        assert_eq!(Develop::default().camera_profile, None);
+        let develop = Develop {
+            camera_profile: Some("Profil Ärger 📷".to_owned()),
+            ..Develop::default()
+        };
+        assert_eq!(develop.camera_profile.as_deref(), Some("Profil Ärger 📷"));
+        assert_ne!(develop, Develop::default());
+    }
 }

@@ -1038,6 +1038,14 @@ fn map_table(
                     push_unmapped(&mut develop.unmapped, name);
                 }
             },
+            // Reported by name only; it never becomes a develop command.
+            "CameraProfile" => match value {
+                LuaValue::Text(profile) if !profile.is_empty() => {
+                    develop.camera_profile = Some(profile.clone());
+                }
+                LuaValue::Text(_) => {}
+                _ => push_unmapped(&mut develop.unmapped, name),
+            },
             _ => push_unmapped(&mut develop.unmapped, name),
         }
     }
@@ -1434,5 +1442,47 @@ mod tests {
         assert_eq!(geometry.orientation, StoredOrientation::Normal);
         let geometry = StoredGeometry::new(Some("AB"), Some(0.0), Some(1000.0));
         assert_eq!(geometry.aspect(), 1.0);
+    }
+
+    #[test]
+    fn a_camera_profile_keeps_its_bytes() {
+        for profile in ["Studio Neutral", "Profil Ärger 📷", "  padded  "] {
+            let develop = parse(&format!("s = {{ CameraProfile = \"{profile}\" }}"));
+            assert_eq!(
+                develop.camera_profile.as_deref(),
+                Some(profile),
+                "profile must survive byte for byte"
+            );
+            assert!(develop.unmapped.is_empty(), "{profile}");
+        }
+    }
+
+    #[test]
+    fn a_missing_or_empty_camera_profile_is_none() {
+        for text in ["s = {}", "s = { CameraProfile = \"\" }"] {
+            let develop = parse(text);
+            assert_eq!(develop.camera_profile, None, "{text}");
+            assert!(develop.unmapped.is_empty(), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_wrongly_typed_camera_profile_is_unmapped() {
+        for text in [
+            "s = { CameraProfile = 42 }",
+            "s = { CameraProfile = true }",
+            "s = { CameraProfile = { X = 1 } }",
+        ] {
+            let develop = parse(text);
+            assert_eq!(develop.camera_profile, None, "{text}");
+            assert_eq!(develop.unmapped, ["CameraProfile"], "{text}");
+        }
+    }
+
+    #[test]
+    fn a_look_is_still_unmapped_and_not_a_camera_profile() {
+        let develop = parse("s = { CameraProfile = \"A\", Look = \"B\" }");
+        assert_eq!(develop.camera_profile.as_deref(), Some("A"));
+        assert_eq!(develop.unmapped, ["Look"]);
     }
 }
