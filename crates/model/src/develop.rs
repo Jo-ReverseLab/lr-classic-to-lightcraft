@@ -34,6 +34,9 @@ pub struct Develop {
     /// Local corrections, in LightCraft's order and shape, or empty when the
     /// photo has no usable mask.
     pub masks: Vec<Mask>,
+    /// Spot removal and healing, in catalog order, or empty when the photo
+    /// has no usable spot.
+    pub spots: Vec<Spot>,
     /// White-balance mode and what its scale would need.
     pub white_balance: WhiteBalance,
     /// The camera profile name the catalog stores, byte for byte, or `None`
@@ -237,6 +240,38 @@ pub struct BrushStroke {
     pub erase: bool,
 }
 
+/// How a spot rebuilds the area it covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpotMode {
+    /// Content-aware removal: the spot is rebuilt from its surroundings.
+    #[default]
+    Remove,
+    /// Healing with a source, blended with the target.
+    Heal,
+    /// Cloning from an explicit source.
+    Clone,
+    /// Content-aware fill without a single source.
+    Fill,
+}
+
+/// One spot removal or healing area, in LightCraft's vocabulary.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Spot {
+    /// How the area is rebuilt.
+    pub mode: SpotMode,
+    /// The target: one point for a circle, a path for a brush.
+    pub points: Vec<Point>,
+    /// Radius as a fraction of the photo's long edge.
+    pub size: f64,
+    /// Feather on LightCraft's 0..100 scale.
+    pub feather: f64,
+    /// Opacity on LightCraft's 0..100 scale.
+    pub opacity: f64,
+    /// Offset from the first target point to the source, or `None` when the
+    /// source is automatic.
+    pub source_offset: Option<Point>,
+}
+
 /// A point normalized to a photo's width and height.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Point {
@@ -282,6 +317,33 @@ mod tests {
         };
         assert_eq!(develop.masks, vec![mask]);
         assert_ne!(develop.masks, Develop::default().masks);
+    }
+
+    #[test]
+    fn spots_default_empty_and_carry_their_points() {
+        assert!(Develop::default().spots.is_empty());
+        let spot = Spot {
+            mode: SpotMode::Heal,
+            points: vec![Point { x: 0.4, y: 0.3 }],
+            size: 0.04,
+            feather: 50.0,
+            opacity: 80.0,
+            source_offset: Some(Point { x: 0.2, y: 0.2 }),
+        };
+        let develop = Develop {
+            spots: vec![spot.clone()],
+            ..Develop::default()
+        };
+        assert_eq!(develop.spots, vec![spot]);
+        assert_ne!(develop.spots, Develop::default().spots);
+    }
+
+    #[test]
+    fn every_spot_mode_is_distinct() {
+        assert_ne!(SpotMode::Remove, SpotMode::Heal);
+        assert_ne!(SpotMode::Heal, SpotMode::Clone);
+        assert_ne!(SpotMode::Clone, SpotMode::Fill);
+        assert_eq!(SpotMode::default(), SpotMode::Remove);
     }
 
     #[test]
