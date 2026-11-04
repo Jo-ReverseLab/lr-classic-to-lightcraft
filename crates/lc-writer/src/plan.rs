@@ -49,8 +49,8 @@ use crate::smart::{convertible, translate};
 use crate::state::{EntryKind, PhotoFields, State, hex_hash, keyword_text, snapshot};
 use model::{
     Collection, CollectionKind, CurvePoint, Curves, Develop, Keyword, Mask, MaskComponent, MaskOp,
-    MaskShape, MergeValue, Photo, Point, QuickCollection, SkipCode, Skipped, SmartCollection,
-    Stack, WhiteBalanceHint,
+    MaskShape, MergeValue, Photo, Point, QuickCollection, SkipCode, Skipped, SmartCollection, Spot,
+    SpotMode, Stack, WhiteBalanceHint,
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -321,6 +321,8 @@ pub struct Plan {
     develop_photos_with_profile: usize,
     /// Converted photos with at least one mask.
     develop_masks: usize,
+    /// Converted photos with at least one spot.
+    develop_spots: usize,
 }
 
 impl Plan {
@@ -528,6 +530,11 @@ impl Plan {
     /// Converted photos with at least one mask.
     pub fn develop_masks(&self) -> usize {
         self.develop_masks
+    }
+
+    /// Converted photos with at least one spot.
+    pub fn develop_spots(&self) -> usize {
+        self.develop_spots
     }
 
     /// The plan as a script: one JSON line per step, each an
@@ -1009,6 +1016,9 @@ fn plan_photos(
             if !develop.masks.is_empty() {
                 out.develop_masks += 1;
             }
+            if !develop.spots.is_empty() {
+                out.develop_spots += 1;
+            }
             out.develop_unmapped
                 .extend(develop.unmapped.iter().cloned());
         }
@@ -1175,6 +1185,7 @@ fn has_develop_content(develop: &Develop) -> bool {
         || !curves_are_empty(&develop.curves)
         || develop.crop.is_some()
         || !develop.masks.is_empty()
+        || !develop.spots.is_empty()
 }
 
 /// The nested `settings` object of `develop.merge`: dotted `partial` paths
@@ -1214,6 +1225,7 @@ fn develop_settings(develop: &Develop) -> Option<Value> {
         );
     }
     add_masks(&mut settings, &develop.masks);
+    add_spots(&mut settings, &develop.spots);
     (!settings.is_empty()).then_some(Value::Object(settings))
 }
 
@@ -1228,6 +1240,34 @@ fn add_masks(settings: &mut Map<String, Value>, masks: &[Mask]) {
         "masks".to_owned(),
         Value::Array(masks.iter().map(mask_json).collect()),
     );
+}
+
+/// Adds the spots as LightCraft's `spots` array. Spots travel only through
+/// `develop.merge`, never through `develop.set`.
+fn add_spots(settings: &mut Map<String, Value>, spots: &[Spot]) {
+    if spots.is_empty() {
+        return;
+    }
+    settings.insert(
+        "spots".to_owned(),
+        Value::Array(spots.iter().map(spot_json).collect()),
+    );
+}
+
+fn spot_json(spot: &Spot) -> Value {
+    json!({
+        "mode": match spot.mode {
+            SpotMode::Remove => "remove",
+            SpotMode::Heal => "heal",
+            SpotMode::Clone => "clone",
+            SpotMode::Fill => "fill",
+        },
+        "points": spot.points.iter().map(point_json).collect::<Vec<_>>(),
+        "size": spot.size,
+        "feather": spot.feather,
+        "opacity": spot.opacity,
+        "source_offset": spot.source_offset.as_ref().map(point_json),
+    })
 }
 
 fn mask_json(mask: &Mask) -> Value {
@@ -2729,5 +2769,97 @@ mod tests {
             None,
             "an empty develop sends nothing"
         );
+    }
+
+    fn sample_spot() -> Spot {
+        Spot {
+            mode: SpotMode::Heal,
+            points: vec![Point { x: 0.4, y: 0.3 }],
+            size: 0.04,
+            feather: 50.0,
+            opacity: 80.0,
+            source_offset: Some(Point { x: 0.2, y: 0.2 }),
+        }
+    }
+
+    #[test]
+    fn spots_alone_make_develop_content() {
+        let develop = Develop {
+            spots: vec![sample_spot()],
+            ..Develop::default()
+        };
+        assert!(has_develop_content(&develop));
+        let settings = develop_settings(&develop).expect("spots are merge content");
+        assert_eq!(
+            settings,
+            json!({
+                "spots": [{
+                    "mode": "heal",
+                    "points": [{"x": 0.4, "y": 0.3}],
+                    "size": 0.04,
+                    "feather": 50.0,
+                    "opacity": 80.0,
+                    "source_offset": {"x": 0.2, "y": 0.2},
+                }]
+            })
+        );
+    }
+
+    #[test]
+    fn every_spot_mode_serializes_with_its_name() {
+        for (mode, name) in [
+            (SpotMode::Remove, "remove"),
+            (SpotMode::Heal, "heal"),
+            (SpotMode::Clone, "clone"),
+            (SpotMode::Fill, "fill"),
+        ] {
+            let spot = Spot {
+                mode,
+                ..sample_spot()
+            };
+            assert_eq!(spot_json(&spot)["mode"], json!(name));
+        }
+    }
+
+    #[test]
+    fn a_recorded_hash_leaves_spots_unwritten() {
+        let source = [9u8; 32];
+        let develop = Develop {
+            source_hash: Some(source),
+            spots: vec![sample_spot()],
+            ..Develop::default()
+        };
+        let known = crate::state::PhotoEntry {
+            lightroom_id: 1,
+            lightcraft_id: json!(5),
+            fields: crate::state::PhotoFields::default(),
+            path: None,
+            copy_of: None,
+            develop_hash: Some(hex_hash(&source)),
+        };
+        let mut out = Plan::default();
+        plan_develop("gid", Some(&known), &develop, false, &mut out);
+        assert!(out.steps.is_empty(), "{:?}", out.steps);
+        assert_eq!(out.develop_planned, 0);
+    }
+
+    #[test]
+    fn spots_travel_only_through_develop_merge() {
+        let develop = Develop {
+            controls: BTreeMap::from([("light.exposure".to_string(), 0.5)]),
+            spots: vec![sample_spot()],
+            ..Develop::default()
+        };
+        let mut out = Plan::default();
+        plan_develop("gid", None, &develop, false, &mut out);
+        assert_eq!(out.steps.len(), 2);
+        let Step::DevelopSet { values, .. } = &out.steps[0] else {
+            panic!("{:?}", out.steps[0]);
+        };
+        assert!(!values.contains_key("spots"));
+        let Step::DevelopMerge { settings, .. } = &out.steps[1] else {
+            panic!("{:?}", out.steps[1]);
+        };
+        assert!(settings["spots"].is_array());
     }
 }

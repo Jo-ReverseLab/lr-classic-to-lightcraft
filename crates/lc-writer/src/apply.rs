@@ -236,6 +236,8 @@ pub struct ApplySummary {
     pub develop_photos_with_profile: usize,
     /// Converted photos with at least one mask.
     pub develop_masks: usize,
+    /// Converted photos with at least one spot.
+    pub develop_spots: usize,
     /// `removed_photos.len()`, for the report.
     pub photos_removed: usize,
     /// `moved_photos.len()`, for the report.
@@ -347,6 +349,7 @@ pub fn apply_partial(
             develop_camera_profiles: plan.develop_camera_profiles().clone(),
             develop_photos_with_profile: plan.develop_photos_with_profile(),
             develop_masks: plan.develop_masks(),
+            develop_spots: plan.develop_spots(),
             ..ApplySummary::default()
         },
         recorded: plan.recorded_fields_map(),
