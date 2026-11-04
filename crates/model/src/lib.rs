@@ -14,7 +14,8 @@ pub mod skip;
 pub mod smart;
 
 pub use develop::{
-    CropGeometry, CurvePoint, Curves, Develop, MergeValue, WhiteBalance, WhiteBalanceHint,
+    BrushStroke, CropGeometry, CurvePoint, Curves, Develop, Mask, MaskComponent, MaskOp, MaskShape,
+    MergeValue, Point, WhiteBalance, WhiteBalanceHint,
 };
 pub use label::{ColorLabel, LabelSet};
 pub use mapping::{MappedPath, PathMapping, PathMappings};
