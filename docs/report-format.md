@@ -156,6 +156,7 @@ rendering value.
 | `develop.camera_profiles_count` | integer | always | full number of distinct profile names, also above the cap |
 | `develop.photos_with_profile` | integer | always | converted photos with a non-empty profile name |
 | `develop.masks` | integer | always | converted photos with at least one mask (local correction) |
+| `develop.spots` | integer | always | converted photos with at least one spot (heal/clone/remove/fill) |
 
 **Guarantee.** A camera profile name is reported byte for byte and only when
 it is non-empty; it is never a rendering value and never triggers a develop
@@ -163,6 +164,9 @@ command. Profile names and unmapped field names are independent: `Look` is
 an unmapped field name, not a profile. A mask that cannot be converted is
 named in `develop.unmapped` (`Mask: colour range`, `Mask: AI mask (3)`),
 never replaced by a partial mask; mask values never appear in the report.
+The same holds for spots: an unconvertible spot is named (`Spot: Gradient`,
+`Spot: empty brush`, `Spot: legacy line`, `Spot: no mask`) and its values
+never appear in the report.
 
 ## collections
 

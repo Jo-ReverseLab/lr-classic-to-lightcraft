@@ -20,7 +20,8 @@ ratings, pick/reject flags, colour labels, titles, captions, copyright and
 creator, collections as albums and collection sets as album folders (with
 their members), smart collections, folder stacks, the Quick Collection and
 development settings (sliders, tone curves, crop geometry, the
-white-balance mode and masks; the stored Lua table is parsed, never executed).
+white-balance mode, masks and spots; the stored Lua table is parsed, never
+executed).
 
 What `--apply` writes into a LightCraft library, through the control port of
 the running LightCraft app: keywords, photos (as references to the existing
@@ -28,8 +29,7 @@ files), ratings, flags, labels, titles, captions, copyright and creator,
 albums and album folders with their members, smart albums (only when the rule
 translates exactly), stacks (always written expanded), the Quick
 Collection (only adding photos) and development settings (sliders, tone
-curves, crop geometry, the white-balance mode and masks; spots follow in a
-later change).
+curves, crop geometry, the white-balance mode, masks and spots).
 
 Without `--apply`, lr2lc only reports what it would do. Everything that is
 not converted is listed with a reason in the summary and in `report.json`.
@@ -473,6 +473,18 @@ brush — is reported under a stable name such as `Mask: colour range` in
 `develop.merge`, never `develop.set`, and the develop hash covers them, so a
 second run plans nothing.
 
+Spot removal and healing go in the same `develop.merge` as LightCraft's
+`spots` array. Each spot carries its mode (`heal`, `clone`, `remove` or
+`fill`), its target points (one point for an ellipse or circle, the brush
+path for a painted spot), a size in long-edge units, feather and opacity on
+LightCraft's 0..100 scale and an optional source offset. The current
+`RetouchAreas` container is read first; the older `RetouchInfo` lines are
+used only when it yields no spot, with `size = radius × min(aspect, 1)` and
+no feather. A spot LightCraft cannot express is reported under a stable name
+(`Spot: <kind>`, `Spot: no mask`, `Spot: empty brush`, `Spot: legacy line`)
+in `unmapped`, never written as a partial spot. Spots travel only through
+`develop.merge`, never `develop.set`, and the develop hash covers them too.
+
 The camera profile (`CameraProfile`) is kept byte for byte in the model but
 never written: there is no profile or LUT converter, and a photo that only
 carries a profile plans no develop command. The report groups converted
@@ -493,10 +505,11 @@ hash:
 The dry run plans the same commands. The summary has one line
 `develop: photos with settings N, commands planned N, written N, unmapped
 fields N (N listed), changed and not applied N, overwritten N, photos with
-camera profile N, photos with masks N`, and `report.json` carries the same
-numbers in its top-level `develop` area (`photos`, `planned`, `written`,
-`unmapped`, `unmapped_count`, `not_applied`, `overwritten`, `camera_profiles`,
-`camera_profiles_count`, `photos_with_profile`, `masks`). `written` is 0 in a
+camera profile N, photos with masks N, photos with spots N`, and `report.json`
+carries the same numbers in its top-level `develop` area (`photos`, `planned`,
+`written`, `unmapped`, `unmapped_count`, `not_applied`, `overwritten`,
+`camera_profiles`, `camera_profiles_count`, `photos_with_profile`, `masks`,
+`spots`). `written` is 0 in a
 dry run.
 `unmapped` lists at most 20 distinct field names, sorted; `unmapped_count`
 is the full count. `camera_profiles` maps each profile name to the number of

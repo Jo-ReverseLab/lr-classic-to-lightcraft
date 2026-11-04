@@ -471,13 +471,15 @@ identical).
 | `Mask/Paint` | brush mask | dabs, radius, flow, `MaskValue` ≤ 0 erases | `crs_masks.rs:196-220` |
 | `Mask/Image` `MaskSubType` 1 / 2 | subject / sky mask | other AI subtypes are reported as `Mask: AI mask (n)` | `crs_masks.rs:221-225` |
 | `Mask/RangeMask` type 2 / 3 | luminance / depth range | lightness converted; colour ranges are reported | `crs_masks.rs:226-245` |
-| `MaskBlendMode`, `MaskInverted` | add / subtract / intersect, invert | numbers 0/1/2 | `xmp-interop.md:231` |
-| `RetouchAreas`, `RetouchInfo` | `spots[]` | heal/clone, circle or brush, source offset, opacity, feather | `crs_masks.rs:298-431` |
-| other mask kinds | — | reported as `Mask: <kind>` | `crs_masks.rs:240-248` |
+| `MaskBlendMode`, `MaskInverted` | add / subtract / intersect, invert | numbers 0/1/2; any other number is reported as `Mask: blend mode N`, never silently `add` | `xmp-interop.md:231` |
+| `RetouchAreas`, `RetouchInfo` | `spots[]` | mapped (P6-7b): `SpotType = clone` → clone, everything else heal; `Masks[0]` as ellipse (X, Y, SizeX × min(aspect, 1)), circular gradient (box centre, half width × min(aspect, 1)) or brush (dabs after the first token, `Radius` as stored); size clamped 0.001..0.25; feather and opacity ×100, clamped 0..100 (defaults 0 and 1); source offset from absolute `SourceX`/`OffsetY` when `SourceState` is missing or `sourceSetExplicitly`, null when missing or at the same position. `RetouchInfo` is the fallback only when `RetouchAreas` yields no spot: `size = radius × min(aspect, 1)`, feather 0 | `crs_masks.rs:298-431` |
+| other mask kinds | — | reported as `Mask: <kind>`; a container whose value is not a list as `Mask: container <field>` | `crs_masks.rs:240-248` |
+| other spot kinds | — | reported as `Spot: <kind>`, `Spot: no mask`, `Spot: empty brush` or `Spot: legacy line` | `crs_masks.rs:298-431` |
 | other `Local*` sliders (e.g. `LocalGrain`) | — | reported as `Mask: LocalGrain` when set | `crs_masks.rs:102-115` |
 
-The correction geometry is converted relative to the photo's aspect ratio
-(width / height) for radial and spot masks (`crs_masks.rs:253-254`); presets
+The correction geometry is converted relative to the photo's displayed aspect
+ratio (width / height after the stored orientation, so a quarter turn uses
+the reciprocal) for radial and spot masks (`crs_masks.rs:253-254`); presets
 assume 3:2 (`xmp-interop.md:227`). lr2lc must pass the real photo aspect, which
 it knows from the catalog's `fileWidth`/`fileHeight` (section 2.1).
 
@@ -975,8 +977,11 @@ deterministically (`tests/fixtures/README.md:6-9`).
 6. Masks: each of the four containers; brush merging; `MaskValue <= 0` erases;
    subject/sky subtypes; luminance/depth ranges; colour range reported; the
    photo aspect is used for radial geometry.
-7. Spots: heal and clone; circle and brush; source offset present only with
-   `sourceSetExplicitly`.
+7. Spots: heal and clone; ellipse, circular and brush shapes; size, feather
+   and opacity clamps; source offset from an explicit absolute source, none
+   for an automatic or same-position source; `RetouchInfo` only as fallback
+   with `radius × min(aspect, 1)` and no feather; unknown shapes, a missing
+   mask, an empty brush and an unreadable legacy line reported by name.
 8. Sentinel `-999999` removed everywhere and counted once.
 9. Unknown fields reported once per photo, in a deterministic order, without
    values in the reason text.

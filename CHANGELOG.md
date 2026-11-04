@@ -34,7 +34,9 @@ The project has not made a release yet.
   old-process fields with LightCraft's approximation, the merge-only
   switches, the white-balance mode, the 2012 tone curves, the crop geometry,
   the masks (linear, radial, brush, luminance range, depth range, subject and
-  sky, with blend operations and local sliders) and the camera profile name
+  sky, with blend operations and local sliders), the spots (heal and clone
+  from `RetouchAreas` or the legacy `RetouchInfo`, with points, size, feather,
+  opacity and source offset) and the camera profile name
   (kept byte for byte). The stored Lua table is
   parsed without executing it; unknown
   fields, unreadable entries and Lightroom's `-999999` sentinel are recorded
@@ -43,19 +45,20 @@ The project has not made a release yet.
   the unreadable-row path.
 - Writing of development settings (phase 6a): slider values as
   `develop.set`, the structured parts, the white-balance mode, the tone
-  curves, the crop geometry and the masks as `develop.merge` after a
-  selection. Temperature, tint, the look and the other unmapped fields are
+  curves, the crop geometry, the masks and the spots as `develop.merge` after
+  a selection. Temperature, tint, the look and the other unmapped fields are
   reported by name and never written; the camera profile is read and reported
-  but not written, and there is no profile or LUT converter. A mask that
-  LightCraft cannot express is reported under a stable `Mask: ...` name, never
-  written partially. Spots (healing and cloning) follow in a later change.
+  but not written, and there is no profile or LUT converter. A mask or spot
+  that LightCraft cannot express is reported under a stable `Mask: ...` or
+  `Spot: ...` name, never written partially.
 - `develop_hash` in the mapping file keeps the develop writes idempotent. A
   known photo whose settings changed in Lightroom is only rewritten with the
   new `--overwrite-develop`.
 - A top-level `develop` area in `report.json` and one summary line count the
   photos with settings, the planned and written commands, the unmapped field
   names (capped at 20), the changes left alone, the overwrites, the converted
-  photos with a camera profile and the converted photos with masks. Profiles
+  photos with a camera profile and the converted photos with masks and with
+  spots. Profiles
   are grouped by name (sorted, capped at 20) with the full distinct count.
 - Dry run by default. The summary and `--report FILE` (`report.json`) list
   everything that is not converted, each with a reason and a fixed code
