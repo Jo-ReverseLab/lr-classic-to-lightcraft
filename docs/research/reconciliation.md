@@ -10,23 +10,23 @@ Goal: a re-run must only **add**, never overwrite silently. Three states per fie
 
 | Field | `catalog.query` summary | `photo.inspect` | Other |
 |---|---|---|---|
-| Stars | `rating` (`LC: crates/engine/src/cmd/query.rs:21`) | `rating` (whole `Photo` serialised, `query.rs:161-164`; field `crates/catalog/src/model.rs:243`) | |
-| Pick/Reject | `flag`, lowercase `none\|pick\|reject` (`query.rs:22`; enum `model.rs:49-56`) | `flag` | |
-| Colour label | `label`, lowercase name or null (`query.rs:23`; enum `model.rs:69-77`, field `:247`) | `label` | |
-| Title | `title` (`query.rs:25`) | `meta.title` (`model.rs:182`) | |
+| Stars | `rating` (`LC: crates/engine/src/cmd/query.rs:21`) | `rating` (whole `Photo` serialised, `LC: crates/engine/src/cmd/query.rs:161-164`; field `crates/catalog/src/model.rs:243`) | |
+| Pick/Reject | `flag`, lowercase `none\|pick\|reject` (`LC: crates/engine/src/cmd/query.rs:22`; enum `crates/catalog/src/model.rs:49-56`) | `flag` | |
+| Colour label | `label`, lowercase name or null (`LC: crates/engine/src/cmd/query.rs:23`; enum `crates/catalog/src/model.rs:69-77`, field `:247`) | `label` | |
+| Title | `title` (`LC: crates/engine/src/cmd/query.rs:25`) | `meta.title` (`crates/catalog/src/model.rs:182`) | |
 | Caption | **not in summary** | `meta.caption` (`model.rs:183`) | |
 | Copyright | **not in summary** | `meta.copyright` (`model.rs:187`) | |
 | Creator | **not in summary** | `meta.creator` (`model.rs:195`) | |
-| Keywords of a photo | `keywords` (`query.rs:26`) | `meta.keywords` (`model.rs:196`) | |
+| Keywords of a photo | `keywords` (`LC: crates/engine/src/cmd/query.rs:26`) | `meta.keywords` (`crates/catalog/src/model.rs:196`) | |
 | Keyword tree | | | `keyword.list {}` → array of `{name,path,count,children}`; attributes via `keyword.info` (`docs/research/lightcraft-albums.md` A5, `LC: crates/engine/src/cmd/keywords.rs:313-354`) |
-| Album members | `catalog.query {filter:{album:id}}` with paging (`query.rs:82-95`; `docs/research/lightcraft-albums.md` A1) | `albums: [album ids]` of one photo (`query.rs:164`) | `albums.list` gives tree, name, `folder`, `count`, smart `rules`, but **no members and no parent field** (`docs/research/lightcraft-albums.md` A1) |
-| Photo existence / deleted | `deleted` (`query.rs:30`) | `deleted` | |
+| Album members | `catalog.query {filter:{album:id}}` with paging (`LC: crates/engine/src/cmd/query.rs:82-94`; `docs/research/lightcraft-albums.md` A1) | `albums: [album ids]` of one photo (`LC: crates/engine/src/cmd/query.rs:165`) | `albums.list` gives tree, name, `folder`, `count`, smart `rules`, but **no members and no parent field** (`docs/research/lightcraft-albums.md` A1) |
+| Photo existence / deleted | `deleted` (`LC: crates/engine/src/cmd/query.rs:28`) | `deleted` | |
 
 Consequences:
 
-- Rating, flag, label, title and keywords of all photos come cheaply from paged `catalog.query` (default `limit` 200, `query.rs:91`; `filter: {}` lists the library instead of the current UI view, `query.rs:82-89` — but not Local or deleted photos, corrected 2026-11-04, `LC: crates/catalog/src/query.rs:353-360`). The summary needs no per-photo call.
+- Rating, flag, label, title and keywords of all photos come cheaply from paged `catalog.query` (default `limit` 200, `LC: crates/engine/src/cmd/query.rs:91`; `filter: {}` lists the library instead of the current UI view, `LC: crates/engine/src/cmd/query.rs:82-89` — but not Local or deleted photos, corrected 2026-11-04, `LC: crates/catalog/src/query.rs:353-360`). The summary needs no per-photo call.
 - **Caption, copyright and creator need one `photo.inspect` per photo** (the summary lacks them). Only call it for photos where lr2lc has a base value for those fields or a Lightroom value to write; otherwise skip.
-- All `photo.inspect`/`catalog.query` commands are `always` (read-only, no selection needed) in their registration (`query.rs:82`, `:161`) *(the `always` flag meaning is an assumption)*; they do not take the selection gate that `photo.*` writers have.
+- All `photo.inspect`/`catalog.query` commands are `always` (read-only, no selection needed) in their registration (`LC: crates/engine/src/cmd/query.rs:82`, `:161`) *(the `always` flag meaning is an assumption)*; they do not take the selection gate that `photo.*` writers have.
 - The summary emits `title` as a plain string; an empty LightCraft title is `""`, while the mapping file stores `None` for empty (`crates/lc-writer/src/state.rs:62-68`). Normalise `""` → `None` before comparing.
 - Keyword paths in `meta.keywords` are `a|b|c` text (`docs/research/lightcraft-control-port.md` §5), the same form as `PhotoFields.keywords` (`state.rs:70`). Comparison is case-insensitive in LightCraft (`docs/research/lightcraft-albums.md` A5, `keyword_path` lowercases); compare lower-cased *(design suggestion)*.
 - Nothing in these replies gives a modification time or a "who changed it" marker *(assumption: none was found in the summary or `Photo` fields read)*; hence a base value in the mapping file is the only way to tell.
