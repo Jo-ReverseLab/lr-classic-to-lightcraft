@@ -50,10 +50,9 @@ pub enum DevelopError {
 /// Empty or whitespace-only text is an empty [`Develop`]. The returned value
 /// always carries the SHA-256 of `text` as its source hash.
 ///
-/// Without the image's stored orientation and pixel size (the catalog reader
-/// supplies them through `parse_develop_with_geometry`), a crop is expressed
-/// as if the image were upright and 1:1. Callers that parse a real catalog
-/// photo must use the geometry-aware entry point.
+/// Without the image's stored orientation and pixel size — the catalog reader
+/// supplies them — a crop is expressed as if the image were upright and 1:1.
+/// The crate-internal geometry-aware entry point produces the real crop.
 pub fn parse_develop(text: &str) -> Result<Develop, DevelopError> {
     parse_develop_with_geometry(text, StoredGeometry::default())
 }
