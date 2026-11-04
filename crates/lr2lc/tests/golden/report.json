@@ -523,7 +523,8 @@
     "overwritten": 0,
     "camera_profiles": {},
     "camera_profiles_count": 0,
-    "photos_with_profile": 0
+    "photos_with_profile": 0,
+    "masks": 0
   },
   "writer": {
     "planned": {

@@ -389,7 +389,6 @@ fn expected_two_components() -> Value {
 }
 
 #[test]
-#[ignore = "waiting for P6-7"]
 fn masks_are_counted_and_the_summary_names_them() {
     let s = Setup::masks();
     let (report, stdout) = s.dry_ok_full(&s.report_path());
@@ -408,7 +407,6 @@ fn masks_are_counted_and_the_summary_names_them() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7"]
 fn unsupported_masks_are_reported_by_name_only() {
     let s = Setup::masks();
     let (report, stdout) = s.dry_ok_full(&s.report_path());
@@ -424,7 +422,6 @@ fn unsupported_masks_are_reported_by_name_only() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7"]
 fn two_dry_runs_are_identical_and_leave_the_catalog_unchanged() {
     let s = Setup::masks();
     let before = fs::read(&s.catalog).unwrap();
@@ -449,7 +446,6 @@ fn two_dry_runs_are_identical_and_leave_the_catalog_unchanged() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7"]
 fn script_contains_the_exact_lightcraft_mask_json() {
     let s = Setup::masks();
     let report_path = s.work.path().join("report.json");
@@ -511,7 +507,6 @@ fn script_contains_the_exact_lightcraft_mask_json() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7"]
 fn edge_cases_are_reported_and_the_blend_modes_map() {
     let s = Setup::edges();
     let report_path = s.work.path().join("report.json");
@@ -584,7 +579,6 @@ fn edge_cases_are_reported_and_the_blend_modes_map() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7"]
 fn the_unmapped_detail_list_is_capped() {
     let s = Setup::many_unmapped();
     let report = s.dry_ok(&s.report_path());
@@ -611,7 +605,6 @@ fn the_unmapped_detail_list_is_capped() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7"]
 fn apply_writes_masks_once_and_a_second_run_writes_nothing() {
     use fake_lightcraft::{Config, FakeLightCraft};
     use lc_test_support::fake_lightcraft;
@@ -674,7 +667,6 @@ fn apply_writes_masks_once_and_a_second_run_writes_nothing() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7"]
 fn a_fixture_without_mask_rows_is_still_fine() {
     // The plain settings helper produces no mask container at all; this
     // guards against an accidental "masks" key or a changed count.

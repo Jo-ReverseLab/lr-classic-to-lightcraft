@@ -32,8 +32,10 @@ The project has not made a release yet.
   Light, HDR/SDR, tone-curve, colour-grading, colour, mixer, effects,
   vignette, grain, detail, optics, geometry and calibration controls, the
   old-process fields with LightCraft's approximation, the merge-only
-  switches, the white-balance mode, the 2012 tone curves, the crop geometry
-  and the camera profile name (kept byte for byte). The stored Lua table is
+  switches, the white-balance mode, the 2012 tone curves, the crop geometry,
+  the masks (linear, radial, brush, luminance range, depth range, subject and
+  sky, with blend operations and local sliders) and the camera profile name
+  (kept byte for byte). The stored Lua table is
   parsed without executing it; unknown
   fields, unreadable entries and Lightroom's `-999999` sentinel are recorded
   for the report. The crop is transformed into LightCraft's oriented frame
@@ -41,19 +43,20 @@ The project has not made a release yet.
   the unreadable-row path.
 - Writing of development settings (phase 6a): slider values as
   `develop.set`, the structured parts, the white-balance mode, the tone
-  curves and the crop geometry as `develop.merge` after a selection.
-  Temperature, tint, the look and the other unmapped fields are reported by
-  name and never written; the camera profile is read and reported but not
-  written, and there is no profile or LUT converter. Masks and spots follow
-  in a later change.
+  curves, the crop geometry and the masks as `develop.merge` after a
+  selection. Temperature, tint, the look and the other unmapped fields are
+  reported by name and never written; the camera profile is read and reported
+  but not written, and there is no profile or LUT converter. A mask that
+  LightCraft cannot express is reported under a stable `Mask: ...` name, never
+  written partially. Spots (healing and cloning) follow in a later change.
 - `develop_hash` in the mapping file keeps the develop writes idempotent. A
   known photo whose settings changed in Lightroom is only rewritten with the
   new `--overwrite-develop`.
 - A top-level `develop` area in `report.json` and one summary line count the
   photos with settings, the planned and written commands, the unmapped field
-  names (capped at 20), the changes left alone, the overwrites and the
-  converted photos with a camera profile. Profiles are grouped by name
-  (sorted, capped at 20) with the full distinct count.
+  names (capped at 20), the changes left alone, the overwrites, the converted
+  photos with a camera profile and the converted photos with masks. Profiles
+  are grouped by name (sorted, capped at 20) with the full distinct count.
 - Dry run by default. The summary and `--report FILE` (`report.json`) list
   everything that is not converted, each with a reason and a fixed code
   (such as `missing`, `video` or `smart_untranslatable`); read equals

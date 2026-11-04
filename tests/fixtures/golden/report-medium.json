@@ -28,6 +28,7 @@
   "develop": {
     "camera_profiles": {},
     "camera_profiles_count": 0,
+    "masks": 0,
     "not_applied": 0,
     "overwritten": 0,
     "photos": 0,
