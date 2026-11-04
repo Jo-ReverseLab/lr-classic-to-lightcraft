@@ -4,7 +4,7 @@
 //!
 //! Skip reasons name ids only, never keyword names or synonym texts.
 
-use crate::catalog::{Catalog, ReadError};
+use crate::catalog::{value_or_blob, Catalog, ReadError};
 use model::{Keyword, Photo, Report, SkipCode, Skipped};
 use rusqlite::OptionalExtension;
 use rusqlite::types::Value;
@@ -181,7 +181,7 @@ impl Catalog {
                 "SELECT value FROM Adobe_variablesTable \
                  WHERE name = 'AgLibraryKeyword_rootTagID' LIMIT 1",
                 [],
-                |row| row.get(0),
+                |row| row.get_ref(0).map(value_or_blob),
             )
             .optional()
             .map_err(ReadError::Query)?;
@@ -198,21 +198,21 @@ impl Catalog {
             .map_err(ReadError::Query)?;
         let rows = stmt
             .query_map([], |row| {
-                let (name, name_invalid) = value_as_text(row.get(1)?);
+                let (name, name_invalid) = value_as_text(value_or_blob(row.get_ref(1)?));
                 Ok(KeywordRow {
                     id: row.get(0)?,
                     name,
                     name_invalid,
                     parent: row.get(2)?,
-                    global_id: match row.get(7)? {
+                    global_id: match value_or_blob(row.get_ref(7)?) {
                         Value::Text(t) => Some(t),
                         _ => None,
                     },
                     attributes: Attributes {
-                        include_on_export: value_as_flag(&row.get(3)?),
-                        export_containing: value_as_flag(&row.get(4)?),
-                        export_synonyms: value_as_flag(&row.get(5)?),
-                        kind: value_as_type(&row.get(6)?),
+                        include_on_export: value_as_flag(&value_or_blob(row.get_ref(3)?)),
+                        export_containing: value_as_flag(&value_or_blob(row.get_ref(4)?)),
+                        export_synonyms: value_as_flag(&value_or_blob(row.get_ref(5)?)),
+                        kind: value_as_type(&value_or_blob(row.get_ref(6)?)),
                     },
                 })
             })
@@ -229,7 +229,7 @@ impl Catalog {
             .map_err(ReadError::Query)?;
         let rows = stmt
             .query_map([], |row| {
-                let (name, name_invalid) = value_as_text(row.get(2)?);
+                let (name, name_invalid) = value_as_text(value_or_blob(row.get_ref(2)?));
                 Ok(SynonymRow {
                     id: row.get(0)?,
                     keyword: row.get(1)?,
@@ -1097,6 +1097,91 @@ mod tests {
         }
         .apply(&mut k);
         assert!(!k.person && k.include_on_export && k.export_synonyms);
+    }
+
+    /// Writes the small fixture to `dir` and runs `sql` against it with a
+    /// plain read-write connection, so a test can store hostile cell values
+    /// the generator never writes. Returns the catalog path.
+    fn catalog_with_sql(dir: &std::path::Path, sql: &str) -> std::path::PathBuf {
+        let path = dir.join("keywords.lrcat");
+        lrcat_fixtures::write_small_catalog(&path).expect("generate fixture");
+        let conn = rusqlite::Connection::open(&path).expect("open for setup");
+        conn.execute_batch(sql).expect("setup");
+        drop(conn);
+        path
+    }
+
+    fn read_keywords(path: &std::path::Path) -> (KeywordData, Report) {
+        let catalog = Catalog::open(path).expect("open catalog");
+        let mut keyword_report = Report::new();
+        let data = catalog
+            .keywords(&[], &mut keyword_report, &mut Report::new())
+            .expect("read keywords");
+        (data, keyword_report)
+    }
+
+    #[test]
+    fn invalid_utf8_text_keyword_name_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = catalog_with_sql(
+            dir.path(),
+            "UPDATE AgLibraryKeyword SET name = CAST(x'FFFE' AS TEXT) WHERE id_local = 2;",
+        );
+        let (data, report) = read_keywords(&path);
+        let skipped = report
+            .skipped_items()
+            .iter()
+            .find(|s| s.reason.starts_with("keyword 2: "))
+            .expect("keyword 2 is skipped");
+        assert_eq!(skipped.code, SkipCode::NameInvalid);
+        assert_eq!(skipped.reason, "keyword 2: name is not valid UTF-8");
+        assert!(data
+            .keywords
+            .iter()
+            .all(|k| k.lightroom_id != Some(2)));
+    }
+
+    #[test]
+    fn invalid_utf8_text_synonym_name_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("keywords.lrcat");
+        lrcat_fixtures::write_keyword_edge_catalog(&path).expect("generate fixture");
+        let conn = rusqlite::Connection::open(&path).expect("open for setup");
+        conn.execute_batch(
+            "UPDATE AgLibraryKeywordSynonym SET name = CAST(x'FFFE' AS TEXT) WHERE id_local = 1;",
+        )
+        .expect("setup");
+        drop(conn);
+        let catalog = Catalog::open(&path).expect("open catalog");
+        let mut keyword_report = Report::new();
+        let data = catalog
+            .keywords(&[], &mut keyword_report, &mut Report::new())
+            .expect("read keywords");
+        let skipped = data
+            .synonym_report
+            .skipped_items()
+            .iter()
+            .find(|s| s.reason.starts_with("synonym 1: "))
+            .expect("synonym 1 is skipped");
+        assert_eq!(skipped.code, SkipCode::NameInvalid);
+        assert_eq!(skipped.reason, "synonym 1: name is not valid UTF-8");
+    }
+
+    #[test]
+    fn invalid_utf8_text_global_id_counts_as_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = catalog_with_sql(
+            dir.path(),
+            "UPDATE AgLibraryKeyword SET id_global = CAST(x'FFFE' AS TEXT) WHERE id_local = 2;",
+        );
+        let (_, report) = read_keywords(&path);
+        let skipped = report
+            .skipped_items()
+            .iter()
+            .find(|s| s.reason.starts_with("keyword 2: "))
+            .expect("keyword 2 is skipped");
+        assert_eq!(skipped.code, SkipCode::MissingGlobalId);
+        assert_eq!(skipped.reason, "keyword 2: missing global id");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Opening a Lightroom Classic catalog strictly read-only.
 
-use rusqlite::types::Value;
+use rusqlite::types::{Value, ValueRef};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::fs::File;
@@ -19,6 +19,9 @@ pub enum ReadError {
     /// The catalog has no `Adobe_DBVersion` entry.
     #[error("catalog has no Adobe_DBVersion entry")]
     MissingVersion,
+    /// The `Adobe_DBVersion` value holds bytes that are not valid UTF-8.
+    #[error("catalog Adobe_DBVersion is not valid UTF-8")]
+    InvalidVersion,
     /// The catalog was written by a Lightroom version this reader does not support.
     #[error("unsupported catalog version {0} (supported: {SUPPORTED_VERSION})")]
     UnsupportedVersion(String),
@@ -43,6 +46,27 @@ pub enum ReadError {
         /// The missing column, or `None` if the whole table is missing.
         column: Option<String>,
     },
+}
+
+/// Converts a row value like `From<ValueRef> for Value`, except that text
+/// which is not valid UTF-8 becomes a blob holding the same bytes.
+///
+/// `rusqlite`'s own conversion calls `expect("invalid UTF-8")` on such a
+/// text value and aborts the run. The readers already decide how to treat a
+/// cell that is not text (a name becomes `NameInvalid`, an id counts as
+/// missing), so handing them a blob lets them report the problem instead of
+/// panicking.
+pub(crate) fn value_or_blob(value: ValueRef<'_>) -> Value {
+    match value {
+        ValueRef::Null => Value::Null,
+        ValueRef::Integer(i) => Value::Integer(i),
+        ValueRef::Real(r) => Value::Real(r),
+        ValueRef::Text(bytes) => match std::str::from_utf8(bytes) {
+            Ok(text) => Value::Text(text.to_owned()),
+            Err(_) => Value::Blob(bytes.to_vec()),
+        },
+        ValueRef::Blob(bytes) => Value::Blob(bytes.to_vec()),
+    }
 }
 
 fn missing_schema_message(table: &str, column: Option<&str>) -> String {
@@ -136,21 +160,30 @@ impl Catalog {
             | OpenFlags::SQLITE_OPEN_NO_MUTEX;
         let conn = Connection::open_with_flags(uri, flags).map_err(ReadError::Open)?;
 
-        let value: Option<Value> = conn
+        let value: Option<Option<Result<String, ()>>> = conn
             .query_row(
                 "SELECT value FROM Adobe_variablesTable WHERE name = 'Adobe_DBVersion' LIMIT 1",
                 [],
-                |row| row.get(0),
+                |row| {
+                    Ok(match row.get_ref(0)? {
+                        ValueRef::Null => None,
+                        ValueRef::Integer(i) => Some(Ok(i.to_string())),
+                        ValueRef::Real(r) => Some(Ok(r.to_string())),
+                        ValueRef::Text(bytes) => {
+                            Some(std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| ()))
+                        }
+                        ValueRef::Blob(bytes) => {
+                            Some(String::from_utf8(bytes.to_vec()).map_err(|_| ()))
+                        }
+                    })
+                },
             )
             .optional()
             .map_err(ReadError::Open)?;
         let version = match value {
-            None => return Err(ReadError::MissingVersion),
-            Some(Value::Text(s)) => s,
-            Some(Value::Integer(i)) => i.to_string(),
-            Some(Value::Null) => return Err(ReadError::MissingVersion),
-            Some(Value::Real(r)) => r.to_string(),
-            Some(Value::Blob(b)) => String::from_utf8_lossy(&b).into_owned(),
+            None | Some(None) => return Err(ReadError::MissingVersion),
+            Some(Some(Err(()))) => return Err(ReadError::InvalidVersion),
+            Some(Some(Ok(version))) => version,
         };
         if version != SUPPORTED_VERSION {
             return Err(ReadError::UnsupportedVersion(version));
@@ -361,6 +394,25 @@ mod tests {
         lrcat_fixtures::write_small_catalog(&path).unwrap();
         let catalog = Catalog::open(&path).expect("open");
         assert_eq!(catalog.version(), SUPPORTED_VERSION);
+    }
+
+    #[test]
+    fn invalid_utf8_dbversion_is_a_read_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cat.lrcat");
+        lrcat_fixtures::write_small_catalog(&path).unwrap();
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE Adobe_variablesTable SET value = CAST(x'FFFE' AS TEXT) \
+             WHERE name = 'Adobe_DBVersion'",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        assert!(matches!(
+            Catalog::open(&path),
+            Err(ReadError::InvalidVersion)
+        ));
     }
 
     #[test]

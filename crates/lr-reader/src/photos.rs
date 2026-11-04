@@ -1,7 +1,7 @@
 //! Reading photos (`Adobe_images` joined with `AgLibraryFile`,
 //! `AgLibraryFolder` and `AgLibraryRootFolder`).
 
-use crate::catalog::{Catalog, ReadError};
+use crate::catalog::{value_or_blob, Catalog, ReadError};
 use crate::folders::join_folder_path;
 use crate::xmp::{Unreadable, title_from_blob};
 use model::{Flag, Photo, Rating, Report, SkipCode, Skipped};
@@ -176,15 +176,17 @@ impl Catalog {
                 Ok(Row {
                     image_id: row.get(0)?,
                     master: row.get(1)?,
-                    rating: row.get(2)?,
-                    pick: row.get(12)?,
-                    color_label: text_value(row.get(13)?).filter(|t| !t.is_empty()),
-                    caption: text_value(row.get(14)?).filter(|t| !t.is_empty()),
-                    copyright: text_value(row.get(15)?).filter(|t| !t.is_empty()),
-                    creator: text_value(row.get(16)?).filter(|t| !t.is_empty()),
-                    xmp: row.get(17)?,
-                    file_format: text_value(row.get(3)?),
-                    global_id: text_value(row.get(11)?),
+                    rating: value_or_blob(row.get_ref(2)?),
+                    pick: value_or_blob(row.get_ref(12)?),
+                    color_label: text_value(value_or_blob(row.get_ref(13)?))
+                        .filter(|t| !t.is_empty()),
+                    caption: text_value(value_or_blob(row.get_ref(14)?)).filter(|t| !t.is_empty()),
+                    copyright: text_value(value_or_blob(row.get_ref(15)?))
+                        .filter(|t| !t.is_empty()),
+                    creator: text_value(value_or_blob(row.get_ref(16)?)).filter(|t| !t.is_empty()),
+                    xmp: value_or_blob(row.get_ref(17)?),
+                    file_format: text_value(value_or_blob(row.get_ref(3)?)),
+                    global_id: text_value(value_or_blob(row.get_ref(11)?)),
                     file: match file_id {
                         Some(_) => Some((
                             row.get::<_, Option<String>>(5)?.unwrap_or_default(),
