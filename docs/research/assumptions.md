@@ -24,10 +24,15 @@ because they are load-bearing for the writer and one is the example named in the
 task: the `albums.list` depth limit (`lightcraft-albums.md:52`) and the
 selection gate (`lightcraft-albums.md:16`).
 
-Result: **72 rows** (A01–A72). The task estimated about 59; the difference comes
+Result: **77 rows** (A01–A77). The task estimated about 59; the difference comes
 from splitting claims that share one sentence (for example the two assumed
 column sets of the stack tables) and from including the fact-asserting open
-questions. Every claim still appears only once.
+questions. A second pass after the completeness review added the five
+statements the marker scan had not caught: the `camera`, `fileName` and
+`stacked` smart-collection criteria (`smart-collection-mapping.md:32`, `:33`;
+`lightcraft-albums.md:101`), the cover-image table
+(`lightcraft-albums.md:195`) and the post-creation synonym question
+(`lightcraft-control-port.md:77`). Every claim still appears only once.
 
 ### Evidence classes
 
@@ -52,23 +57,28 @@ worse message**.
 | Priority | Rows | Settled part (fact / corrected / stale / partly) |
 |---|---:|---:|
 | high | 21 | 11 |
-| medium | 35 | 17 |
-| low | 16 | 7 |
-| **Total** | **72** | **35 settled or partly settled, 37 fully open** |
+| medium | 38 | 20 |
+| low | 18 | 8 |
+| **Total** | **77** | **39 settled or partly settled, 38 fully open** |
+
+The settled column counts a row when its evidence cell carries a class,
+including `partly`. Of the 39, **31 are fully settled** (fact, sourced,
+corrected or stale, without the `partly` qualifier) and **8 are partly
+settled**; the remaining **38** are fully open.
 
 Per file (primary location):
 
 | File | Rows |
 |---|---:|
-| `lightcraft-control-port.md` | 8 |
+| `lightcraft-control-port.md` | 9 |
 | `lightcraft-library.md` | 3 |
 | `lightcraft-import.md` | 3 |
 | `lightcraft-develop.md` | 2 |
 | `label-names.md` | 2 |
 | `lrcat-schema-lrc15.md` | 2 |
 | `reconciliation.md` | 9 |
-| `smart-collection-mapping.md` | 19 |
-| `lightcraft-albums.md` | 24 |
+| `smart-collection-mapping.md` | 21 |
+| `lightcraft-albums.md` | 26 |
 
 ## The table
 
@@ -146,6 +156,11 @@ Per file (primary location):
 | A70 | `docs/research/lightcraft-albums.md:280` | Creating a deep keyword path implicitly creates its ancestor levels in the tree. | The writer creates only the full path, not each ancestor. | **fact** — `create_keyword_ops` writes one `SetKeyword` for the full path (`lightcraft:crates/catalog/src/keywords.rs:690-699`); the tree derives ancestor levels from the string (`:258-270`). | wrong data | medium |
 | A71 | `docs/research/lightcraft-albums.md:16` | Photo commands are gated by the UI selection; they fail with `no photos selected` even when `ids` is passed, unless `library.select` ran first. | This is the difference between a working writer and one that fails on the first photo command. | **fact** — the gate is skipped only for `explicit_targets && names_photos` (`lightcraft:crates/engine/src/lib.rs:561-563`); `has_selection` reads only the selection (`lightcraft:crates/engine/src/cmd/mod.rs:108-110`). The writer now sends `library.select` (`crates/lc-writer/src/apply.rs:9`, `:1080`, `:1435`). | wrong data | high |
 | A72 | `docs/research/lightcraft-albums.md:178` | The UI thread is blocked while `library.import` runs, so no frames are drawn. | A blocked UI could trigger the 5 s no-frame rejection for the next request. | **open** — the call chain was read (`lightcraft:crates/ui-egui/src/control.rs:329-333`); not run. L2/L12. | only a worse message | medium |
+| A73 | `docs/research/smart-collection-mapping.md:32` | The `camera` criterion (`==`) may compare Lightroom's camera model rather than make + model, and LightCraft's field content was unread. | A camera rule is not translated today; enabling it on a false assumption would select the wrong photos. | **partly fact** — LightCraft's field is `Meta.camera` (`lightcraft:crates/catalog/src/rules.rs:1014`), built as Exif Make, a space and Model (`lightcraft:crates/engine/src/files.rs:18`, stored at `:20`; field `lightcraft:crates/catalog/src/model.rs:169-170`). What Lightroom compares remains open (C3/L11). | wrong data | medium |
+| A74 | `docs/research/smart-collection-mapping.md:33` | Lightroom's `fileName` value may or may not include the file extension. | A literal `==`/`startsWith`/`endsWith` translation would match nothing or the wrong files if the two sides differ. | **partly fact** — LightCraft matches `Photo.file_name` (`lightcraft:crates/catalog/src/rules.rs:1004`), which carries the extension: `extension()` splits it off at the last dot (`lightcraft:crates/catalog/src/model.rs:455-459`). The Lightroom side is open (C3/L11). | wrong data | medium |
+| A75 | `docs/research/lightcraft-albums.md:101` | The `stacked` bool is the counterpart of Lightroom's "Stacking state" criterion. | A stack rule can be translated only if both sides mean "is a member of a stack". | **partly fact** — `stacked` is true iff `catalog.stack_of(photo)` returns a stack (`lightcraft:crates/catalog/src/rules.rs:974`; `lightcraft:crates/catalog/src/stacks.rs:23`), i.e. LightCraft's own membership. Lightroom's criterion semantics were not read (C3/L11). Separate from A53, which is only the missing list-all-stacks command. | wrong data | medium |
+| A76 | `docs/research/lightcraft-albums.md:195` | `AgLibraryCollectionCoverImage {collection, collectionImage}` exists in Lightroom 6 but is not in the LrC 15 schema document, so its presence there is unverified. | A cover reader would fail if the table is absent; a cover is not in the MVP. | **open** — no source in the reading list documents it for LrC 15; C5 checks the table name. | only a worse message | low |
+| A77 | `docs/research/lightcraft-control-port.md:77` | It was unverified whether a keyword's synonyms can be set after creation (the rows at `keywords.rs:385-546` were not read). | Keyword attributes are in the MVP; a re-sync must be able to add or correct synonyms without recreating the keyword. | **fact** — `keyword.edit` accepts `synonyms?` and keeps omitted attributes (`lightcraft:crates/engine/src/cmd/keywords.rs:386-405`); `info_from` replaces the list only when the parameter is present (`:45-58`); `edit_keyword_ops` applies it (`lightcraft:crates/catalog/src/keywords.rs:735-755`). The writer deliberately reports changed attributes instead of editing (`crates/lc-writer/src/plan.rs:803-811`) and sends synonyms at creation (`:829-839`). | only a worse message | low |
 
 ## Live-check checklist
 
@@ -186,9 +201,9 @@ and column names only**. No value, path, name or keyword may leave the machine.
 |---|---|---|---|
 | C1 | `SELECT creationId, COUNT(*) FROM AgLibraryCollection GROUP BY 1;` plus `SELECT COUNT(*) FROM AgLibraryCollection WHERE systemOnly<>0;` plus duplicate names per parent: `SELECT COUNT(*) FROM (SELECT parent,name,COUNT(*) c FROM AgLibraryCollection GROUP BY 1,2 HAVING c>1);` | rows of `(creationId, count)`; one count; one count | which `creationId` strings exist and their counts; `systemOnly` count; duplicate-name groups (A56, A57, A60, A66) |
 | C2 | `SELECT SUM(lc_name = lower(name)), COUNT(*) FROM AgLibraryKeyword;` and `SELECT COUNT(*) FROM (SELECT keyword FROM AgLibraryKeywordSynonym GROUP BY keyword HAVING COUNT(*)>1);` | two counts; one count | equality count, total keywords, keywords with >1 synonym (A19, A20) |
-| C3 | Smart-collection inventory: `SELECT COUNT(*) FROM AgLibraryCollectionContent WHERE owningModule='ag.library.smart_collection';`; then a read-only script over `content` that prints a histogram of `criteria`, `operation`, `combine` and `value_units` **names** (reuse the repo parser or a small script; print names and counts only) | `(name, count)` rows | criterion names, operation names, combine names, unit names and counts (A30–A47) |
+| C3 | Smart-collection inventory: `SELECT COUNT(*) FROM AgLibraryCollectionContent WHERE owningModule='ag.library.smart_collection';`; then a read-only script over `content` that prints a histogram of `criteria`, `operation`, `combine` and `value_units` **names** (reuse the repo parser or a small script; print names and counts only) | `(name, count)` rows | criterion names, operation names, combine names, unit names and counts (A30–A47, A73–A75) |
 | C4 | `SELECT typeof(positionInCollection), COUNT(*) FROM AgLibraryCollectionImage GROUP BY 1;` plus `SELECT COUNT(*) FROM AgLibraryCollectionImage WHERE positionInCollection IS NULL OR positionInCollection='';` plus `SELECT COUNT(*) FROM AgLibraryCollectionImage WHERE positionInCollection GLOB '*[^0-9.]*';` | `(type, count)` rows; one count; one count | types present; empty count; non-numeric count (A58, A59) |
-| C5 | `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AgLibraryCollectionCoverImage';` | 0 or 1 | table present (not triaged here; low) |
+| C5 | `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AgLibraryCollectionCoverImage';` | 0 or 1 | table present (A76) |
 | C6 | `SELECT COUNT(*) FROM AgLibraryCollection c JOIN AgLibraryCollectionImage i ON i.collection=c.id_local WHERE c.creationId LIKE '%smart%';` and the number of smart collections | two counts | whether smart collections have member rows (A61) |
 | C7 | `SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%Stack%';`; `PRAGMA table_info(AgLibraryFolderStack);`; `PRAGMA table_info(AgLibraryFolderStackImage);`; `SELECT COUNT(*) FROM AgLibraryFolderStackImage WHERE position=1;` and `SELECT COUNT(*) FROM AgLibraryFolderStack;` | table names; column names; two counts | actual table/column names; whether each stack has exactly one position-1 row (A62–A65) |
 
@@ -198,7 +213,8 @@ and column names only**. No value, path, name or keyword may leave the machine.
    machine that has a display; the Pi has none. They are a one-off owner task,
    not an automated test. Decide who runs them (see `QUESTIONS.md`).
 2. **Do not enable any further smart-collection translation** (`pick`,
-   `labelColor`, `keywords empty`, dates) before L11/C3 answer A32–A47. This is
+   `labelColor`, `keywords empty`, dates) before L11/C3 answer A32–A47 and
+   A73–A75. This is
    already the code's strict-allowlist behaviour.
 3. **Treat `albums.list` depth 64 as a report condition.** A collection set
    nested deeper than 64 levels is invisible to the reader; recommend a
@@ -211,7 +227,7 @@ and column names only**. No value, path, name or keyword may leave the machine.
 
 ## Open questions
 
-1. Which smart-collection value vocabularies (A31–A47) does the owner's real
+1. Which smart-collection value vocabularies (A31–A47, A73–A75) does the owner's real
    catalog actually use? Only a structure-only histogram can answer it.
 2. Is the Quick Collection in Lightroom Classic 15 a `systemOnly` row with a
    fixed `creationId`, and what is its name? (A66)
@@ -225,10 +241,12 @@ and column names only**. No value, path, name or keyword may leave the machine.
 
 ## Recommendation
 
-Treat the 27 settled rows as facts and fix the two stale notes; they no longer
-need live checks. Before the next smart-collection or stack milestone, run the
-catalog structure checks C1–C7 on a copy (they are cheap and answer the highest
-number of high-priority rows). Run the app checks L1–L12 once on a throw-away
+Treat the **31 fully settled rows** (fact, sourced, corrected or stale, without
+the `partly` qualifier) as facts and fix the two stale notes; they no longer
+need live checks. Only the **8 partly settled rows** keep the check named in
+their evidence cell for the open part. Before the next smart-collection or
+stack milestone, run the catalog structure checks C1–C7 on a copy (they are
+cheap and answer the highest number of high-priority rows). Run the app checks L1–L12 once on a throw-away
 library, record only shapes and counts, and close the rows they settle. Do not
 add a public source or a "fact" mark for any row that still lacks a citation:
 the two corrections (A26, A51) show that the intuition in the notes was not
