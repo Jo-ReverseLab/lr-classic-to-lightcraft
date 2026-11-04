@@ -1,6 +1,6 @@
 //! Reading folders (`AgLibraryFolder` joined with `AgLibraryRootFolder`).
 
-use crate::catalog::{Catalog, ReadError};
+use crate::catalog::{Catalog, ReadError, TextCell, text_cell};
 use model::{Folder, Report, SkipCode, Skipped};
 
 impl Catalog {
@@ -29,9 +29,9 @@ impl Catalog {
                 Ok(FolderRow {
                     folder_id: row.get(0)?,
                     root_id: row.get(1)?,
-                    rel: row.get(2)?,
+                    rel: text_cell(row.get_ref(2)?),
                     root_row: row.get::<_, Option<i64>>(3)?.is_some(),
-                    root_path: row.get(4)?,
+                    root_path: text_cell(row.get_ref(4)?),
                 })
             })
             .map_err(ReadError::Query)?;
@@ -52,9 +52,9 @@ impl Catalog {
 struct FolderRow {
     folder_id: i64,
     root_id: Option<i64>,
-    rel: Option<String>,
+    rel: TextCell,
     root_row: bool,
-    root_path: Option<String>,
+    root_path: TextCell,
 }
 
 /// Turns a joined row into a folder, or returns the reason it is skipped.
@@ -73,16 +73,38 @@ fn folder_from_row(row: FolderRow) -> Result<Folder, Skipped> {
             ),
         });
     }
-    let root = row.root_path.ok_or_else(|| {
-        Skipped::new(
-            SkipCode::RootFolderNoPath,
-            format!("folder {id}: root folder has no path"),
-        )
-    })?;
-    Ok(Folder::new(join_folder_path(
-        &root,
-        row.rel.as_deref().unwrap_or(""),
-    )))
+    let root = match row.root_path {
+        TextCell::Text(path) => path,
+        TextCell::Null => {
+            return Err(Skipped::new(
+                SkipCode::RootFolderNoPath,
+                format!("folder {id}: root folder has no path"),
+            ));
+        }
+        cell => {
+            return Err(Skipped::new(
+                SkipCode::PathNotUtf8,
+                format!(
+                    "folder {id}: root folder path {}",
+                    cell.problem().unwrap_or("is not usable text")
+                ),
+            ));
+        }
+    };
+    let rel = match row.rel {
+        TextCell::Text(path) => path,
+        TextCell::Null => String::new(),
+        cell => {
+            return Err(Skipped::new(
+                SkipCode::PathNotUtf8,
+                format!(
+                    "folder {id}: path from root {}",
+                    cell.problem().unwrap_or("is not usable text")
+                ),
+            ));
+        }
+    };
+    Ok(Folder::new(join_folder_path(&root, &rel)))
 }
 
 /// Joins a root folder path and a path relative to it.
@@ -158,9 +180,9 @@ mod tests {
         FolderRow {
             folder_id: 3,
             root_id: Some(1),
-            rel: Some("a/".into()),
+            rel: TextCell::Text("a/".into()),
             root_row: true,
-            root_path: Some("/r/".into()),
+            root_path: TextCell::Text("/r/".into()),
         }
     }
 
@@ -197,10 +219,92 @@ mod tests {
     #[test]
     fn root_without_path_is_skipped() {
         let mut r = row();
-        r.root_path = None;
+        r.root_path = TextCell::Null;
         let skip = folder_from_row(r).unwrap_err();
         assert_eq!(skip.code, SkipCode::RootFolderNoPath);
         let reason = skip.reason;
         assert!(reason.contains("root") && reason.contains('3'));
+    }
+
+    #[test]
+    fn invalid_root_path_is_skipped() {
+        let mut r = row();
+        r.root_path = TextCell::InvalidUtf8;
+        let skip = folder_from_row(r).unwrap_err();
+        assert_eq!(skip.code, SkipCode::PathNotUtf8);
+        assert_eq!(skip.reason, "folder 3: root folder path is not valid UTF-8");
+    }
+
+    #[test]
+    fn invalid_relative_path_is_skipped() {
+        let mut r = row();
+        r.rel = TextCell::InvalidUtf8;
+        let skip = folder_from_row(r).unwrap_err();
+        assert_eq!(skip.code, SkipCode::PathNotUtf8);
+        assert_eq!(skip.reason, "folder 3: path from root is not valid UTF-8");
+    }
+
+    #[test]
+    fn non_text_path_is_skipped_without_naming_a_path() {
+        let mut r = row();
+        r.rel = TextCell::NotText;
+        let skip = folder_from_row(r).unwrap_err();
+        assert_eq!(skip.code, SkipCode::PathNotUtf8);
+        assert_eq!(skip.reason, "folder 3: path from root is not text");
+    }
+
+    /// Writes the small fixture and stores a raw value in one column.
+    fn catalog_with_sql(sql: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("folders.lrcat");
+        lrcat_fixtures::write_small_catalog(&path).expect("generate fixture");
+        let conn = rusqlite::Connection::open(&path).expect("open for setup");
+        conn.execute_batch(sql).expect("setup");
+        drop(conn);
+        (dir, path)
+    }
+
+    #[test]
+    fn invalid_utf8_text_folder_path_is_skipped() {
+        let (_dir, path) = catalog_with_sql(
+            "UPDATE AgLibraryFolder SET pathFromRoot = CAST(x'FFFE' AS TEXT) WHERE id_local = 2;",
+        );
+        let catalog = Catalog::open(&path).expect("open catalog");
+        let mut report = Report::new();
+        let folders = catalog.folders(&mut report).expect("read folders");
+        let skipped = report
+            .skipped_items()
+            .iter()
+            .find(|s| s.reason.starts_with("folder 2: "))
+            .expect("folder 2 is skipped");
+        assert_eq!(skipped.code, SkipCode::PathNotUtf8);
+        assert_eq!(
+            skipped.reason,
+            "folder 2: path from root is not valid UTF-8"
+        );
+        assert_eq!(folders.len() + report.skipped_count(), report.read_count());
+    }
+
+    #[test]
+    fn invalid_utf8_text_root_folder_path_is_skipped() {
+        let (_dir, path) = catalog_with_sql(
+            "UPDATE AgLibraryRootFolder SET absolutePath = CAST(x'FFFE' AS TEXT) \
+             WHERE id_local = 2;",
+        );
+        let catalog = Catalog::open(&path).expect("open catalog");
+        let mut report = Report::new();
+        let folders = catalog.folders(&mut report).expect("read folders");
+        let skipped = report
+            .skipped_items()
+            .iter()
+            .find(|s| s.reason.starts_with("folder 4: "))
+            .expect("folder 4 is skipped");
+        assert_eq!(skipped.code, SkipCode::PathNotUtf8);
+        assert_eq!(
+            skipped.reason,
+            "folder 4: root folder path is not valid UTF-8"
+        );
+        assert_eq!(report.skipped_count(), 3);
+        assert_eq!(folders.len() + report.skipped_count(), report.read_count());
     }
 }

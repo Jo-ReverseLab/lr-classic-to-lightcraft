@@ -4,7 +4,7 @@
 //!
 //! Skip reasons name ids only, never keyword names or synonym texts.
 
-use crate::catalog::{value_or_blob, Catalog, ReadError};
+use crate::catalog::{Catalog, ReadError, value_or_blob};
 use model::{Keyword, Photo, Report, SkipCode, Skipped};
 use rusqlite::OptionalExtension;
 use rusqlite::types::Value;
@@ -1135,10 +1135,7 @@ mod tests {
             .expect("keyword 2 is skipped");
         assert_eq!(skipped.code, SkipCode::NameInvalid);
         assert_eq!(skipped.reason, "keyword 2: name is not valid UTF-8");
-        assert!(data
-            .keywords
-            .iter()
-            .all(|k| k.lightroom_id != Some(2)));
+        assert!(data.keywords.iter().all(|k| k.lightroom_id != Some(2)));
     }
 
     #[test]

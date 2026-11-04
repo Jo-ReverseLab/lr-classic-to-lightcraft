@@ -69,6 +69,48 @@ pub(crate) fn value_or_blob(value: ValueRef<'_>) -> Value {
     }
 }
 
+/// A catalog cell that the reader needs as text (a path, a file name, a
+/// schema name), classified without letting `rusqlite` abort on bad bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TextCell {
+    /// SQL NULL.
+    Null,
+    /// Text, or a blob that holds valid UTF-8.
+    Text(String),
+    /// Bytes that are not valid UTF-8.
+    InvalidUtf8,
+    /// A value of another type (integer or real).
+    NotText,
+}
+
+impl TextCell {
+    /// Why the cell cannot be used as text, or `None` when it can.
+    pub(crate) fn problem(&self) -> Option<&'static str> {
+        match self {
+            TextCell::Null | TextCell::Text(_) => None,
+            TextCell::InvalidUtf8 => Some("is not valid UTF-8"),
+            TextCell::NotText => Some("is not text"),
+        }
+    }
+}
+
+/// Reads a cell as text without `rusqlite`'s `String` conversion, which
+/// calls `expect("invalid UTF-8")` and aborts the run on such a value.
+///
+/// The callers decide what an unusable cell means for their row; nothing is
+/// replaced and no bytes are dropped silently.
+pub(crate) fn text_cell(value: ValueRef<'_>) -> TextCell {
+    let bytes = match value {
+        ValueRef::Null => return TextCell::Null,
+        ValueRef::Text(bytes) | ValueRef::Blob(bytes) => bytes,
+        ValueRef::Integer(_) | ValueRef::Real(_) => return TextCell::NotText,
+    };
+    match std::str::from_utf8(bytes) {
+        Ok(text) => TextCell::Text(text.to_owned()),
+        Err(_) => TextCell::InvalidUtf8,
+    }
+}
+
 fn missing_schema_message(table: &str, column: Option<&str>) -> String {
     match column {
         Some(c) => format!("catalog table {table} has no column {c}; the catalog may be damaged"),
@@ -169,9 +211,11 @@ impl Catalog {
                         ValueRef::Null => None,
                         ValueRef::Integer(i) => Some(Ok(i.to_string())),
                         ValueRef::Real(r) => Some(Ok(r.to_string())),
-                        ValueRef::Text(bytes) => {
-                            Some(std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| ()))
-                        }
+                        ValueRef::Text(bytes) => Some(
+                            std::str::from_utf8(bytes)
+                                .map(str::to_owned)
+                                .map_err(|_| ()),
+                        ),
                         ValueRef::Blob(bytes) => {
                             Some(String::from_utf8(bytes.to_vec()).map_err(|_| ()))
                         }
@@ -214,12 +258,19 @@ fn check_schema(conn: &Connection) -> Result<(), ReadError> {
                 column: None,
             });
         }
+        // A hostile catalog can store a column name that is not valid
+        // UTF-8. Such a name cannot equal any required ASCII name, so it
+        // counts as absent; reading it must not abort the run.
         let present = columns
-            .query_map([table], |row| row.get::<_, String>(0))
+            .query_map([table], |row| Ok(text_cell(row.get_ref(0)?)))
             .map_err(ReadError::Open)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(ReadError::Open)?;
-        if let Some(missing) = required.iter().find(|c| !present.iter().any(|p| p == *c)) {
+        if let Some(missing) = required.iter().find(|c| {
+            !present
+                .iter()
+                .any(|p| matches!(p, TextCell::Text(name) if name == *c))
+        }) {
             return Err(ReadError::MissingSchema {
                 table: table.to_owned(),
                 column: Some((*missing).to_owned()),
@@ -563,5 +614,49 @@ mod tests {
             Catalog::open(&path),
             Err(ReadError::MissingVersion)
         ));
+    }
+
+    #[test]
+    fn text_cell_classifies_without_converting_lossily() {
+        assert_eq!(text_cell(ValueRef::Null), TextCell::Null);
+        assert_eq!(
+            text_cell(ValueRef::Text(b"ok")),
+            TextCell::Text("ok".into())
+        );
+        assert_eq!(text_cell(ValueRef::Text(&[0xFF])), TextCell::InvalidUtf8);
+        assert_eq!(
+            text_cell(ValueRef::Blob(b"ok")),
+            TextCell::Text("ok".into())
+        );
+        assert_eq!(text_cell(ValueRef::Blob(&[0xFF])), TextCell::InvalidUtf8);
+        assert_eq!(text_cell(ValueRef::Integer(1)), TextCell::NotText);
+        assert_eq!(text_cell(ValueRef::Real(1.0)), TextCell::NotText);
+    }
+
+    /// A schema name is catalog data too: a hostile catalog can store bytes
+    /// that are not valid UTF-8 in `sqlite_master`. Such a name must count as
+    /// absent instead of aborting the run through `rusqlite`'s `String`.
+    #[test]
+    fn invalid_utf8_column_name_counts_as_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad-schema.lrcat");
+        write_minimal_catalog(&path);
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch("PRAGMA writable_schema = ON;").unwrap();
+        c.execute(
+            "UPDATE sqlite_master SET sql = CAST(?1 AS TEXT) \
+             WHERE type = 'table' AND name = 'AgLibraryFolder'",
+            [b"CREATE TABLE AgLibraryFolder (id_local, rootFolder, pathFromRoot\xFF)".to_vec()],
+        )
+        .unwrap();
+        c.execute_batch("PRAGMA writable_schema = OFF;").unwrap();
+        drop(c);
+        match Catalog::open(&path) {
+            Err(ReadError::MissingSchema { table, column }) => {
+                assert_eq!(table, "AgLibraryFolder");
+                assert_eq!(column.as_deref(), Some("pathFromRoot"));
+            }
+            other => panic!("expected MissingSchema, got {other:?}"),
+        }
     }
 }

@@ -1,7 +1,7 @@
 //! Reading photos (`Adobe_images` joined with `AgLibraryFile`,
 //! `AgLibraryFolder` and `AgLibraryRootFolder`).
 
-use crate::catalog::{value_or_blob, Catalog, ReadError};
+use crate::catalog::{Catalog, ReadError, TextCell, text_cell, value_or_blob};
 use crate::folders::join_folder_path;
 use crate::xmp::{Unreadable, title_from_blob};
 use model::{Flag, Photo, Rating, Report, SkipCode, Skipped};
@@ -33,10 +33,10 @@ struct Row {
     /// `Adobe_AdditionalMetadata.xmp` of the row with the smallest
     /// `id_local` for this image, as stored.
     xmp: Value,
-    file: Option<(String, String)>,
-    folder: Option<String>,
+    file: Option<(TextCell, TextCell)>,
+    folder: Option<TextCell>,
     root_row: bool,
-    root_path: Option<String>,
+    root_path: TextCell,
 }
 
 /// Photos read from a catalog, plus facts about them that the photos
@@ -188,18 +188,15 @@ impl Catalog {
                     file_format: text_value(value_or_blob(row.get_ref(3)?)),
                     global_id: text_value(value_or_blob(row.get_ref(11)?)),
                     file: match file_id {
-                        Some(_) => Some((
-                            row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                            row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                        )),
+                        Some(_) => Some((text_cell(row.get_ref(5)?), text_cell(row.get_ref(6)?))),
                         None => None,
                     },
                     folder: match folder_id {
-                        Some(_) => Some(row.get::<_, Option<String>>(8)?.unwrap_or_default()),
+                        Some(_) => Some(text_cell(row.get_ref(8)?)),
                         None => None,
                     },
                     root_row: root_id.is_some(),
-                    root_path: row.get(10)?,
+                    root_path: text_cell(row.get_ref(10)?),
                 })
             })
             .map_err(ReadError::Query)?;
@@ -284,7 +281,12 @@ fn photo_from_row(
             ),
         ));
     }
-    let ext = row.file.as_ref().map(|(_, ext)| ext.as_str());
+    // An unusable extension is not a video extension; the path check below
+    // skips the row for it.
+    let ext = row.file.as_ref().and_then(|(_, ext)| match ext {
+        TextCell::Text(name) => Some(name.as_str()),
+        _ => None,
+    });
     if is_video(row.file_format.as_deref(), ext) {
         return Err(skip(
             SkipCode::Video,
@@ -312,24 +314,42 @@ fn photo_from_row(
             format!("photo {id}: file row not found in catalog"),
         )
     })?;
-    let rel = row.folder.ok_or_else(|| {
+    let base = match base {
+        TextCell::Text(name) => name,
+        TextCell::Null => String::new(),
+        cell => return Err(unreadable_path(id, "file name", &cell)),
+    };
+    let ext = match ext {
+        TextCell::Text(name) => name,
+        TextCell::Null => String::new(),
+        cell => return Err(unreadable_path(id, "file extension", &cell)),
+    };
+    let rel = match row.folder.ok_or_else(|| {
         skip(
             SkipCode::FolderRowNotFound,
             format!("photo {id}: folder row not found in catalog"),
         )
-    })?;
+    })? {
+        TextCell::Text(path) => path,
+        TextCell::Null => String::new(),
+        cell => return Err(unreadable_path(id, "folder path", &cell)),
+    };
     if !row.root_row {
         return Err(skip(
             SkipCode::RootFolderNotFound,
             format!("photo {id}: root folder row not found in catalog"),
         ));
     }
-    let root = row.root_path.ok_or_else(|| {
-        skip(
-            SkipCode::RootFolderNoPath,
-            format!("photo {id}: root folder has no path"),
-        )
-    })?;
+    let root = match row.root_path {
+        TextCell::Text(path) => path,
+        TextCell::Null => {
+            return Err(skip(
+                SkipCode::RootFolderNoPath,
+                format!("photo {id}: root folder has no path"),
+            ));
+        }
+        cell => return Err(unreadable_path(id, "root folder path", &cell)),
+    };
     let rating = rating_from_value(&row.rating).ok_or_else(|| {
         skip(
             SkipCode::InvalidRating,
@@ -363,6 +383,18 @@ fn photo_from_row(
 
 /// Skip reason of a video, after the `photo {id}: ` prefix.
 pub const VIDEO_SKIP_REASON: &str = "video files are not supported by LightCraft";
+
+/// The skip entry of a photo whose path component is unusable. The reason
+/// names the photo id and the component, never the stored bytes.
+fn unreadable_path(id: i64, component: &str, cell: &TextCell) -> Skipped {
+    Skipped::new(
+        SkipCode::PathNotUtf8,
+        format!(
+            "photo {id}: {component} {}",
+            cell.problem().unwrap_or("is not usable text")
+        ),
+    )
+}
 
 /// File extensions (lower case, without dot) that mark a video.
 const VIDEO_EXTENSIONS: [&str; 11] = [
@@ -438,6 +470,10 @@ fn join_file_path(folder: &str, name: &str) -> String {
 mod tests {
     use super::*;
 
+    fn text(s: &str) -> TextCell {
+        TextCell::Text(s.to_owned())
+    }
+
     fn row() -> Row {
         Row {
             image_id: 1,
@@ -451,10 +487,10 @@ mod tests {
             copyright: None,
             creator: None,
             xmp: Value::Null,
-            file: Some(("IMG".into(), "jpg".into())),
-            folder: Some("a/".into()),
+            file: Some((text("IMG"), text("jpg"))),
+            folder: Some(text("a/")),
             root_row: true,
-            root_path: Some("/r/".into()),
+            root_path: text("/r/"),
         }
     }
 
@@ -702,7 +738,7 @@ mod tests {
         r.root_row = false;
         assert_eq!(code(r), SkipCode::RootFolderNotFound);
         let mut r = row();
-        r.root_path = None;
+        r.root_path = TextCell::Null;
         assert_eq!(code(r), SkipCode::RootFolderNoPath);
         let mut r = row();
         r.rating = Value::Integer(9);
@@ -712,7 +748,7 @@ mod tests {
     #[test]
     fn root_folder_without_path_is_skipped() {
         let mut r = row();
-        r.root_path = None;
+        r.root_path = TextCell::Null;
         assert!(
             photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
                 .unwrap_err()
@@ -766,7 +802,7 @@ mod tests {
     fn video_row_is_skipped_with_video_reason() {
         let mut r = row();
         r.image_id = 4;
-        r.file = Some(("clip".into(), "MOV".into()));
+        r.file = Some((text("clip"), text("MOV")));
         assert_eq!(
             photo_from_row(r, &mut HashSet::new(), &mut HashSet::new())
                 .unwrap_err()
@@ -803,7 +839,7 @@ mod tests {
     #[test]
     fn base_name_with_video_suffix_is_not_a_video() {
         let mut r = row();
-        r.file = Some(("clip.mp4".into(), "jpg".into()));
+        r.file = Some((text("clip.mp4"), text("jpg")));
         assert!(photo_from_row(r, &mut HashSet::new(), &mut HashSet::new()).is_ok());
     }
 
@@ -883,5 +919,155 @@ mod tests {
         assert_eq!(photo_with(&catalog, e::NULL_FIRST_ID).title, None);
         // A broken blob in the smallest row wins over a later valid title.
         assert_eq!(photo_with(&catalog, e::BROKEN_FIRST_ID).title, None);
+    }
+
+    #[test]
+    fn invalid_utf8_or_non_text_path_components_are_skipped() {
+        let skip =
+            |file: Option<(TextCell, TextCell)>, folder: Option<TextCell>, root_path: TextCell| {
+                let mut r = row();
+                r.file = file;
+                r.folder = folder;
+                r.root_path = root_path;
+                photo_from_row(r, &mut HashSet::new(), &mut HashSet::new()).unwrap_err()
+            };
+        let base = skip(
+            Some((TextCell::InvalidUtf8, text("jpg"))),
+            Some(text("a/")),
+            text("/r/"),
+        );
+        assert_eq!(base.code, SkipCode::PathNotUtf8);
+        assert_eq!(base.reason, "photo 1: file name is not valid UTF-8");
+        let ext = skip(
+            Some((text("IMG"), TextCell::NotText)),
+            Some(text("a/")),
+            text("/r/"),
+        );
+        assert_eq!(ext.code, SkipCode::PathNotUtf8);
+        assert_eq!(ext.reason, "photo 1: file extension is not text");
+        let folder = skip(
+            Some((text("IMG"), text("jpg"))),
+            Some(TextCell::InvalidUtf8),
+            text("/r/"),
+        );
+        assert_eq!(folder.reason, "photo 1: folder path is not valid UTF-8");
+        let root = skip(
+            Some((text("IMG"), text("jpg"))),
+            Some(text("a/")),
+            TextCell::NotText,
+        );
+        assert_eq!(root.reason, "photo 1: root folder path is not text");
+    }
+
+    /// Writes the small fixture and stores a raw value in one column.
+    fn catalog_with_sql(sql: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("photos.lrcat");
+        lrcat_fixtures::write_small_catalog(&path).expect("generate fixture");
+        let conn = rusqlite::Connection::open(&path).expect("open for setup");
+        conn.execute_batch(sql).expect("setup");
+        drop(conn);
+        (dir, path)
+    }
+
+    fn read_photos(path: &std::path::Path) -> (PhotoData, Report) {
+        let catalog = Catalog::open(path).expect("open catalog");
+        let mut report = Report::new();
+        let data = catalog.photo_data(&mut report).expect("read photos");
+        (data, report)
+    }
+
+    #[test]
+    fn invalid_utf8_text_photo_file_name_is_skipped() {
+        let (_dir, path) = catalog_with_sql(
+            "UPDATE AgLibraryFile SET baseName = CAST(x'FFFE' AS TEXT) WHERE id_local = 1;",
+        );
+        let (data, report) = read_photos(&path);
+        let skipped = report
+            .skipped_items()
+            .iter()
+            .find(|s| s.reason.starts_with("photo 1: "))
+            .expect("photo 1 is skipped");
+        assert_eq!(skipped.code, SkipCode::PathNotUtf8);
+        assert_eq!(skipped.reason, "photo 1: file name is not valid UTF-8");
+        assert!(data.photos.iter().all(|p| p.lightroom_id != 1));
+        assert_eq!(
+            report.read_count(),
+            data.photos.len() + report.skipped_count()
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_text_photo_extension_is_skipped() {
+        let (_dir, path) = catalog_with_sql(
+            "UPDATE AgLibraryFile SET extension = CAST(x'FFFE' AS TEXT) WHERE id_local = 1;",
+        );
+        let (data, report) = read_photos(&path);
+        let skipped = report
+            .skipped_items()
+            .iter()
+            .find(|s| s.reason.starts_with("photo 1: "))
+            .expect("photo 1 is skipped");
+        assert_eq!(skipped.code, SkipCode::PathNotUtf8);
+        assert_eq!(skipped.reason, "photo 1: file extension is not valid UTF-8");
+        assert!(
+            data.photos.iter().all(|p| p.lightroom_id != 1),
+            "photo 1 is not converted"
+        );
+        assert_eq!(
+            report.read_count(),
+            data.photos.len() + report.skipped_count()
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_text_photo_folder_path_is_skipped() {
+        let (_dir, path) = catalog_with_sql(
+            "UPDATE AgLibraryFolder SET pathFromRoot = CAST(x'FFFE' AS TEXT) WHERE id_local = 2;",
+        );
+        let (data, report) = read_photos(&path);
+        let skipped: Vec<_> = report
+            .skipped_items()
+            .iter()
+            .filter(|s| s.code == SkipCode::PathNotUtf8)
+            .collect();
+        assert_eq!(skipped.len(), 3);
+        assert!(
+            skipped
+                .iter()
+                .any(|s| s.reason == "photo 1: folder path is not valid UTF-8")
+        );
+        for id in [1, 8, 14] {
+            assert!(data.photos.iter().all(|p| p.lightroom_id != id));
+        }
+        assert_eq!(
+            report.read_count(),
+            data.photos.len() + report.skipped_count()
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_text_photo_root_path_is_skipped() {
+        let (_dir, path) = catalog_with_sql(
+            "UPDATE AgLibraryRootFolder SET absolutePath = CAST(x'FFFE' AS TEXT) \
+             WHERE id_local = 1;",
+        );
+        let (data, report) = read_photos(&path);
+        let skipped: Vec<_> = report
+            .skipped_items()
+            .iter()
+            .filter(|s| s.code == SkipCode::PathNotUtf8)
+            .collect();
+        assert!(!skipped.is_empty());
+        assert!(
+            skipped
+                .iter()
+                .any(|s| s.reason == "photo 1: root folder path is not valid UTF-8")
+        );
+        assert!(data.photos.iter().all(|p| p.lightroom_id != 1));
+        assert_eq!(
+            report.read_count(),
+            data.photos.len() + report.skipped_count()
+        );
     }
 }

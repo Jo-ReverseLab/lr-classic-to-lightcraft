@@ -10,7 +10,7 @@
 //! Both tables are optional: without them the catalog has no stacks.
 //! Reasons name ids only.
 
-use crate::catalog::{Catalog, ReadError};
+use crate::catalog::{Catalog, ReadError, TextCell, text_cell};
 use crate::collections::{as_id, is_nonzero};
 use model::{Photo, Report, SkipCode, Skipped, Stack};
 use rusqlite::types::ValueRef;
@@ -72,12 +72,18 @@ impl Catalog {
             .conn
             .prepare("SELECT name FROM pragma_table_info(?1)")
             .map_err(ReadError::Query)?;
+        // A hostile catalog can store a schema name that is not valid UTF-8.
+        // Such a name matches no required ASCII name and counts as absent.
         let present = stmt
-            .query_map([table], |row| row.get::<_, String>(0))
+            .query_map([table], |row| Ok(text_cell(row.get_ref(0)?)))
             .map_err(ReadError::Query)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(ReadError::Query)?;
-        Ok(columns.iter().all(|c| present.iter().any(|p| p == c)))
+        Ok(columns.iter().all(|c| {
+            present
+                .iter()
+                .any(|p| matches!(p, TextCell::Text(name) if name == c))
+        }))
     }
 
     /// `id_local -> collapsed` of every stack row.

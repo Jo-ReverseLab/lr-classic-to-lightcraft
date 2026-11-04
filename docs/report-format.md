@@ -362,7 +362,11 @@ Reader — keywords, assignments, synonyms: `name_empty`, `name_has_bar`,
 `assignment_photo_skipped`, `assignment_keyword_skipped`, `keyword_skipped`,
 `keyword_unknown`.
 
-Writer: `keyword_changed`, `path_not_utf8`, `no_global_id`,
+Reader and writer — paths: `path_not_utf8` (a catalog path or file name
+that is not valid UTF-8 and is skipped by the reader, or a model path the
+writer cannot send as UTF-8).
+
+Writer: `keyword_changed`, `no_global_id`,
 `no_lightcraft_id`, `ambiguous`, `parent_not_created`, `parent_failed`,
 `no_id_returned`, `applied_not_saved`, `import_failed`, `rejected`.
 
