@@ -341,7 +341,19 @@ const TOP_LEVEL_KEYS: &[&str] = &[
     "keyword_synonyms",
     "skipped_by_code",
     "ratings",
+    "develop",
     "writer",
+];
+
+/// The top-level `develop` section: counts and unmapped field names only.
+const DEVELOP_KEYS: &[&str] = &[
+    "photos",
+    "planned",
+    "written",
+    "unmapped",
+    "unmapped_count",
+    "not_applied",
+    "overwritten",
 ];
 
 #[test]
@@ -428,6 +440,7 @@ fn report_keys_match_the_documented_schema() {
     assert_keys(&v["photos"], "photos", PHOTO_AREA_KEYS);
     assert_keys(&v["photos"]["flags"], "photos.flags", FLAG_KEYS);
     assert_keys(&v["photos"]["labels"], "photos.labels", LABEL_KEYS);
+    assert_keys(&v["develop"], "develop", DEVELOP_KEYS);
 
     // The writer section of a dry run is the planned section.
     assert_keys(&v["writer"], "writer", PLANNED_SECTION_KEYS);
