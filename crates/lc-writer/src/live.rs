@@ -1,9 +1,15 @@
 //! Reads the current state of a LightCraft library, read-only.
 //!
 //! Only `catalog.query`, `photo.inspect`, `albums.list` and `keyword.list`
-//! are sent. Photos the mapping file does not know are counted, never
-//! stored. An empty text becomes `None`, as the mapping file never stores
-//! `""`. Error texts never contain a value from a reply.
+//! are sent. The photo inventory comes from two queries, each read page by
+//! page: `catalog.query {filter: {}}` for the library and
+//! `catalog.query {filter: {deleted: true}}` for photos in the trash. Their
+//! LightCraft ids are merged and deduplicated before `photo.inspect`, so
+//! every mapped photo LightCraft lists, deleted or not, is inspected once.
+//! Photos the mapping file does not know are counted over the union of both
+//! queries, each id once, and never stored. An empty text becomes `None`, as
+//! the mapping file never stores `""`. Error texts never contain a value from
+//! a reply.
 
 use crate::albums::parse_album_list;
 use crate::apply::{QUERY_PAGE, id_text, parse_keyword_list, parse_query_page, same_id};
@@ -54,11 +60,13 @@ pub struct LiveAlbum {
 /// to reconcile, so a partial picture is never acted on.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LiveState {
-    /// Mapped photos LightCraft still has, by global id.
+    /// Mapped photos LightCraft lists, by global id. Photos in the trash are
+    /// present, with their live values.
     pub photos: BTreeMap<String, LivePhoto>,
-    /// Mapped photos LightCraft no longer lists.
+    /// Mapped photos that neither photo query lists.
     pub missing_photos: BTreeSet<String>,
-    /// Photos LightCraft lists that the mapping file does not know.
+    /// Photos either photo query lists that the mapping file does not know,
+    /// each id counted once.
     pub foreign_photos: usize,
     /// Mapped collections still present, by Lightroom collection id.
     pub albums: BTreeMap<i64, LiveAlbum>,
@@ -77,27 +85,8 @@ pub fn read_live(client: &mut ControlClient, state: &State) -> Result<LiveState,
         .collect();
 
     let mut live = LiveState::default();
-    let mut present: Vec<(String, Value, LivePhoto)> = Vec::new();
-    let mut offset = 0;
-    loop {
-        let value = read(
-            client,
-            "catalog.query",
-            json!({"filter": {}, "offset": offset, "limit": QUERY_PAGE}),
-        )?;
-        let (total, items) = parse_summary_page(&value)?;
-        let count = items.len();
-        for (id, photo) in items {
-            match id_text(&id).and_then(|t| by_id.get(&t)) {
-                Some(gid) => present.push((gid.clone(), id, photo)),
-                None => live.foreign_photos += 1,
-            }
-        }
-        offset += count;
-        if count == 0 || count < QUERY_PAGE || offset >= total {
-            break;
-        }
-    }
+    let (present, foreign) = read_photo_streams(client, &by_id)?;
+    live.foreign_photos = foreign;
 
     for (gid, id, mut photo) in present {
         let value = read(client, "photo.inspect", json!({"id": id}))?;
@@ -138,6 +127,53 @@ pub fn read_live(client: &mut ControlClient, state: &State) -> Result<LiveState,
         );
     }
     Ok(live)
+}
+
+/// A photo LightCraft lists and the mapping file knows: global id, LightCraft
+/// id and the live summary from `catalog.query`.
+type PresentPhoto = (String, Value, LivePhoto);
+
+/// Reads both photo streams, each page by page: all photos and the photos in
+/// the trash. Returns the mapped photos by global id (LightCraft id, id and
+/// live summary, each listed id once) and the number of distinct LightCraft
+/// ids the mapping file does not know.
+fn read_photo_streams(
+    client: &mut ControlClient,
+    by_id: &HashMap<String, String>,
+) -> Result<(Vec<PresentPhoto>, usize), WriteError> {
+    // Keyed by LightCraft id as text: a photo listed by both streams appears
+    // once, and with the summary of the stream that listed it first.
+    let mut present: BTreeMap<String, PresentPhoto> = BTreeMap::new();
+    let mut foreign: BTreeSet<String> = BTreeSet::new();
+    for filter in [json!({}), json!({"deleted": true})] {
+        let mut offset = 0;
+        loop {
+            let value = read(
+                client,
+                "catalog.query",
+                json!({"filter": filter, "offset": offset, "limit": QUERY_PAGE}),
+            )?;
+            let (total, items) = parse_summary_page(&value)?;
+            let count = items.len();
+            for (id, photo) in items {
+                let text = id_text(&id).ok_or_else(summary_error)?;
+                match by_id.get(&text) {
+                    Some(gid) => {
+                        present.entry(text).or_insert((gid.clone(), id, photo));
+                    }
+                    None => {
+                        foreign.insert(text);
+                    }
+                }
+            }
+            offset += count;
+            if count == 0 || count < QUERY_PAGE || offset >= total {
+                break;
+            }
+        }
+    }
+    let present = present.into_values().collect();
+    Ok((present, foreign.len()))
 }
 
 /// Sends a read command; an answer like a writing command is a protocol

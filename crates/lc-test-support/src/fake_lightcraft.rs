@@ -151,11 +151,15 @@ pub struct SeedPhoto {
     pub caption: Option<String>,
     pub copyright: Option<String>,
     pub creator: Option<String>,
+    /// Whether LightCraft has the photo in the trash ("Recently Deleted").
+    /// A deleted photo is listed only by `catalog.query {deleted: true}`, but
+    /// `photo.inspect` still answers for it.
+    pub deleted: bool,
 }
 
 impl SeedPhoto {
     /// A photo as LightCraft creates it on import: no stars, no flag, no
-    /// label, empty texts, no keywords.
+    /// label, empty texts, no keywords, not deleted.
     pub fn plain(id: i64) -> SeedPhoto {
         SeedPhoto {
             id,
@@ -167,6 +171,7 @@ impl SeedPhoto {
             caption: None,
             copyright: None,
             creator: None,
+            deleted: false,
         }
     }
 }
@@ -233,6 +238,11 @@ pub struct Config {
     pub seed_members: Vec<(usize, i64)>,
     /// `catalog.query` summaries carry `rating` as a text, not a number.
     pub summary_broken: bool,
+    /// `catalog.query` ignores the `deleted` filter and lists every photo in
+    /// both streams, so a photo can appear in both. Models a library where
+    /// the two queries overlap; the reader must merge the ids, not duplicate
+    /// them.
+    pub ignore_deleted_filter: bool,
 }
 
 impl Config {
@@ -261,6 +271,7 @@ impl Config {
             seed_photos: Vec::new(),
             seed_members: Vec::new(),
             summary_broken: false,
+            ignore_deleted_filter: false,
         }
     }
 }
@@ -1232,8 +1243,10 @@ fn toggle_target(config: &Config, lib: &mut Library, params: &Value) -> Result<V
 /// `catalog.query {filter?, offset?, limit?}` -> `{total, photos:[{id,
 /// fileName}]}`; `filter.album` lists the members of that album, sorted by
 /// photo id (not by insertion order, like the real app); without it all
-/// photos. The default `limit` is 200.
+/// photos. `filter.deleted: true` lists only photos in the trash, a missing
+/// or false `deleted` only photos outside it. The default `limit` is 200.
 fn catalog_query(config: &Config, lib: &Library, params: &Value) -> Result<Value, String> {
+    let deleted = params["filter"]["deleted"].as_bool().unwrap_or(false);
     let mut ids: Vec<i64> = match params["filter"].get("album") {
         Some(v) => {
             let id = v.as_u64().ok_or("album must be a number")?;
@@ -1242,6 +1255,10 @@ fn catalog_query(config: &Config, lib: &Library, params: &Value) -> Result<Value
         }
         None => lib.photos.values().copied().collect(),
     };
+    // A photo without a seed is a plain, non-deleted photo.
+    ids.retain(|id| {
+        config.ignore_deleted_filter || lib.seeds.get(id).is_none_or(|seed| seed.deleted == deleted)
+    });
     ids.sort_unstable();
     let offset = params["offset"].as_u64().unwrap_or(0) as usize;
     let limit = params["limit"].as_u64().unwrap_or(200) as usize;
@@ -1261,7 +1278,7 @@ fn catalog_query(config: &Config, lib: &Library, params: &Value) -> Result<Value
             v["label"] = json!(seed.label);
             v["title"] = json!(seed.title);
             v["keywords"] = json!(seed.keywords);
-            v["deleted"] = json!(false);
+            v["deleted"] = json!(seed.deleted);
             if config.summary_broken {
                 v["rating"] = json!("many");
             }
