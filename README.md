@@ -18,14 +18,17 @@ that the original files exist, after an optional path mapping), keywords with
 their hierarchy, synonyms and attributes and their assignments to photos, star
 ratings, pick/reject flags, colour labels, titles, captions, copyright and
 creator, collections as albums and collection sets as album folders (with
-their members), smart collections, folder stacks and the Quick Collection.
+their members), smart collections, folder stacks, the Quick Collection and
+development settings (sliders and the white-balance mode; the stored Lua
+table is parsed, never executed).
 
 What `--apply` writes into a LightCraft library, through the control port of
 the running LightCraft app: keywords, photos (as references to the existing
 files), ratings, flags, labels, titles, captions, copyright and creator,
 albums and album folders with their members, smart albums (only when the rule
 translates exactly), stacks (always written expanded) and the Quick
-Collection (only adding photos). Development settings are not converted yet.
+Collection (only adding photos). Development settings are read from the
+catalog but not written yet.
 
 Without `--apply`, lr2lc only reports what it would do. Everything that is
 not converted is listed with a reason in the summary and in `report.json`.

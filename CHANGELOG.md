@@ -28,6 +28,14 @@ The project has not made a release yet.
   star-rating rules); folder stacks; the Quick Collection.
 - Stable identity of photos and keywords through Lightroom's global ids, so
   repeated runs create no duplicates.
+- Reading of development settings from the catalog (phase 6a sliders): the
+  Light, HDR/SDR, tone-curve, colour-grading, colour, mixer, effects,
+  vignette, grain, detail, optics, geometry and calibration controls, the
+  old-process fields with LightCraft's approximation, the merge-only
+  switches and the white-balance mode. The stored Lua table is parsed
+  without executing it; unknown fields, unreadable entries and Lightroom's
+  `-999999` sentinel are recorded for the report. Writing the settings
+  follows in a later change.
 - Dry run by default. The summary and `--report FILE` (`report.json`) list
   everything that is not converted, each with a reason and a fixed code
   (such as `missing`, `video` or `smart_untranslatable`); read equals
