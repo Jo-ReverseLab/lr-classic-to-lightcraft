@@ -363,8 +363,9 @@ Reader — keywords, assignments, synonyms: `name_empty`, `name_has_bar`,
 `keyword_unknown`.
 
 Reader and writer — paths: `path_not_utf8` (a catalog path or file name
-that is not valid UTF-8 and is skipped by the reader, or a model path the
-writer cannot send as UTF-8).
+that cannot be used as text — bytes that are not valid UTF-8, or a
+non-text value — and is skipped by the reader, or a model path the writer
+cannot send as UTF-8).
 
 Writer: `keyword_changed`, `no_global_id`,
 `no_lightcraft_id`, `ambiguous`, `parent_not_created`, `parent_failed`,

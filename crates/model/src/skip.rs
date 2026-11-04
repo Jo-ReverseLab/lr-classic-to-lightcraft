@@ -70,9 +70,11 @@ pub enum SkipCode {
     KeywordUnresolved,
     // Writer.
     KeywordChanged,
-    /// A path or file name is not valid UTF-8: a catalog path or file name
-    /// read by the reader, or a model path the writer would send. Emitted by
-    /// both; the element is skipped instead of being lossily rewritten.
+    /// A path or file name cannot be used as text: a catalog path or file
+    /// name read by the reader (bytes that are not valid UTF-8, or a
+    /// non-text value), or a model path the writer would send (not valid
+    /// UTF-8). Emitted by both; the element is skipped instead of being
+    /// lossily rewritten.
     PathNotUtf8,
     NoGlobalId,
     NoLightcraftId,
