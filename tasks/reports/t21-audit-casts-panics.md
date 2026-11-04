@@ -5,6 +5,9 @@ justified as safe. No panic remains on catalog, LightCraft or command-line
 data.
 Branch: `agent/t21-audit`
 Base: `agent/t23-ci-proposal` (`0754cd0`, "Correct C5 monthly cost to four runs per month"; contains the T20, T22 and T23 work). The fixes were written on top of `agent/t20-performance` (`3edac05`) and rebased onto T23 before the final run.
+Fixes on this branch: `60c2e1a` (strict UTF-8 for catalog text, WIP) and
+`7f2dc5c` (paths and schema names); the report corrections follow in the
+next commit.
 
 ## Goal
 
@@ -44,10 +47,34 @@ listed because they are indexing sites, with the surrounding guard noted.
 No `assert!`, `debug_assert!`, `todo!` or `unimplemented!` remains in
 production code (checked file by file up to the test module).
 
+### Non-UTF-8 catalog text (`rusqlite`'s `expect`)
+
+`rusqlite` 0.32.1 converts a TEXT value to `String` with
+`expect("invalid UTF-8")` (`value_ref.rs:161-163`). A damaged or hostile
+catalog that stores invalid bytes in a text column therefore aborts the
+whole run instead of skipping a row. Every catalog text read now goes
+through `get_ref` and one of two strict helpers: `value_or_blob`
+(`catalog.rs`) for values the reader already classifies, and `text_cell`
+(`catalog.rs`) for paths and schema names. Nothing is replaced with U+FFFD,
+and no catalog value is passed through `from_utf8_lossy`.
+
+| File | Finding | Decision | Test |
+| --- | --- | --- | --- |
+| `crates/lr-reader/src/catalog.rs` (`Adobe_DBVersion`) | `row.get::<_, String>` / lossy read | **fixed** (WIP `60c2e1a`): strict `str::from_utf8`; invalid bytes are `ReadError::InvalidVersion`, never silently converted | `catalog.rs::tests::invalid_utf8_dbversion_is_a_read_error` |
+| `crates/lr-reader/src/catalog.rs`, `stacks.rs` (`pragma_table_info` column names) | column name read as `String` | **fixed**: `text_cell`; a name that is not valid UTF-8 matches no required ASCII name and counts as absent, so a missing required column stays a schema error instead of a panic | `catalog.rs::tests::invalid_utf8_column_name_counts_as_missing`, `catalog.rs::tests::text_cell_classifies_without_converting_lossily` |
+| `crates/lr-reader/src/folders.rs` (`pathFromRoot`, `absolutePath`) | `row.get::<_, String>` | **fixed**: `text_cell`; an unusable path skips the folder with `PathNotUtf8` and a reason naming only the folder id | `folders.rs::tests::invalid_utf8_text_folder_path_is_skipped`, `folders.rs::tests::invalid_utf8_text_root_folder_path_is_skipped`, `folders.rs::tests::invalid_root_path_is_skipped`, `folders.rs::tests::invalid_relative_path_is_skipped` |
+| `crates/lr-reader/src/photos.rs` (`AgLibraryFile.baseName`, `extension`, `AgLibraryFolder.pathFromRoot`, `AgLibraryRootFolder.absolutePath`) | `row.get::<_, String>` / `unwrap_or_default` | **fixed**: `text_cell`; an unusable component skips the photo with `PathNotUtf8`, never an empty or replacement path | `photos.rs::tests::invalid_utf8_text_photo_file_name_is_skipped`, `invalid_utf8_text_photo_extension_is_skipped`, `invalid_utf8_text_photo_folder_path_is_skipped`, `invalid_utf8_text_photo_root_path_is_skipped`, `invalid_utf8_or_non_text_path_components_are_skipped` |
+| `crates/lr-reader/src/photos.rs` (`rating`, `pick`, `colorLabels`, `caption`, `copyright`, creator, `fileFormat`, `id_global`) | `row.get` as `String` for some columns | **fixed** (WIP `60c2e1a`): `get_ref` + `value_or_blob`; an unusable id counts as missing, other non-text values keep their documented fallback | existing photo tests plus the path tests above |
+| `crates/lr-reader/src/keywords.rs` (`name`, `id_global`, synonym `name`) | `row.get::<_, String>` / `from_utf8_lossy` | **fixed** (WIP `60c2e1a`): strict UTF-8; an invalid keyword or synonym name is skipped with `NameInvalid`, an invalid global id counts as missing | `keywords.rs::tests::invalid_utf8_text_keyword_name_is_skipped`, `invalid_utf8_text_synonym_name_is_skipped`, `invalid_utf8_text_global_id_counts_as_missing` |
+
+Each affected reader test also checks the counts stay balanced for its area
+(`read = converted + skipped`).
+
 ### Indexing, slicing and arithmetic
 
 | File:line | Finding | Data source | Decision | Test |
 | --- | --- | --- | --- | --- |
+| `crates/lr-reader/src/stacks.rs:222` | `kept[0].1` | catalog stack members | safe: only reached inside the `kept.len() >= 2` branch (the `if kept.len() < 2` arm above returns to its own path), so index 0 always exists | — |
 | `crates/lr-reader/src/collections.rs:193` | `data.collections[i].kind` | catalog | safe: `i` comes from the index map built over `data.collections` | — |
 | `crates/lr-reader/src/collections.rs:207` | `data.collections[i].members.push(p)` | catalog | safe: same index map as above | — |
 | `crates/lr-reader/src/collections.rs:563,575,579` | `&path[cycle_from..]`, `path[below]`, `path[i]`, `path[i+1]` | catalog parent chain | safe: `path` is a non-empty walk up the chain; `cycle_from` and `below` are derived from its length, and `last` is only set after at least one step | — |
@@ -99,7 +126,7 @@ process runs out of memory.
 
 | File:line | Finding | Data source | Decision | Test |
 | --- | --- | --- | --- | --- |
-| `crates/lr-reader/src/catalog.rs:153` | `String::from_utf8_lossy` for `Adobe_DBVersion` | catalog | safe: the result is only compared to the exact supported version; invalid bytes can never match, and only the error text could show a replacement character | — |
+| `crates/lr-reader/src/catalog.rs:153` | `String::from_utf8_lossy` for `Adobe_DBVersion` | catalog | **fixed** (WIP `60c2e1a`): strict `str::from_utf8`; invalid bytes are `ReadError::InvalidVersion` instead of a lossy value | `catalog.rs::tests::invalid_utf8_dbversion_is_a_read_error` |
 | `crates/lr-reader/src/keywords.rs:299` | `String::from_utf8_lossy` (was) for keyword and synonym names | catalog | **fixed**: strict `String::from_utf8`; invalid UTF-8 skips the keyword/synonym with `NameInvalid` and the reason "not valid UTF-8", never a U+FFFD name. NULL and empty keep `NameEmpty` | `keywords.rs::tests::invalid_utf8_keyword_name_is_skipped`, `keywords.rs::tests::invalid_utf8_synonym_name_is_skipped`, `keywords.rs::tests::valid_utf8_blob_name_is_kept_byte_for_byte` |
 | `crates/lc-writer/src/plan.rs:560` | `to_string_lossy` (was) for the import path | photo path from the model (originally catalog) | **fixed**: `import_params` returns `Option` and uses `to_str()`; a non-UTF-8 path is never lossily sent. The plan already skips such photos with `PathNotUtf8`; `apply` repeats the skip defensively | `plan.rs::tests::import_params_rejects_a_non_utf8_path` |
 | `crates/lr2lc/src/args.rs:161` | `to_string_lossy` (was) for `--port` | command line | **fixed**: `to_str()` with an explicit "not valid UTF-8" error | `args.rs::tests::non_utf8_port_is_an_error` (`#[cfg(unix)]`) |
@@ -121,15 +148,23 @@ All commands run from the task worktree with a cold target directory. The
 branch was rebased onto `agent/t23-ci-proposal` and all three commands were
 re-run green on the rebased tree:
 
-- `cargo fmt --all` — clean.
+- `cargo fmt --all --check` — clean.
 - `cargo clippy --workspace --all-targets -- -D warnings` — clean.
-- `cargo test --workspace` — all tests pass, 0 failed, nothing ignored.
+- `cargo test --workspace --no-fail-fast` — 1317 passed, 0 failed,
+  3 ignored. The three ignored tests are the deliberate performance
+  measurements at 10 000, 100 000 and 500 000 photos
+  (`dry_run_10_000_photos`, `dry_run_100_000_photos`,
+  `dry_run_500_000_photos` in `crates/lr2lc/tests/performance.rs`); they are
+  the only ignored tests and are not part of the default run.
 
 Output is unchanged: the golden report and the acceptance tests were not
 modified and stay green. The only observable changes are for inputs that
 were previously mangled or could abort the run: an invalid-UTF-8 keyword or
 synonym name is now skipped with `NameInvalid` instead of being written with
-U+FFFD, and a non-UTF-8 path or port is refused with a clear error.
+U+FFFD; a catalog path or file name that is not valid UTF-8 skips the
+affected folder or photo with `PathNotUtf8` instead of aborting the run; an
+unusable schema name counts as a missing column; and a non-UTF-8 port is
+refused with a clear error.
 
 Residual risk: the 32-bit truncation paths in the two `usize::try_from`
 fixes cannot be exercised on this 64-bit host; the tests assert them only
