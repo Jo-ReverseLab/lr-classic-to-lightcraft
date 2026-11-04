@@ -368,12 +368,12 @@ fn unmapped_fields_are_listed_by_name_only_and_capped_at_twenty() {
     assert_eq!(n(&d["unmapped_count"]), 25);
     let listed = d["unmapped"].as_array().unwrap();
     assert_eq!(listed.len(), 20, "the detail is capped: {listed:?}");
+    let names: Vec<&str> = listed.iter().filter_map(Value::as_str).collect();
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    assert_eq!(names, sorted, "the listed field names are sorted");
     assert!(
-        d["unmapped"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|v| v.as_str().is_some_and(|s| s.starts_with("ZzMystery"))),
+        names.iter().all(|s| s.starts_with("ZzMystery")),
         "field names only: {listed:?}"
     );
 
