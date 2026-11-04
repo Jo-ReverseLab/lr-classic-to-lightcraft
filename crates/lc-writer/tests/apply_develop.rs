@@ -29,11 +29,11 @@ use lc_writer::control::{ControlClient, WriteError};
 use lc_writer::plan::WriteInput;
 use lc_writer::state::{State, state_path};
 use model::{Develop, MergeValue, Photo, Rating, WhiteBalanceHint};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use fake_lightcraft::{Config, FakeLightCraft};
+use fake_lightcraft::{Config, FakeLightCraft, SeedPhoto};
 use lc_test_support::fake_lightcraft;
 
 const PHOTO_DIR: &str = "/Users/example/Pictures";
@@ -395,4 +395,40 @@ fn the_plan_of_a_finished_run_has_no_develop_command_left() {
         !script.contains("develop."),
         "nothing left to write: {script}"
     );
+}
+
+#[test]
+fn the_fake_gates_develop_merge_on_a_selection_but_not_develop_set() {
+    let env = env();
+    let mut config = Config::new(&env.library);
+    config.seed_photos = vec![SeedPhoto::plain(42)];
+    let fake = FakeLightCraft::start(config);
+    let mut client = ControlClient::connect(fake.port()).unwrap();
+
+    // The fake behaves like the app: `develop.merge` needs a selection.
+    let error = client
+        .execute(
+            "develop.merge",
+            json!({"settings": {"wb": {"mode": "daylight"}}}),
+        )
+        .expect_err("a merge without a selection must be rejected");
+    assert!(error.to_string().contains("no photos selected"), "{error}");
+
+    // `develop.set` names its photos itself and needs no selection.
+    client
+        .execute(
+            "develop.set",
+            json!({"values": {"light.exposure": 1.0}, "ids": [42]}),
+        )
+        .expect("develop.set must not need a selection");
+
+    client
+        .execute("library.select", json!({"ids": [42], "active": 42}))
+        .unwrap();
+    client
+        .execute(
+            "develop.merge",
+            json!({"settings": {"wb": {"mode": "daylight"}}}),
+        )
+        .expect("a merge after a selection is accepted");
 }
