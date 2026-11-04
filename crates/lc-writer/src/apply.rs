@@ -84,7 +84,7 @@ use crate::plan::{
     import_params, members_select_params, needs_live, plan, renamed_keywords, same_members,
     select_params, smart_skip_reason, snapshot_with_renames,
 };
-use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, keyword_text};
+use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, hex_hash, keyword_text};
 use model::{Collection, CollectionKind, Keyword, Photo, SkipCode, Skipped, SmartCollection};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -214,6 +214,21 @@ pub struct ApplySummary {
     /// text), ascending by Lightroom id. Nothing was created or renamed in
     /// LightCraft.
     pub renamed_keywords: Vec<RenamedKeyword>,
+    /// Converted photos that carry development settings (`Develop` is
+    /// `Some`), whether or not a command was needed.
+    pub develop_photos: usize,
+    /// Photos the plan sent develop commands for.
+    pub develop_planned: usize,
+    /// Photos whose develop commands all succeeded.
+    pub develop_written: usize,
+    /// Known photos whose development settings changed in Lightroom and were
+    /// left alone because `--overwrite-develop` was not given.
+    pub develop_not_applied: usize,
+    /// Photos written because `--overwrite-develop` was given.
+    pub develop_overwritten: usize,
+    /// Distinct names of catalog fields that could not be carried over,
+    /// sorted. Only names, never values.
+    pub develop_unmapped: Vec<String>,
     /// `removed_photos.len()`, for the report.
     pub photos_removed: usize,
     /// `moved_photos.len()`, for the report.
@@ -317,6 +332,11 @@ pub fn apply_partial(
             photos_moved: plan.moved_photos().len(),
             renamed_keywords: plan.renamed_keywords().to_vec(),
             keywords_renamed: plan.renamed_keywords().len(),
+            develop_photos: plan.develop_photos(),
+            develop_planned: plan.develop_planned(),
+            develop_not_applied: plan.develop_not_applied(),
+            develop_overwritten: plan.develop_overwritten(),
+            develop_unmapped: plan.develop_unmapped().to_vec(),
             ..ApplySummary::default()
         },
         recorded: plan.recorded_fields_map(),
@@ -426,6 +446,9 @@ struct Current {
     /// True for a photo known from the mapping file (no import in this
     /// run) that is not yet counted as updated.
     uncounted_update: bool,
+    /// True once a develop command of this photo started; on success its
+    /// source hash is recorded.
+    develop_pending: bool,
 }
 
 struct Run<'a> {
@@ -543,6 +566,7 @@ impl Run<'_> {
                     ok: true,
                     selected: false,
                     uncounted_update: false,
+                    develop_pending: false,
                 });
                 self.import(global_id, path)
             }
@@ -556,6 +580,7 @@ impl Run<'_> {
                     ok: true,
                     selected: false,
                     uncounted_update: false,
+                    develop_pending: false,
                 });
                 self.virtual_copy(global_id, master_global_id)
             }
@@ -571,6 +596,7 @@ impl Run<'_> {
                         ok: true,
                         selected: false,
                         uncounted_update: true,
+                        develop_pending: false,
                     });
                 }
                 if self.current.as_ref().is_some_and(|c| c.ok && !c.selected) {
@@ -578,6 +604,23 @@ impl Run<'_> {
                 }
                 if self.current.as_ref().is_some_and(|c| c.ok) {
                     self.update(global_id, command, params)?;
+                }
+                Ok(())
+            }
+            Step::DevelopSet { global_id, values } => {
+                self.enter_photo(global_id)?;
+                if self.current.as_ref().is_some_and(|c| c.ok) {
+                    self.develop_set(global_id, values)?;
+                }
+                Ok(())
+            }
+            Step::DevelopMerge {
+                global_id,
+                settings,
+            } => {
+                self.enter_photo(global_id)?;
+                if self.current.as_ref().is_some_and(|c| c.ok) {
+                    self.develop_merge(global_id, settings)?;
                 }
                 Ok(())
             }
@@ -1433,6 +1476,122 @@ impl Run<'_> {
         Ok(())
     }
 
+    /// Makes `global_id` the running photo, finishing the previous one. A
+    /// develop step can stand alone for a known photo whose fields are
+    /// unchanged.
+    fn enter_photo(&mut self, global_id: &str) -> Result<(), WriteError> {
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|c| c.global_id == global_id)
+        {
+            return Ok(());
+        }
+        self.finish_photo()?;
+        self.current = Some(Current {
+            global_id: global_id.to_string(),
+            ok: true,
+            selected: false,
+            uncounted_update: false,
+            develop_pending: false,
+        });
+        Ok(())
+    }
+
+    /// Sets slider values with `develop.set`, which names its photo directly
+    /// and needs no selection.
+    fn develop_set(
+        &mut self,
+        global_id: &str,
+        values: &BTreeMap<String, f64>,
+    ) -> Result<(), WriteError> {
+        let Some(entry) = self.state.photo(global_id) else {
+            // Not reachable: a develop step follows a recorded import or a
+            // known photo.
+            self.fail_current();
+            return Ok(());
+        };
+        let lightroom_id = entry.lightroom_id;
+        let id = entry.lightcraft_id.clone();
+        if let Some(c) = &mut self.current {
+            c.develop_pending = true;
+        }
+        let result = self
+            .client
+            .execute("develop.set", json!({"values": values, "ids": [id]}));
+        self.develop_outcome(lightroom_id, "develop.set", result)
+    }
+
+    /// Selects the photo and merges structured settings with `develop.merge`,
+    /// which acts on the selection and carries no `ids`.
+    fn develop_merge(&mut self, global_id: &str, settings: &Value) -> Result<(), WriteError> {
+        let Some(entry) = self.state.photo(global_id) else {
+            self.fail_current();
+            return Ok(());
+        };
+        let lightroom_id = entry.lightroom_id;
+        let id = entry.lightcraft_id.clone();
+        match self.client.execute("library.select", select_params(&id)) {
+            Ok(_) => {}
+            Err(WriteError::Command { command, .. }) => {
+                self.reject_develop(lightroom_id, &command);
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        }
+        if let Some(c) = &mut self.current {
+            c.develop_pending = true;
+        }
+        let result = self
+            .client
+            .execute("develop.merge", json!({"settings": settings}));
+        self.develop_outcome(lightroom_id, "develop.merge", result)
+    }
+
+    /// Handles a develop command's reply like the field updates: a rejected or
+    /// unsaved command leaves the photo incomplete and is sent again by the
+    /// next run; the hash is not recorded then.
+    fn develop_outcome(
+        &mut self,
+        lightroom_id: i64,
+        command: &str,
+        result: Result<Outcome, WriteError>,
+    ) -> Result<(), WriteError> {
+        match result {
+            Ok(Outcome::Applied(_)) => Ok(()),
+            Ok(Outcome::AppliedNotSaved(_)) => {
+                self.summary.not_saved += 1;
+                self.summary.photos_incomplete.push(Skipped::new(
+                    SkipCode::AppliedNotSaved,
+                    format!(
+                        "photo {lightroom_id}: `{command}` was applied but not saved; \
+                         the photo is incomplete and is updated again by the next run"
+                    ),
+                ));
+                self.fail_current();
+                Ok(())
+            }
+            Err(WriteError::Command { command, .. }) => {
+                self.reject_develop(lightroom_id, &command);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Marks the running photo as incomplete after a rejected develop
+    /// command, without counting it as a field update.
+    fn reject_develop(&mut self, lightroom_id: i64, command: &str) {
+        self.summary.photos_incomplete.push(Skipped::new(
+            SkipCode::Rejected,
+            format!(
+                "photo {lightroom_id}: LightCraft rejected `{command}`; \
+                 the photo is incomplete and is updated again by the next run"
+            ),
+        ));
+        self.fail_current();
+    }
+
     /// Selects the running photo before its first update. A select is
     /// sent even right after an import, which selects as a side effect.
     fn select(&mut self, global_id: &str) -> Result<(), WriteError> {
@@ -1557,6 +1716,19 @@ impl Run<'_> {
             .get(&photo.lightroom_id)
             .map(Vec::as_slice)
             .unwrap_or_default();
+        // Every develop step of the photo ran and none failed: the photo
+        // counts as written and its source hash is recorded below, so the
+        // next run leaves it alone.
+        if current.develop_pending {
+            self.summary.develop_written += 1;
+        }
+        let develop_hash = self
+            .photos
+            .get(current.global_id.as_str())
+            .and_then(|p| p.develop.as_ref())
+            .and_then(|d| d.source_hash)
+            .map(|hash| hex_hash(&hash))
+            .filter(|_| current.develop_pending);
         // A known photo the live state covered records what was reconciled:
         // a field changed on both sides keeps its last imported value, so the
         // next run reports the conflict again. An imported photo records its
@@ -1566,12 +1738,23 @@ impl Run<'_> {
             .get(&current.global_id)
             .cloned()
             .unwrap_or_else(|| snapshot_with_renames(photo, keywords, &self.renamed));
-        if entry.fields == fields && entry.lightroom_id == photo.lightroom_id && !path_added {
+        let develop_changed = develop_hash
+            .as_deref()
+            .is_some_and(|hash| entry.develop_hash.as_deref() != Some(hash));
+        if entry.fields == fields
+            && entry.lightroom_id == photo.lightroom_id
+            && !path_added
+            && !develop_changed
+        {
             return Ok(());
         }
         let id = entry.lightcraft_id.clone();
         self.state
-            .record(current.global_id, photo.lightroom_id, id, fields);
+            .record(current.global_id.clone(), photo.lightroom_id, id, fields);
+        if develop_hash.is_some() {
+            self.state
+                .record_develop_hash(&current.global_id, develop_hash);
+        }
         self.state.save(self.state_file)?;
         Ok(())
     }

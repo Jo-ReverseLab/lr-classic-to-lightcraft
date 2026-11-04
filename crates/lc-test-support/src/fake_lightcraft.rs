@@ -798,6 +798,42 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             }
             Ok(json!({}))
         }
+        "develop.set" => {
+            // Slider values name their photos directly and need no selection.
+            let values = params
+                .get("values")
+                .and_then(Value::as_object)
+                .ok_or("values is missing")?;
+            if values.values().any(|v| !v.is_number()) {
+                return Err("values must be numbers".into());
+            }
+            let ids = params
+                .get("ids")
+                .and_then(Value::as_array)
+                .ok_or("ids is missing")?;
+            let ids: Vec<i64> = ids.iter().filter_map(Value::as_i64).collect();
+            if ids.len() != params["ids"].as_array().map_or(0, Vec::len) {
+                return Err("ids must be numbers".into());
+            }
+            if let Some(unknown) = ids.iter().find(|i| !lib.photos.values().any(|p| p == *i)) {
+                return Err(format!("unknown photo id {unknown}"));
+            }
+            Ok(json!({}))
+        }
+        "develop.merge" => {
+            // Structured settings act on the selection, like `photo.*`, and
+            // carry no `ids`.
+            if config.selection_gate && lib.selection.is_empty() {
+                return Err("no photos selected".into());
+            }
+            if params.get("ids").is_some() {
+                return Err("develop.merge takes no ids".into());
+            }
+            if params.get("settings").and_then(Value::as_object).is_none() {
+                return Err("settings is missing".into());
+            }
+            Ok(json!({}))
+        }
         "photo.virtualCopy" => {
             // `photo.virtualCopy {ids: [master id]}` -> `{ids: [new id]}`.
             // Every call makes a new copy (not idempotent), like the real app.
