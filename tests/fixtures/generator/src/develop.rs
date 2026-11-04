@@ -753,3 +753,86 @@ pub fn oversized_text() -> String {
     let padding = "x".repeat(OVERSIZED_PADDING_BYTES);
     format!("s = {{ ZyxPad = \"{padding}\" }}")
 }
+
+/// Camera-profile fixture (P6-5). All names are invented.
+///
+/// One `CameraProfile` per row, plus a `Look` on one row. Every row carries no
+/// slider and no other mapped field, so a profile alone must not plan a
+/// develop command.
+pub mod profile {
+    /// Two photos share [`STUDIO`]; a third shares it through [`LOOK_PHOTO`].
+    pub const STUDIO_A_PHOTO: i64 = 1;
+    pub const STUDIO_B_PHOTO: i64 = 2;
+    /// Profile name with umlauts and an emoji; must survive byte for byte.
+    pub const BYTE_EXACT_PHOTO: i64 = 3;
+    /// Same byte-exact name again: count 2.
+    pub const BYTE_EXACT_SECOND_PHOTO: i64 = 10;
+    /// Row without any `CameraProfile` field.
+    pub const NO_PROFILE_PHOTO: i64 = 4;
+    /// Row with `CameraProfile = ""`: no name, no report entry.
+    pub const EMPTY_PROFILE_PHOTO: i64 = 5;
+    /// Row with `CameraProfile = 42`: wrong type, unmapped, no profile.
+    pub const WRONG_TYPE_PHOTO: i64 = 6;
+    /// Row with `CameraProfile` and a `Look`; the profile counts, the Look is
+    /// still unmapped.
+    pub const LOOK_PHOTO: i64 = 7;
+    /// Row whose only field is `CameraProfile`.
+    pub const PROFILE_ONLY_PHOTO: i64 = 8;
+
+    pub const STUDIO: &str = "Studio Neutral";
+    pub const BYTE_EXACT: &str = "Profil Ärger 📷";
+    pub const PROFILE_ONLY: &str = "Solo Profile";
+    pub const LOOK: &str = "Zyx Look";
+
+    /// Photos that carry a non-empty profile name: 1, 2, 3, 7, 8 and 10.
+    pub const PHOTOS_WITH_PROFILE: usize = 6;
+    /// Distinct names: [`STUDIO`], [`BYTE_EXACT`], [`PROFILE_ONLY`].
+    pub const DISTINCT_PROFILES: usize = 3;
+    /// Photo 6 (wrong type) and photo 7 (`Look`) are the only unmapped fields.
+    pub const UNMAPPED_NAMES: [&str; 2] = ["CameraProfile", "Look"];
+}
+
+/// The camera-profile fixture: ten rows, profile-only except the `Look` and
+/// the wrong-typed value.
+pub fn write_camera_profile_catalog_with_files(dir: &Path) -> Result<PathBuf> {
+    use profile as p;
+    let rows = [
+        (
+            p::STUDIO_A_PHOTO,
+            settings().text("CameraProfile", p::STUDIO).build(),
+        ),
+        (
+            p::STUDIO_B_PHOTO,
+            settings().text("CameraProfile", p::STUDIO).build(),
+        ),
+        (
+            p::BYTE_EXACT_PHOTO,
+            settings().text("CameraProfile", p::BYTE_EXACT).build(),
+        ),
+        (p::NO_PROFILE_PHOTO, settings().build()),
+        (
+            p::EMPTY_PROFILE_PHOTO,
+            settings().text("CameraProfile", "").build(),
+        ),
+        (
+            p::WRONG_TYPE_PHOTO,
+            settings().integer("CameraProfile", 42).build(),
+        ),
+        (
+            p::LOOK_PHOTO,
+            settings()
+                .text("CameraProfile", p::STUDIO)
+                .text("Look", p::LOOK)
+                .build(),
+        ),
+        (
+            p::PROFILE_ONLY_PHOTO,
+            settings().text("CameraProfile", p::PROFILE_ONLY).build(),
+        ),
+        (
+            p::BYTE_EXACT_SECOND_PHOTO,
+            settings().text("CameraProfile", p::BYTE_EXACT).build(),
+        ),
+    ];
+    write_develop_catalog_with_files(dir, "develop-camera-profile.lrcat", &rows)
+}
