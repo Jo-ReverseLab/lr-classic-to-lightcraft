@@ -1241,9 +1241,13 @@ pub mod masks {
     pub const BLEND_MODES_PHOTO: i64 = 9;
     pub const UNKNOWN_KIND_PHOTO: i64 = 10;
     pub const ERASING_BRUSH_PHOTO: i64 = 11;
-    /// Converted photos with at least one mask in the edge fixture: the blend
-    /// modes photo and the erasing brush photo.
-    pub const EDGE_PHOTOS_WITH_MASKS: usize = 2;
+    /// `CorrectionAmount = 3.0` (300 before the clamp).
+    pub const AMOUNT_HIGH_PHOTO: i64 = 12;
+    /// `CorrectionAmount = -0.5` (-50 before the clamp).
+    pub const AMOUNT_LOW_PHOTO: i64 = 13;
+    /// Converted photos with at least one mask in the edge fixture: blend
+    /// modes, erasing brush and the two amount-clamp photos.
+    pub const EDGE_PHOTOS_WITH_MASKS: usize = 4;
     /// Distinct unsupported fields of the edge fixture, sorted.
     pub const EDGE_UNMAPPED: [&str; 3] = [
         "Mask: UnknownShape",
@@ -1568,6 +1572,21 @@ pub mod masks {
             )]),
         );
 
+        let amount_high = settings().raw(
+            "GradientBasedCorrections",
+            &corrections(&[Correction::default()
+                .name("Amount High")
+                .amount(3.0)
+                .component(linear_component())]),
+        );
+        let amount_low = settings().raw(
+            "GradientBasedCorrections",
+            &corrections(&[Correction::default()
+                .name("Amount Low")
+                .amount(-0.5)
+                .component(linear_component())]),
+        );
+
         write_develop_catalog_with_files(
             dir,
             "develop-mask-edges.lrcat",
@@ -1577,6 +1596,8 @@ pub mod masks {
                 (BLEND_MODES_PHOTO, blend_modes.build()),
                 (UNKNOWN_KIND_PHOTO, unknown_kind.build()),
                 (ERASING_BRUSH_PHOTO, erasing_brush.build()),
+                (AMOUNT_HIGH_PHOTO, amount_high.build()),
+                (AMOUNT_LOW_PHOTO, amount_low.build()),
             ],
         )
     }

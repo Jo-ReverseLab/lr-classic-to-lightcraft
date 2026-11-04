@@ -232,7 +232,7 @@ fn the_mask_edge_fixture_has_one_row_per_edge_photo() {
             r.get(0)
         })
         .unwrap();
-    assert_eq!(n, 5);
+    assert_eq!(n, 7);
     let empty: String = c
         .query_row(
             &format!("SELECT text FROM {} WHERE image = ?1", dev::TABLE),

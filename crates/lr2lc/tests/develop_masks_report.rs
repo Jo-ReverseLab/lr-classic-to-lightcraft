@@ -541,7 +541,7 @@ fn edge_cases_are_reported_and_the_blend_modes_map() {
             merges.push((id, params.clone()));
         }
     }
-    assert_eq!(merges.len(), 2, "{merges:?}");
+    assert_eq!(merges.len(), 4, "{merges:?}");
 
     let blend = merges
         .iter()
@@ -568,6 +568,19 @@ fn edge_cases_are_reported_and_the_blend_modes_map() {
     let stroke = &erasing["settings"]["masks"][0]["components"][0]["shape"]["strokes"][0];
     assert_eq!(stroke["erase"], json!(true));
     assert_eq!(stroke["density"], json!(50.0));
+
+    // CorrectionAmount is clamped to 0..200 after the ×100 conversion.
+    for (id, amount) in [("lr:image-00000012", 200.0), ("lr:image-00000013", 0.0)] {
+        let params = merges
+            .iter()
+            .find(|(merge_id, _)| merge_id == id)
+            .map(|(_, params)| params)
+            .unwrap_or_else(|| panic!("no merge for {id}: {merges:?}"));
+        assert_eq!(
+            params["settings"]["masks"][0]["adjust"]["amount"],
+            json!(amount)
+        );
+    }
 }
 
 #[test]
