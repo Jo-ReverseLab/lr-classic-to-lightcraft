@@ -193,3 +193,60 @@ fn the_deferred_fixture_contains_the_sentinel() {
         .unwrap();
     assert!(text.contains("-999999"), "{text}");
 }
+
+#[test]
+fn the_mask_fixture_writes_all_four_containers() {
+    use lrcat_fixtures::develop::masks as m;
+    let dir = tempfile::tempdir().unwrap();
+    let cat = m::write_masks_catalog_with_files(dir.path()).unwrap();
+    let c = open(&cat);
+    let text: String = c
+        .query_row(
+            &format!("SELECT text FROM {} WHERE image = ?1", dev::TABLE),
+            [m::ALL_KINDS_PHOTO],
+            |r| r.get(0),
+        )
+        .unwrap();
+    for container in [
+        "MaskGroupBasedCorrections",
+        "GradientBasedCorrections",
+        "CircularGradientBasedCorrections",
+        "PaintBasedCorrections",
+    ] {
+        assert!(text.contains(container), "{container} missing: {text}");
+    }
+    assert!(text.contains("CorrectionMasks"), "{text}");
+    assert!(text.contains("Mask/Image"), "{text}");
+    assert!(text.contains("Mask/RangeMask"), "{text}");
+    assert!(text.contains("d 0.1 0.2"), "{text}");
+}
+
+#[test]
+fn the_mask_edge_fixture_has_one_row_per_edge_photo() {
+    use lrcat_fixtures::develop::masks as m;
+    let dir = tempfile::tempdir().unwrap();
+    let cat = m::write_mask_edges_catalog_with_files(dir.path()).unwrap();
+    let c = open(&cat);
+    let n: i64 = c
+        .query_row(&format!("SELECT COUNT(*) FROM {}", dev::TABLE), [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(n, 5);
+    let empty: String = c
+        .query_row(
+            &format!("SELECT text FROM {} WHERE image = ?1", dev::TABLE),
+            [m::EMPTY_DABS_PHOTO],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(empty.contains("Dabs = { }"), "{empty}");
+    let missing: String = c
+        .query_row(
+            &format!("SELECT text FROM {} WHERE image = ?1", dev::TABLE),
+            [m::MISSING_COMPONENTS_PHOTO],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(!missing.contains("CorrectionMasks"), "{missing}");
+}
