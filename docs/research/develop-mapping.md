@@ -526,13 +526,13 @@ Yellow, Green, Aqua, Blue, Purple, Magenta` (`crs.rs:60`;
 | `light.whites` | `light.whites` | `Whites2012`; old `Brightness` | `controls.rs:178`; `crs.rs:214`, `:239` |
 | `light.blacks` | `light.blacks` | `Blacks2012`; old `Shadows` | `controls.rs:179`; `crs.rs:215`, `:240` |
 | — (merge only) | `hdr.enabled` (bool) | `HDREditMode` | `crs.rs:217-220`; `settings.rs:1126-1127` |
-| `hdr.maxEv` | `hdr.max_ev` | **(assumption)** key not verified | `controls.rs:180`; `settings.rs:1126-1137`; no `crs.rs` mapping |
-| `hdr.sdrBrightness` | `hdr.sdr_brightness` | **(assumption)** key not verified | `controls.rs:181`; `settings.rs:1131`; no `crs.rs` mapping |
-| `hdr.sdrContrast` | `hdr.sdr_contrast` | **(assumption)** key not verified | `controls.rs:182`; `settings.rs:1132`; no `crs.rs` mapping |
-| `hdr.sdrHighlights` | `hdr.sdr_highlights` | **(assumption)** key not verified | `controls.rs:183`; `settings.rs:1133`; no `crs.rs` mapping |
-| `hdr.sdrShadows` | `hdr.sdr_shadows` | **(assumption)** key not verified | `controls.rs:184`; `settings.rs:1134`; no `crs.rs` mapping |
-| `hdr.sdrWhites` | `hdr.sdr_whites` | **(assumption)** key not verified | `controls.rs:185`; `settings.rs:1135`; no `crs.rs` mapping |
-| `hdr.sdrClarity` | `hdr.sdr_clarity` | **(assumption)** key not verified | `controls.rs:186`; `settings.rs:1136`; no `crs.rs` mapping |
+| `hdr.maxEv` | `hdr.max_ev` | `HDRMaxValue` — confirmed on a catalog copy, 2026-11-04, 11 photos contain it; meaning inferred from the name | `controls.rs:180`; `settings.rs:1126-1137`; no `crs.rs` mapping |
+| `hdr.sdrBrightness` | `hdr.sdr_brightness` | `SDRBrightness` — confirmed on a catalog copy, 2026-11-04, 11 photos contain it | `controls.rs:181`; `settings.rs:1131`; no `crs.rs` mapping |
+| `hdr.sdrContrast` | `hdr.sdr_contrast` | `SDRContrast` — confirmed on a catalog copy, 2026-11-04, 11 photos contain it | `controls.rs:182`; `settings.rs:1132`; no `crs.rs` mapping |
+| `hdr.sdrHighlights` | `hdr.sdr_highlights` | `SDRHighlights` — confirmed on a catalog copy, 2026-11-04, 11 photos contain it | `controls.rs:183`; `settings.rs:1133`; no `crs.rs` mapping |
+| `hdr.sdrShadows` | `hdr.sdr_shadows` | `SDRShadows` — confirmed on a catalog copy, 2026-11-04, 11 photos contain it | `controls.rs:184`; `settings.rs:1134`; no `crs.rs` mapping |
+| `hdr.sdrWhites` | `hdr.sdr_whites` | `SDRWhites` — confirmed on a catalog copy, 2026-11-04, 11 photos contain it | `controls.rs:185`; `settings.rs:1135`; no `crs.rs` mapping |
+| `hdr.sdrClarity` | `hdr.sdr_clarity` | `SDRClarity` — confirmed on a catalog copy, 2026-11-04, 11 photos contain it | `controls.rs:186`; `settings.rs:1136`; no `crs.rs` mapping |
 | `curve.highlights` | `curve.highlights` | `ParametricHighlights` | `controls.rs:187`; `crs.rs:324` |
 | `curve.lights` | `curve.lights` | `ParametricLights` | `controls.rs:188`; `crs.rs:323` |
 | `curve.darks` | `curve.darks` | `ParametricDarks` | `controls.rs:189`; `crs.rs:322` |
@@ -598,8 +598,8 @@ Yellow, Green, Aqua, Blue, Purple, Magenta` (`crs.rs:60`;
 | `optics.defringeGreen` | `optics.defringe_green_amount` | `DefringeGreenAmount` | `controls.rs:273`; `crs.rs:414` |
 | `optics.defringeGreenHueLo` | `optics.defringe_green_hue_lo` | `DefringeGreenHueLo` | `controls.rs:274`; `crs.rs:415` |
 | `optics.defringeGreenHueHi` | `optics.defringe_green_hue_hi` | `DefringeGreenHueHi` | `controls.rs:275`; `crs.rs:416` |
-| `optics.caRed` | `optics.ca_red` | **(assumption)** no Lightroom key found | `controls.rs:276`; `settings.rs:673-676`; no `crs.rs` mapping |
-| `optics.caBlue` | `optics.ca_blue` | **(assumption)** no Lightroom key found | `controls.rs:277`; `settings.rs:673-676`; no `crs.rs` mapping |
+| `optics.caRed` | `optics.ca_red` | **(assumption)** no Lightroom key found; no such name in the available copy, 2026-11-04 | `controls.rs:276`; `settings.rs:673-676`; no `crs.rs` mapping |
+| `optics.caBlue` | `optics.ca_blue` | **(assumption)** no Lightroom key found; no such name in the available copy, 2026-11-04 | `controls.rs:277`; `settings.rs:673-676`; no `crs.rs` mapping |
 | `geometry.vertical` | `geometry.vertical` | `PerspectiveVertical` | `controls.rs:278`; `crs.rs:428` |
 | `geometry.horizontal` | `geometry.horizontal` | `PerspectiveHorizontal` | `controls.rs:279`; `crs.rs:429` |
 | `geometry.rotate` | `geometry.rotate` | `PerspectiveRotate` | `controls.rs:280`; `crs.rs:430` |
@@ -615,22 +615,79 @@ Yellow, Green, Aqua, Blue, Purple, Magenta` (`crs.rs:60`;
 | `calibration.blueHue`, `calibration.blueSat` | `calibration.blue_hue`, `calibration.blue_sat` | `BlueHue`, `BlueSaturation` | `controls.rs:290-291`; `crs.rs:424-425` |
 | `crop.angle` | `crop.geometry.angle` | `CropAngle` | `controls.rs:292`; `crs.rs:447-458`; `settings.rs:815-822` |
 | — (merge only) | `crop.geometry.rect` (`x0`, `y0`, `x1`, `y1`) | `CropLeft`, `CropTop`, `CropRight`, `CropBottom`; `HasCrop` | `crs.rs:447-458`; `lightroom_catalog.rs:700-705` |
-| — (merge only) | `crop.aspect`, `crop.flip_h`, `crop.flip_v` | **(assumption)** derived from `fileWidth`/`fileHeight` and `orientation`; no direct key verified | `settings.rs:815-822`; `lightroom_catalog.rs:737-765` |
+| — (merge only) | `crop.aspect`, `crop.flip_h`, `crop.flip_v` | **(assumption)** derived from `fileWidth`/`fileHeight` and `orientation`; no direct key verified; no crop or flip key in the available copy, 2026-11-04 | `settings.rs:815-822`; `lightroom_catalog.rs:737-765` |
 | — (merge only) | `treatment` (`color`, `bw`) | `ConvertToGrayscale` | `crs.rs:310-312`; `settings.rs:182-188` |
-| `pointColor.<i>.hueShift` etc. | `point_colors[i].hue_shift`, `sat_shift`, `lum_shift`, `variance`, `range`, `hue_range`, `sat_range`, `lum_range` | `PointColors` exists, but LightCraft's importer does not map it (reported only); **(assumption)** on the catalog key shape | `controls.rs:296-414`; `crs.rs:498-508`; `settings.rs:426-469` |
-| `redEye.<i>.pupilSize`, `.darken` | `red_eye[i].pupil_size`, `.darken` | **(assumption)** Lightroom key (possibly `RedEyeInfo`) not verified | `controls.rs:296-414`; `settings.rs:1075-1087`; `xmp-interop.md:191-192` |
+| `pointColor.<i>.hueShift` etc. | `point_colors[i].hue_shift`, `sat_shift`, `lum_shift`, `variance`, `range`, `hue_range`, `sat_range`, `lum_range` | `PointColors` exists (container key confirmed on a catalog copy, 2026-11-04, 11 photos, empty there), but LightCraft's importer does not map it (reported only); **(assumption)** on the catalog key shape | `controls.rs:296-414`; `crs.rs:498-508`; `settings.rs:426-469` |
+| `redEye.<i>.pupilSize`, `.darken` | `red_eye[i].pupil_size`, `.darken` | `RedEyeInfo` container key confirmed on a catalog copy, 2026-11-04 (11 photos, empty there); inner field names **(assumption)** not verified | `controls.rs:296-414`; `settings.rs:1075-1087`; `xmp-interop.md:191-192` |
 | — (merge only) | `masks[]` | `MaskGroupBasedCorrections`, `GradientBasedCorrections`, `CircularGradientBasedCorrections`, `PaintBasedCorrections` | `crs_masks.rs:23-24`, `:252-296`; `settings.rs:1015-1037` |
 | — (merge only) | `spots[]` | `RetouchAreas`, `RetouchInfo` | `crs_masks.rs:298-431`; `settings.rs:1053-1073` |
-| — (merge only) | `lens_blur` (`enabled`, `amount`, `focal_distance`, `focal_range`) | **(assumption)** Lightroom key not verified | `settings.rs:1096-1103`; `xmp-interop.md:191-192` |
-| `enhance.denoise` | `enhance.denoise` (+ `enhance.denoise_on`) | **(assumption)** Adobe AI-denoise key not verified | `controls.rs:254`; `settings.rs:1105-1117` |
-| — (merge only) | `enhance.raw_details`, `enhance.super_resolution` | **(assumption)** no Lightroom key verified | `settings.rs:1105-1117` |
+| — (merge only) | `lens_blur` (`enabled`, `amount`, `focal_distance`, `focal_range`) | `LensBlur` container key confirmed on a catalog copy, 2026-11-04 (11 photos, empty there); inner field names **(assumption)** not verified | `settings.rs:1096-1103`; `xmp-interop.md:191-192` |
+| `enhance.denoise` | `enhance.denoise` (+ `enhance.denoise_on`) | **(assumption)** Adobe AI-denoise key not verified; not present in the available copy, 2026-11-04 | `controls.rs:254`; `settings.rs:1105-1117` |
+| — (merge only) | `enhance.raw_details`, `enhance.super_resolution` | **(assumption)** no Lightroom key verified; not present in the available copy, 2026-11-04 | `settings.rs:1105-1117` |
 | — (merge only) | `disabled_sections` | — (LightCraft UI state, no Lightroom counterpart) | `settings.rs:143` |
 
-Open field-name gaps, all to be confirmed read-only on a catalog copy in P6-6
-(never on the original catalog): the `hdr.*` group, `red_eye`, `lens_blur`,
-`enhance.*`, `point_colors`, `optics.ca_red`/`ca_blue` and the crop flip
-fields. Until then the reader treats them as assumptions and reports them
-rather than dropping them (section 5.1).
+Open field-name gaps, checked read-only on a catalog copy in P6-6 (never on
+the original catalog; result in the subsection below): the `hdr.*` group,
+`red_eye`, `lens_blur`, `enhance.*`, `point_colors`, `optics.ca_red`/`ca_blue`
+and the crop flip fields. P6-6 confirmed the `hdr.*` names and the container
+keys of `red_eye`, `lens_blur` and `point_colors`; the rest stay unconfirmed.
+Until a name is confirmed, the reader treats it as an assumption and reports
+it rather than dropping it (section 5.1).
+
+#### P6-6 confirmation (2026-11-04)
+
+Method: a catalog copy provided for this task, 2026-11-04, opened read-only
+(`mode=ro`, `immutable=1`); checksums of the source are unchanged before and
+after. Catalog schema version (`Adobe_DBVersion`) 1500000, Camera Raw version
+18.0.0. Only table, column and field names plus row counts were extracted from
+`Adobe_imageDevelopSettings`; no value was read out or recorded. The settings
+text is Lightroom output: no generator in this repository writes develop
+settings.
+
+Counts: `Adobe_imageDevelopSettings` has 13 rows for 13 images (one row per
+image, no orphan rows); 11 rows carry a non-empty `text`, 2 rows are empty.
+The table has 32 columns; `text` is declared without a type. The feature
+columns `hasPointColor`, `hasLensBlur`, `hasAIMasks`, `hasMasks`,
+`isHdrEditMode` and `hasBigData` are 0 in all 13 rows;
+`hasDevelopAdjustmentsEx` is 1 for 5 rows, 0 for 2 and −1 for 6;
+`hasDevelopAdjustments`, `hasRetouch` and `hasSettings1`/`hasSettings2` are
+NULL.
+
+Confirmed top-level field names (number of the 11 non-empty rows):
+
+- `HDREditMode` (11), `HDRMaxValue` (11);
+- `SDRBlend`, `SDRBrightness`, `SDRContrast`, `SDRHighlights`, `SDRShadows`,
+  `SDRWhites`, `SDRClarity` (11 each);
+- `RedEyeInfo` (11), `LensBlur` (11), `PointColors` (11);
+- `AutoLateralCA` (11) — automatic CA removal, already documented, distinct
+  from the manual `optics.ca_red`/`ca_blue` sliders;
+- already-documented names seen as expected: `WhiteBalance` (11),
+  `Temperature`, `Tint`, `IncrementalTemperature`, `IncrementalTint` (3 each),
+  `ProcessVersion` (11). `AsShotTemperature` and `AsShotTint` (listed in the
+  table above, not marked as assumptions) did not occur in this copy.
+
+Structure: the HDR keys are siblings at the top level, not fields of an `HDR`
+table; `HDRMaxValue` and the seven `SDR*` keys are separate top-level keys.
+`SDRBlend` has no counterpart in LightCraft's `Hdr` model (section 1.2 does
+not list it), so it currently would be reported as unmapped. `HDRMaxValue`,
+`SDRBrightness` and the other `SDR*` values are numeric.
+
+Limits: `RedEyeInfo`, `LensBlur` and `PointColors` are empty table literals in
+every row of this copy (matching the zero feature flags), so the names of
+their inner fields could not be observed. No field name containing `Crop`,
+`Flip` or `Chromatic` occurs in this copy; the only CA-related name is
+`AutoLateralCA` (automatic). Likewise none contains `Denoise`, `Enhance`,
+`RawDetails` or `SuperResolution`.
+
+Still assumptions after P6-6: the inner field names of `RedEyeInfo`,
+`LensBlur` and `PointColors`; the manual CA sliders (`optics.ca_red`,
+`ca_blue`); the crop aspect and flip fields; the Adobe AI-denoise and
+enhance fields. Confirming them needs a catalog copy in which those edits are
+actually applied (red eye, lens blur, point colour, AI denoise, cropped and
+flipped photos); the copy used here leaves every one of them at its default.
+
+The assumption notes in section 5.1 name the same fields; this subsection
+states which of those names are confirmed and which remain open.
 
 ---
 
