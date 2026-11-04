@@ -26,9 +26,10 @@ What `--apply` writes into a LightCraft library, through the control port of
 the running LightCraft app: keywords, photos (as references to the existing
 files), ratings, flags, labels, titles, captions, copyright and creator,
 albums and album folders with their members, smart albums (only when the rule
-translates exactly), stacks (always written expanded) and the Quick
-Collection (only adding photos). Development settings are read from the
-catalog but not written yet.
+translates exactly), stacks (always written expanded), the Quick
+Collection (only adding photos) and development settings (sliders and the
+white-balance mode; tone curves and crop follow in a later change, masks and
+spots in another).
 
 Without `--apply`, lr2lc only reports what it would do. Everything that is
 not converted is listed with a reason in the summary and in `report.json`.
@@ -43,6 +44,7 @@ CI runs formatting, lint and tests on Linux, macOS and Windows.
 | `--library DIR` | The LightCraft library to write; also used by the dry run to read the mapping file |
 | `--port N` | Control port of the running LightCraft app (default 7980) |
 | `--allow-xmp` | Write even if the library writes XMP sidecars next to the originals |
+| `--overwrite-develop` | Also rewrite the development settings of known photos that changed in Lightroom |
 | `--map OLD=NEW` | Replace a path prefix, repeatable |
 | `--label-set SET` | Names of the colour labels: `en`, `de`, `auto` (default) or a JSON file |
 | `--report FILE` | Write `report.json` |
@@ -432,6 +434,44 @@ the catalog and its companion files are refused, and an existing `FILE` is
 only overwritten if it is empty or an earlier lr2lc script (every non-empty
 line a JSON object with `"method":"engine.execute"`).
 
+### Development settings
+
+lr2lc writes the development settings that have an exact LightCraft
+equivalent. Slider values (Light, HDR/SDR, colour, mixer, effects, detail,
+optics, geometry and calibration) go as one `develop.set` per photo; that
+command names its photo, so no selection is needed. Structured parts — the
+colour/B&W treatment, `hdr.enabled`, `optics.remove_ca` and the white-balance
+mode — go as one `develop.merge` directly after a `library.select`, because
+LightCraft applies it to the selection. A photo that needs both gets the
+`develop.set` first.
+
+White balance is written only when the mode is known. A Kelvin hint becomes
+`wb.scale: "kelvin"`; a relative or undecidable hint writes the mode alone.
+Temperature and tint themselves are never written, and neither is any value
+of an unmapped field: those are collected and reported by name.
+
+The mapping file records `develop_hash`, the SHA-256 of the settings text
+last written for a photo. On a later run the settings are compared by that
+hash:
+
+- a new photo, or one written by an older lr2lc without a hash, is written;
+- an unchanged hash sends nothing;
+- a changed hash of a known photo is left alone by default and counted as
+  `not_applied`, because the settings may have been edited in Lightroom
+  after the import. `--overwrite-develop` writes them and counts the photo
+  as `overwritten`.
+
+The dry run plans the same commands. The summary has one line
+`develop: photos with settings N, commands planned N, written N, unmapped
+fields N (N listed), changed and not applied N, overwritten N`, and
+`report.json` carries the same numbers in its top-level `develop` area
+(`photos`, `planned`, `written`, `unmapped`, `unmapped_count`, `not_applied`,
+`overwritten`). `written` is 0 in a dry run. `unmapped` lists at most 20
+distinct field names, sorted; `unmapped_count` is the full count. Neither
+the report nor the summary ever holds a value.
+
+Tone curves and crop follow in a later change, masks and spots in another.
+
 ### `--apply`
 
 ```sh
@@ -613,6 +653,11 @@ duplicate is made). A second run sends only what changed in Lightroom since
 then and creates no duplicates. If the file is lost, the next run finds the
 photos again as duplicates and the keywords in the library's keyword list.
 
+A photo entry also gains `develop_hash` once its development settings were
+written (see [Development settings](#development-settings)). Files from an
+older lr2lc without the field still load; such a known photo is written
+once, which records the hash.
+
 Collections are kept under `collections`, keyed by the Lightroom collection
 id: `{"lightcraft_id": ..., "kind": "album" | "folder", "name": ...,
 "parent": <Lightroom id> | null, "members": [...]}`, with the name and
@@ -686,7 +731,13 @@ counts the smart collections converted as smart albums.
   reported, with a code.
 - The collapsed or expanded state of stacks is only counted, not written;
   stacks are always written expanded.
-- Development settings (the Lightroom edit state) are not converted yet.
+- Development settings are written as sliders and the white-balance mode.
+  Tone curves and crop follow in a later change, masks and spots in another.
+  Temperature and tint and the other unmapped fields are reported, never
+  written.
+- A known photo whose development settings changed in Lightroom is left alone
+  unless `--overwrite-develop` is given (see
+  [Development settings](#development-settings)).
 - A second run reconciles every field of a known photo with what LightCraft
   holds now (see [Second run and reconciliation](#second-run-and-reconciliation)):
   a value changed differently on both sides is reported as a conflict with

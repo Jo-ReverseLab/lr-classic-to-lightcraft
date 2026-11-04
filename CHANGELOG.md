@@ -34,8 +34,18 @@ The project has not made a release yet.
   old-process fields with LightCraft's approximation, the merge-only
   switches and the white-balance mode. The stored Lua table is parsed
   without executing it; unknown fields, unreadable entries and Lightroom's
-  `-999999` sentinel are recorded for the report. Writing the settings
-  follows in a later change.
+  `-999999` sentinel are recorded for the report.
+- Writing of development settings (phase 6a): slider values as
+  `develop.set`, the structured parts and the white-balance mode as
+  `develop.merge` after a selection. Temperature, tint and the other
+  unmapped fields are reported by name and never written; tone curves and
+  crop follow in a later change, masks and spots in another.
+- `develop_hash` in the mapping file keeps the develop writes idempotent. A
+  known photo whose settings changed in Lightroom is only rewritten with the
+  new `--overwrite-develop`.
+- A top-level `develop` area in `report.json` and one summary line count the
+  photos with settings, the planned and written commands, the unmapped field
+  names (capped at 20), the changes left alone and the overwrites.
 - Dry run by default. The summary and `--report FILE` (`report.json`) list
   everything that is not converted, each with a reason and a fixed code
   (such as `missing`, `video` or `smart_untranslatable`); read equals
