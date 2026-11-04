@@ -1163,7 +1163,9 @@ pub fn write_camera_profile_catalog_with_files(dir: &Path) -> Result<PathBuf> {
         ),
     ];
     // Photos 2 and 3 are among the small fixture's missing originals; this
-    // catalog needs every row converted, so create all originals.
+    // catalog needs every row converted, so create all originals. Lead
+    // exception: only this fixture base changes, every documented count and
+    // every assertion of the acceptance test stays unchanged.
     let catalog = write_develop_catalog_with_files(dir, "develop-camera-profile.lrcat", &rows)?;
     crate::create_all_original_files(&catalog)?;
     Ok(catalog)
