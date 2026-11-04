@@ -69,7 +69,6 @@ fn query_filters(fake: &FakeLightCraft) -> Vec<Value> {
 }
 
 #[test]
-#[ignore = "waiting for A26 implementation"]
 fn a_deleted_photo_is_present_with_its_live_values() {
     let fake = start(|c| {
         c.seed_photos = vec![SeedPhoto {
@@ -124,7 +123,6 @@ fn a_photo_listed_by_neither_query_is_missing() {
 }
 
 #[test]
-#[ignore = "waiting for A26 implementation"]
 fn a_foreign_deleted_photo_is_counted_exactly_once() {
     let fake = start(|c| {
         c.seed_photos = vec![
@@ -145,7 +143,6 @@ fn a_foreign_deleted_photo_is_counted_exactly_once() {
 }
 
 #[test]
-#[ignore = "waiting for A26 implementation"]
 fn an_id_listed_by_both_queries_counts_once() {
     // Both queries overlap: every photo is listed by each stream.
     let fake = start(|c| {
@@ -182,7 +179,6 @@ fn an_id_listed_by_both_queries_counts_once() {
 }
 
 #[test]
-#[ignore = "waiting for A26 implementation"]
 fn both_queries_are_paged_completely() {
     let fake = start(|c| {
         let mut photos = seeds(1..=450);
@@ -236,7 +232,6 @@ fn both_queries_are_paged_completely() {
 }
 
 #[test]
-#[ignore = "waiting for A26 implementation"]
 fn reading_deleted_photos_sends_only_the_four_read_commands() {
     let fake = start(|c| {
         c.seed_photos = vec![

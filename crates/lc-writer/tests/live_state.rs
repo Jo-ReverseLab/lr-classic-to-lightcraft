@@ -142,7 +142,6 @@ fn only_read_commands_are_sent() {
 }
 
 #[test]
-#[ignore = "waiting for A26 implementation"]
 fn paging_reads_every_page_of_both_queries_in_order() {
     let fake = start(|c| c.seed_photos = seeds(1..=450));
     let ids: Vec<i64> = (1..=450).collect();
@@ -179,7 +178,6 @@ fn paging_reads_every_page_of_both_queries_in_order() {
 }
 
 #[test]
-#[ignore = "waiting for A26 implementation"]
 fn request_counts_are_the_expected_ones() {
     let fake = start(|c| {
         c.seed_photos = seeds(1..=5);
