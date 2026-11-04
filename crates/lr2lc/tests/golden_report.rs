@@ -359,6 +359,7 @@ const DEVELOP_KEYS: &[&str] = &[
     "photos_with_profile",
     "masks",
     "spots",
+    "white_balance_not_carried",
 ];
 
 #[test]
