@@ -396,7 +396,6 @@ fn expected_clamp_photo() -> Value {
 }
 
 #[test]
-#[ignore = "waiting for P6-7b"]
 fn spots_are_counted_and_the_summary_names_them() {
     let s = Setup::spots();
     let (report, stdout) = s.dry_ok_full(&s.report_path());
@@ -418,7 +417,6 @@ fn spots_are_counted_and_the_summary_names_them() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7b"]
 fn unsupported_spots_are_reported_by_name_only() {
     let s = Setup::spots();
     let (report, stdout) = s.dry_ok_full(&s.report_path());
@@ -435,7 +433,6 @@ fn unsupported_spots_are_reported_by_name_only() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7b"]
 fn script_contains_the_exact_lightcraft_spot_json() {
     let s = Setup::spots();
     let report_path = s.work.path().join("report.json");
@@ -498,7 +495,6 @@ fn script_contains_the_exact_lightcraft_spot_json() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7b"]
 fn retouch_info_is_used_only_when_retouch_areas_is_empty() {
     let s = Setup::spots();
     let report_path = s.work.path().join("report.json");
@@ -535,7 +531,6 @@ fn retouch_info_is_used_only_when_retouch_areas_is_empty() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7b"]
 fn two_dry_runs_are_identical_and_leave_the_catalog_unchanged() {
     let s = Setup::spots();
     let before = fs::read(&s.catalog).unwrap();
@@ -560,7 +555,6 @@ fn two_dry_runs_are_identical_and_leave_the_catalog_unchanged() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7b"]
 fn apply_writes_spots_once_and_a_second_run_writes_nothing() {
     use fake_lightcraft::{Config, FakeLightCraft};
     use lc_test_support::fake_lightcraft;
@@ -624,7 +618,6 @@ fn apply_writes_spots_once_and_a_second_run_writes_nothing() {
 }
 
 #[test]
-#[ignore = "waiting for P6-7b"]
 fn a_catalog_without_spots_reports_zero_and_sends_no_spots_key() {
     let s = Setup::without_spots();
     let report_path = s.work.path().join("report.json");

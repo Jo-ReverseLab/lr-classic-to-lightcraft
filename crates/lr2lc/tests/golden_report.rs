@@ -358,6 +358,7 @@ const DEVELOP_KEYS: &[&str] = &[
     "camera_profiles_count",
     "photos_with_profile",
     "masks",
+    "spots",
 ];
 
 #[test]

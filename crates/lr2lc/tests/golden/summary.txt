@@ -122,4 +122,4 @@ writer stacks: to group 6, already in the library 0, members left in LightCraft 
 writer quick collection: to add 3, already in it 0, members left in LightCraft 0
 writer smart albums: smart albums to create 1, already in the library 0, rules changed in Lightroom 0
 writer smart albums no longer translatable (left as is in LightCraft): 0
-develop: photos with settings 0, commands planned 0, written 0, unmapped fields 0 (0 listed), changed and not applied 0, overwritten 0, photos with camera profile 0, photos with masks 0
+develop: photos with settings 0, commands planned 0, written 0, unmapped fields 0 (0 listed), changed and not applied 0, overwritten 0, photos with camera profile 0, photos with masks 0, photos with spots 0
