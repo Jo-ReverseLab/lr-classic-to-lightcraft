@@ -313,6 +313,11 @@ pub struct Plan {
     /// Distinct names of catalog fields that could not be carried over,
     /// sorted, without duplicates. Only names, never values.
     develop_unmapped: Vec<String>,
+    /// Converted photos per camera profile name, ordered by name. Names and
+    /// counts only, never rendering values.
+    develop_camera_profiles: BTreeMap<String, usize>,
+    /// Converted photos that carry a non-empty camera profile name.
+    develop_photos_with_profile: usize,
 }
 
 impl Plan {
@@ -505,6 +510,16 @@ impl Plan {
     /// sorted. Only names, never values.
     pub fn develop_unmapped(&self) -> &[String] {
         &self.develop_unmapped
+    }
+
+    /// Converted photos per camera profile name, ordered by name.
+    pub fn develop_camera_profiles(&self) -> &BTreeMap<String, usize> {
+        &self.develop_camera_profiles
+    }
+
+    /// Converted photos that carry a non-empty camera profile name.
+    pub fn develop_photos_with_profile(&self) -> usize {
+        self.develop_photos_with_profile
     }
 
     /// The plan as a script: one JSON line per step, each an
@@ -972,6 +987,17 @@ fn plan_photos(
         let p = by_gid[gid];
         if let Some(develop) = &p.develop {
             out.develop_photos += 1;
+            // An empty name is no profile (the reader already drops it).
+            if let Some(profile) = develop
+                .camera_profile
+                .as_deref()
+                .filter(|profile| !profile.is_empty())
+            {
+                *out.develop_camera_profiles
+                    .entry(profile.to_owned())
+                    .or_default() += 1;
+                out.develop_photos_with_profile += 1;
+            }
             out.develop_unmapped
                 .extend(develop.unmapped.iter().cloned());
         }
@@ -2281,6 +2307,83 @@ mod tests {
             ..Develop::default()
         };
         assert!(has_develop_content(&cropped));
+    }
+
+    #[test]
+    fn a_camera_profile_alone_plans_no_command_but_is_counted_by_name() {
+        let profile = Develop {
+            camera_profile: Some("Profil Ärger 📷".to_owned()),
+            source_hash: Some([0x11; 32]),
+            ..Develop::default()
+        };
+        let photos = vec![
+            Photo::new("a.jpg", 1, Rating::default())
+                .with_global_id("a")
+                .with_develop(profile.clone()),
+            Photo::new("b.jpg", 2, Rating::default())
+                .with_global_id("b")
+                .with_develop(profile),
+        ];
+        let input = WriteInput {
+            photos,
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &State::default(), &BTreeSet::new());
+        assert_eq!(p.develop_photos(), 2);
+        assert_eq!(p.develop_planned(), 0);
+        assert!(
+            !p.steps
+                .iter()
+                .any(|s| matches!(s, Step::DevelopSet { .. } | Step::DevelopMerge { .. })),
+            "{:?}",
+            p.steps
+        );
+        assert_eq!(p.develop_camera_profiles().get("Profil Ärger 📷"), Some(&2));
+        assert_eq!(p.develop_photos_with_profile(), 2);
+    }
+
+    #[test]
+    fn an_empty_camera_profile_is_neither_listed_nor_counted() {
+        let develop = Develop {
+            camera_profile: Some(String::new()),
+            source_hash: Some([0x22; 32]),
+            ..Develop::default()
+        };
+        let input = WriteInput {
+            photos: vec![
+                Photo::new("a.jpg", 1, Rating::default())
+                    .with_global_id("a")
+                    .with_develop(develop),
+            ],
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &State::default(), &BTreeSet::new());
+        assert!(p.develop_camera_profiles().is_empty());
+        assert_eq!(p.develop_photos_with_profile(), 0);
+    }
+
+    #[test]
+    fn a_profile_does_not_suppress_slider_commands() {
+        let mut develop = Develop {
+            camera_profile: Some("Studio Neutral".to_owned()),
+            source_hash: Some([0x33; 32]),
+            ..Develop::default()
+        };
+        develop.controls.insert("light.exposure".to_owned(), 1.25);
+        let input = WriteInput {
+            photos: vec![
+                Photo::new("a.jpg", 1, Rating::default())
+                    .with_global_id("a")
+                    .with_develop(develop),
+            ],
+            ..WriteInput::default()
+        };
+        let p = plan(&input, &State::default(), &BTreeSet::new());
+        assert_eq!(p.develop_planned(), 1);
+        assert!(matches!(
+            p.steps.as_slice(),
+            [Step::Import { .. }, Step::DevelopSet { .. }]
+        ));
     }
 
     #[test]

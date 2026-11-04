@@ -44,10 +44,20 @@ pub struct DevelopJson {
     pub not_applied: usize,
     /// Photos written because `--overwrite-develop` was given.
     pub overwritten: usize,
+    /// Converted photos per camera profile name, sorted, at most
+    /// [`CAMERA_PROFILES_LIMIT`] entries. Names and counts only.
+    pub camera_profiles: BTreeMap<String, usize>,
+    /// Number of distinct camera profile names, also above the listing cap.
+    pub camera_profiles_count: usize,
+    /// Converted photos that carry a non-empty camera profile name.
+    pub photos_with_profile: usize,
 }
 
 /// At most this many unmapped field names are listed in the report.
 pub const UNMAPPED_LIMIT: usize = 20;
+
+/// At most this many camera profile names are listed in the report.
+pub const CAMERA_PROFILES_LIMIT: usize = 20;
 
 /// The `develop` section of a dry run.
 pub fn planned_develop(plan: &Plan) -> DevelopJson {
@@ -58,6 +68,8 @@ pub fn planned_develop(plan: &Plan) -> DevelopJson {
         plan.develop_unmapped(),
         plan.develop_not_applied(),
         plan.develop_overwritten(),
+        plan.develop_camera_profiles(),
+        plan.develop_photos_with_profile(),
     )
 }
 
@@ -70,9 +82,12 @@ pub fn applied_develop(s: &ApplySummary) -> DevelopJson {
         &s.develop_unmapped,
         s.develop_not_applied,
         s.develop_overwritten,
+        &s.develop_camera_profiles,
+        s.develop_photos_with_profile,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn develop_json(
     photos: usize,
     planned: usize,
@@ -80,6 +95,8 @@ fn develop_json(
     unmapped: &[String],
     not_applied: usize,
     overwritten: usize,
+    camera_profiles: &BTreeMap<String, usize>,
+    photos_with_profile: usize,
 ) -> DevelopJson {
     DevelopJson {
         photos,
@@ -89,6 +106,13 @@ fn develop_json(
         unmapped_count: unmapped.len(),
         not_applied,
         overwritten,
+        camera_profiles: camera_profiles
+            .iter()
+            .take(CAMERA_PROFILES_LIMIT)
+            .map(|(name, count)| (name.clone(), *count))
+            .collect(),
+        camera_profiles_count: camera_profiles.len(),
+        photos_with_profile,
     }
 }
 
@@ -98,14 +122,16 @@ fn develop_line(out: &mut String, d: &DevelopJson) {
     let _ = writeln!(
         out,
         "develop: photos with settings {}, commands planned {}, written {}, \
-         unmapped fields {} ({} listed), changed and not applied {}, overwritten {}",
+         unmapped fields {} ({} listed), changed and not applied {}, overwritten {}, \
+         photos with camera profile {}",
         d.photos,
         d.planned,
         d.written,
         d.unmapped_count,
         d.unmapped.len(),
         d.not_applied,
-        d.overwritten
+        d.overwritten,
+        d.photos_with_profile
     );
 }
 
@@ -657,7 +683,7 @@ pub fn stop_error(e: &WriteError) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::{Photo, Rating, SkipCode};
+    use model::{Develop, Photo, Rating, SkipCode};
 
     fn plan_of(photos: Vec<Photo>) -> Plan {
         let input = WriteInput {
@@ -866,6 +892,62 @@ mod tests {
         assert!(text.contains("collections renamed 1, moved 0, removed 0"));
         assert!(text.contains("skipped collections:"));
         assert!(text.contains("LightCraft rejected `album.create`"));
+    }
+
+    fn photo_with_profile(gid: &str, lr_id: i64, profile: &str) -> Photo {
+        let develop = Develop {
+            camera_profile: Some(profile.to_owned()),
+            ..Develop::default()
+        };
+        Photo::new("a.jpg", lr_id, Rating::default())
+            .with_global_id(gid)
+            .with_develop(develop)
+    }
+
+    #[test]
+    fn camera_profiles_are_sorted_capped_and_counted_by_name() {
+        let photos: Vec<Photo> = (0..25)
+            .map(|i| photo_with_profile(&format!("g{i}"), i + 1, &format!("Profile {:02}", 24 - i)))
+            .collect();
+        let plan = plan_of(photos);
+        let d = planned_develop(&plan);
+        assert_eq!(d.camera_profiles.len(), CAMERA_PROFILES_LIMIT);
+        assert_eq!(d.camera_profiles_count, 25);
+        assert_eq!(d.photos_with_profile, 25);
+        let listed: Vec<&String> = d.camera_profiles.keys().collect();
+        let mut sorted = listed.clone();
+        sorted.sort();
+        assert_eq!(listed, sorted, "the listing is sorted by name");
+        assert_eq!(listed.first().map(|s| s.as_str()), Some("Profile 00"));
+        assert_eq!(listed.last().map(|s| s.as_str()), Some("Profile 19"));
+
+        let v = serde_json::to_value(&d).unwrap();
+        let json_keys: Vec<&String> = v["camera_profiles"]
+            .as_object()
+            .expect("camera_profiles object")
+            .keys()
+            .collect();
+        let mut sorted_json = json_keys.clone();
+        sorted_json.sort();
+        assert_eq!(json_keys, sorted_json);
+        assert_eq!(v["camera_profiles_count"], 25);
+        assert_eq!(v["photos_with_profile"], 25);
+        assert!(planned_summary(&plan).contains("photos with camera profile 25"));
+    }
+
+    #[test]
+    fn a_camera_profile_alone_plans_no_develop_command() {
+        let plan = plan_of(vec![photo_with_profile("g", 1, "Solo Profile")]);
+        let d = planned_develop(&plan);
+        assert_eq!(d.photos, 1);
+        assert_eq!(d.planned, 0);
+        assert_eq!(
+            d.camera_profiles.get("Solo Profile").copied(),
+            Some(1),
+            "{:?}",
+            d.camera_profiles
+        );
+        assert!(planned_summary(&plan).contains("commands planned 0"));
     }
 
     #[test]

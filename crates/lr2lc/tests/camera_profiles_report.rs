@@ -79,7 +79,6 @@ fn count(report: &Value, key: &str) -> usize {
 }
 
 #[test]
-#[ignore = "waiting for P6-5"]
 fn profiles_are_aggregated_by_name_and_keep_their_bytes() {
     let (_dir, catalog, report_path) = setup();
     let (_out, report) = run(&catalog, &report_path);
@@ -87,7 +86,7 @@ fn profiles_are_aggregated_by_name_and_keep_their_bytes() {
     let got = profiles(&report);
     let mut names: Vec<&String> = got.keys().collect();
     names.sort();
-    let mut expected = vec![
+    let mut expected = [
         p::BYTE_EXACT.to_owned(),
         p::STUDIO.to_owned(),
         p::PROFILE_ONLY.to_owned(),
@@ -131,7 +130,6 @@ fn profiles_are_aggregated_by_name_and_keep_their_bytes() {
 }
 
 #[test]
-#[ignore = "waiting for P6-5"]
 fn missing_and_empty_profiles_are_not_reported() {
     let (_dir, catalog, report_path) = setup();
     let (_out, report) = run(&catalog, &report_path);
@@ -150,7 +148,6 @@ fn missing_and_empty_profiles_are_not_reported() {
 }
 
 #[test]
-#[ignore = "waiting for P6-5"]
 fn a_wrongly_typed_profile_is_unmapped_and_creates_no_entry() {
     let (_dir, catalog, report_path) = setup();
     let (_out, report) = run(&catalog, &report_path);
@@ -179,7 +176,6 @@ fn a_wrongly_typed_profile_is_unmapped_and_creates_no_entry() {
 }
 
 #[test]
-#[ignore = "waiting for P6-5"]
 fn a_look_name_is_not_a_camera_profile() {
     let (_dir, catalog, report_path) = setup();
     let (_out, report) = run(&catalog, &report_path);
@@ -192,7 +188,6 @@ fn a_look_name_is_not_a_camera_profile() {
 }
 
 #[test]
-#[ignore = "waiting for P6-5"]
 fn a_profile_alone_plans_no_develop_command() {
     let (_dir, catalog, report_path) = setup();
     let (_out, report) = run(&catalog, &report_path);
@@ -215,7 +210,6 @@ fn a_profile_alone_plans_no_develop_command() {
 }
 
 #[test]
-#[ignore = "waiting for P6-5"]
 fn the_summary_names_the_photos_with_a_profile() {
     let (_dir, catalog, report_path) = setup();
     let (output, _report) = run(&catalog, &report_path);
@@ -228,7 +222,6 @@ fn the_summary_names_the_photos_with_a_profile() {
 }
 
 #[test]
-#[ignore = "waiting for P6-5"]
 fn the_mandatory_invariants_hold_for_the_profile_fixture() {
     let (_dir, catalog, report_path) = setup();
     let before = fs::read(&catalog).unwrap();

@@ -460,6 +460,12 @@ into the displayed frame through the stored orientation and image size the
 same way LightCraft's catalog import does. The angle appears only inside
 `crop.geometry`, never as a control.
 
+The camera profile (`CameraProfile`) is kept byte for byte in the model but
+never written: there is no profile or LUT converter, and a photo that only
+carries a profile plans no develop command. The report groups converted
+photos by profile name (a missing or empty name is no profile) and the
+summary counts them.
+
 The mapping file records `develop_hash`, the SHA-256 of the settings text
 last written for a photo. On a later run the settings are compared by that
 hash:
@@ -473,12 +479,17 @@ hash:
 
 The dry run plans the same commands. The summary has one line
 `develop: photos with settings N, commands planned N, written N, unmapped
-fields N (N listed), changed and not applied N, overwritten N`, and
-`report.json` carries the same numbers in its top-level `develop` area
-(`photos`, `planned`, `written`, `unmapped`, `unmapped_count`, `not_applied`,
-`overwritten`). `written` is 0 in a dry run. `unmapped` lists at most 20
-distinct field names, sorted; `unmapped_count` is the full count. Neither
-the report nor the summary ever holds a value.
+fields N (N listed), changed and not applied N, overwritten N, photos with
+camera profile N`, and `report.json` carries the same numbers in its
+top-level `develop` area (`photos`, `planned`, `written`, `unmapped`,
+`unmapped_count`, `not_applied`, `overwritten`, `camera_profiles`,
+`camera_profiles_count`, `photos_with_profile`). `written` is 0 in a dry run.
+`unmapped` lists at most 20 distinct field names, sorted; `unmapped_count`
+is the full count. `camera_profiles` maps each profile name to the number of
+converted photos, sorted, at most 20 entries; `camera_profiles_count` is the
+full number of distinct names and `photos_with_profile` the number of
+converted photos with a profile. Neither the report nor the summary ever
+holds a value.
 
 Masks and spots follow in a later change.
 

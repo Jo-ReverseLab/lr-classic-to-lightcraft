@@ -520,7 +520,10 @@
     "unmapped": [],
     "unmapped_count": 0,
     "not_applied": 0,
-    "overwritten": 0
+    "overwritten": 0,
+    "camera_profiles": {},
+    "camera_profiles_count": 0,
+    "photos_with_profile": 0
   },
   "writer": {
     "planned": {

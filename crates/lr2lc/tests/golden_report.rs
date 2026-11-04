@@ -354,6 +354,9 @@ const DEVELOP_KEYS: &[&str] = &[
     "unmapped_count",
     "not_applied",
     "overwritten",
+    "camera_profiles",
+    "camera_profiles_count",
+    "photos_with_profile",
 ];
 
 #[test]

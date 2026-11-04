@@ -54,6 +54,7 @@ matching skipped list.
 | `keyword_assignments` | object | always | area |
 | `keyword_synonyms` | object | always | area |
 | `ratings` | object | always | see [ratings](#ratings) |
+| `develop` | object | always | see [develop](#develop) |
 | `skipped_by_code` | object | always, may be `{}` | sums the nine catalog areas only (not `writer`) |
 | `writer` | object | always | see [writer](#writer) |
 
@@ -136,6 +137,29 @@ keys `"0"` .. `"5"`, each an integer count of converted photos with that star
 rating (unrated counts as 0).
 
 **Guarantee.** The six counts sum to `photos.converted`.
+
+## develop
+
+Development settings: counts and field or profile names only, never a
+rendering value.
+
+| Key | Type | When | Notes |
+| --- | --- | --- | --- |
+| `develop.photos` | integer | always | converted photos that carry development settings |
+| `develop.planned` | integer | always | photos the plan sends `develop.*` commands for |
+| `develop.written` | integer | always | photos whose develop commands all succeeded (0 in a dry run) |
+| `develop.unmapped` | array of strings | always | distinct field names that could not be carried over, sorted, at most 20 |
+| `develop.unmapped_count` | integer | always | full number of distinct unmapped names, also above the cap |
+| `develop.not_applied` | integer | always | known photos whose settings changed in Lightroom and were left alone |
+| `develop.overwritten` | integer | always | photos rewritten because `--overwrite-develop` was given |
+| `develop.camera_profiles` | object | always, may be `{}` | profile name → number of converted photos, sorted, at most 20 entries |
+| `develop.camera_profiles_count` | integer | always | full number of distinct profile names, also above the cap |
+| `develop.photos_with_profile` | integer | always | converted photos with a non-empty profile name |
+
+**Guarantee.** A camera profile name is reported byte for byte and only when
+it is non-empty; it is never a rendering value and never triggers a develop
+command. Profile names and unmapped field names are independent: `Look` is
+an unmapped field name, not a profile.
 
 ## collections
 

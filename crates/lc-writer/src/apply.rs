@@ -229,6 +229,11 @@ pub struct ApplySummary {
     /// Distinct names of catalog fields that could not be carried over,
     /// sorted. Only names, never values.
     pub develop_unmapped: Vec<String>,
+    /// Converted photos per camera profile name, ordered by name. Names and
+    /// counts only, never rendering values.
+    pub develop_camera_profiles: BTreeMap<String, usize>,
+    /// Converted photos that carry a non-empty camera profile name.
+    pub develop_photos_with_profile: usize,
     /// `removed_photos.len()`, for the report.
     pub photos_removed: usize,
     /// `moved_photos.len()`, for the report.
@@ -337,6 +342,8 @@ pub fn apply_partial(
             develop_not_applied: plan.develop_not_applied(),
             develop_overwritten: plan.develop_overwritten(),
             develop_unmapped: plan.develop_unmapped().to_vec(),
+            develop_camera_profiles: plan.develop_camera_profiles().clone(),
+            develop_photos_with_profile: plan.develop_photos_with_profile(),
             ..ApplySummary::default()
         },
         recorded: plan.recorded_fields_map(),
