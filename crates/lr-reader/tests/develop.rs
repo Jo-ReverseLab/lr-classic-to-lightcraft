@@ -667,10 +667,22 @@ fn develop_settings_do_not_change_which_photos_are_returned() {
     let cat = dev::write_balance_catalog_with_files(dir.path()).unwrap();
     let (data, report) = read(&cat);
 
+    // The settings table must not add, drop or reorder photos: both catalogs
+    // describe the same photo set, and the report reads the same number of
+    // rows. Which develop rows are invalid or deferred is not part of this
+    // comparison; `develop_counts_add_up` covers that for the settings
+    // catalog.
     let ids = |d: &PhotoData| -> Vec<i64> { d.photos.iter().map(|p| p.lightroom_id).collect() };
-    assert_eq!(ids(&data), ids(&plain_data));
+    assert_eq!(
+        ids(&data),
+        ids(&plain_data),
+        "settings must not change which photos are returned"
+    );
     assert_eq!(data.photos.len(), plain_data.photos.len());
     assert_eq!(report.read_count(), plain_report.read_count());
-    assert_eq!(data.develop_invalid, plain_data.develop_invalid);
-    assert_eq!(data.develop_deferred, plain_data.develop_deferred);
+
+    // The flat catalog has no settings table at all, so nothing can be
+    // invalid or deferred there.
+    assert!(plain_data.develop_invalid.is_empty());
+    assert!(plain_data.develop_deferred.is_empty());
 }
