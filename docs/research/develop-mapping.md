@@ -1,13 +1,13 @@
 # Development settings: mapping from Lightroom Classic to LightCraft
 
 > **Status:** Phase-6 groundwork, updated in P6-0 (2026-11-04), with the P6-6
-> confirmation and the implementation through P6-7a carried in. The scope and
+> confirmation and the implementation through P6-7b carried in. The scope and
 > seven of the eight open decisions are settled (section 8); the white-balance
 > probe is still open (section 8.2). Development settings are implemented for
 > phase 6a (sliders, tone curves, crop, white-balance mode and camera profiles)
-> and for P6-7a (masks); spots remain P6-7b. P6-4 took the cautious route: only
-> the white-balance mode is mapped, and reading the originals remains an open
-> probe (section 8.2). The lr2lc citations were re-checked against commit
+> and for P6-7 (masks in P6-7a, spots in P6-7b). P6-4 took the cautious route:
+> only the white-balance mode is mapped, and reading the originals remains an
+> open probe (section 8.2). The lr2lc citations were re-checked against commit
 > `04ee6f5` (section 0).
 
 This document answers four questions:
@@ -450,7 +450,7 @@ identical).
 | `PerspectiveUpright` | `geometry.upright` | number → off (0), auto (1), level (2), vertical (3), full (4), guided (5) | `crs.rs:435-445` |
 | `UprightTransform_*`, `UprightTransformCount`, `UprightCenterNorm*`, `UprightVersion` | — | saved matrices are not imported; reported (the mode is recalculated) | `xmp-interop.md:173`; `crs.rs:528-536` |
 | `CropLeft/Top/Right/Bottom` | `crop.geometry.rect` (`x0,y0,x1,y1`) | normalised edges of the stored image → rectangle in the oriented, rotated frame; aspect comes from `fileWidth`/`fileHeight` | `crs.rs:447-458`; `lightroom_catalog.rs:737-765` |
-| `CropAngle` | `crop.geometry.angle` (LightCraft also has a `crop.angle` control, `controls.rs:292`; lr2lc does not send it separately) | degrees, sign flipped when the orientation mirrors | `crs.rs:456`; `lightroom_catalog.rs:754-757` |
+| `CropAngle` | `crop.geometry.angle`, control `crop.angle` | degrees, sign flipped when the orientation mirrors | `crs.rs:456`; `lightroom_catalog.rs:754-757` |
 | missing `HasCrop` | — | inferred from any crop field | `lightroom_catalog.rs:700-705` |
 
 ### 4.10 Calibration
@@ -488,9 +488,8 @@ lrcat-extractor (MPL-2.0).
 The correction geometry is converted relative to the photo's displayed aspect
 ratio (width / height after the stored orientation, so a quarter turn uses
 the reciprocal) for radial and spot masks (`crs_masks.rs:253-254`); presets
-assume 3:2 (`xmp-interop.md:227`). lr2lc passes the real photo aspect, which
-it knows from the catalog's `fileWidth`/`fileHeight` and the stored
-orientation (section 2.1).
+assume 3:2 (`xmp-interop.md:227`). lr2lc must pass the real photo aspect, which
+it knows from the catalog's `fileWidth`/`fileHeight` (section 2.1).
 
 **Status (P6-7b):** the mask and spot paths are implemented. The four
 containers, the linear, radial, brush, luminance, depth, subject and sky
@@ -517,10 +516,9 @@ LightCraft has **two spellings** for the same value:
   non-slider fields.
 
 `develop.set` accepts numbers only (`develop.rs:177-190`); booleans, strings,
-curves, crop geometry (the crop rectangle and its angle; LightCraft also
-offers a `crop.angle` control, `controls.rs:292`, but lr2lc stores the angle
-in `crop.geometry.angle` and never sends a duplicate control), masks and spots
-go through `develop.merge` (section 4.12 marks those "merge only"). A "JSON path" below is **nested objects**, not a
+curves, crop geometry (the crop rectangle; `crop.angle` is itself a control,
+`controls.rs:292`), masks and spots go through `develop.merge` (section 4.12
+marks those "merge only"). A "JSON path" below is **nested objects**, not a
 flattened dotted key: `{"detail": {"sharpen_amount": 40}}`, not
 `{"detail.sharpen_amount": 40}`. `develop.merge` deep-merges the object
 (`crates/develop/src/lib.rs:46-48`) and ignores unknown keys silently
@@ -535,7 +533,7 @@ Yellow, Green, Aqua, Blue, Purple, Magenta` (`crs.rs:60`;
 | LightCraft `develop.set` id | `develop.merge` JSON path | Lightroom key in `text` | Evidence |
 | --- | --- | --- | --- |
 | `profile.amount` | `profile.amount` | — (no Lightroom counterpart) | `controls.rs:171`; `settings.rs:191-207`; no mapping in `crs.rs:202-460` |
-| `wb.temp`, `wb.tint` | `wb.temp`, `wb.tint` (+ `wb.scale`) | `Temperature`, `Tint`; `IncrementalTemperature`, `IncrementalTint`; `AsShotTemperature`, `AsShotTint` (assumed names, not observed in the P6-6 copy) | `controls.rs:172-173`; `crs.rs:250-306`; `settings.rs:300-309` |
+| `wb.temp`, `wb.tint` | `wb.temp`, `wb.tint` (+ `wb.scale`) | `Temperature`, `Tint`; `IncrementalTemperature`, `IncrementalTint`; `AsShotTemperature`, `AsShotTint` (the `AsShot*` names are assumed and were not observed in the P6-6 copy) | `controls.rs:172-173`; `crs.rs:250-306`; `settings.rs:300-309` |
 | — (merge only) | `wb.mode` (`asShot`, `auto`, `daylight`, …) | `WhiteBalance` | `crs.rs:250-260`; `settings.rs:210-267` |
 | — (merge only) | `wb.scale: "kelvin"` | written by LightCraft, not read from Lightroom | `crs.rs:294-296`; `settings.rs:278-286` |
 | `light.exposure` | `light.exposure` | `Exposure2012`; old `Exposure` | `controls.rs:174`; `crs.rs:210`, `:235` |
@@ -632,7 +630,7 @@ Yellow, Green, Aqua, Blue, Purple, Magenta` (`crs.rs:60`;
 | `calibration.redHue`, `calibration.redSat` | `calibration.red_hue`, `calibration.red_sat` | `RedHue`, `RedSaturation` | `controls.rs:286-287`; `crs.rs:420-421` |
 | `calibration.greenHue`, `calibration.greenSat` | `calibration.green_hue`, `calibration.green_sat` | `GreenHue`, `GreenSaturation` | `controls.rs:288-289`; `crs.rs:422-423` |
 | `calibration.blueHue`, `calibration.blueSat` | `calibration.blue_hue`, `calibration.blue_sat` | `BlueHue`, `BlueSaturation` | `controls.rs:290-291`; `crs.rs:424-425` |
-| — (merge only) | `crop.geometry.angle` | `CropAngle`; LightCraft's separate `crop.angle` control is not used, so the angle is not written twice | `controls.rs:292`; `crs.rs:447-458`; `settings.rs:815-822` |
+| `crop.angle` | `crop.geometry.angle` | `CropAngle` | `controls.rs:292`; `crs.rs:447-458`; `settings.rs:815-822` |
 | — (merge only) | `crop.geometry.rect` (`x0`, `y0`, `x1`, `y1`) | `CropLeft`, `CropTop`, `CropRight`, `CropBottom`; `HasCrop` | `crs.rs:447-458`; `lightroom_catalog.rs:700-705` |
 | — (merge only) | `crop.aspect`, `crop.flip_h`, `crop.flip_v` | **(assumption)** derived from `fileWidth`/`fileHeight` and `orientation`; no direct key verified; no crop or flip key in the available copy, 2026-11-04 | `settings.rs:815-822`; `lightroom_catalog.rs:737-765` |
 | — (merge only) | `treatment` (`color`, `bw`) | `ConvertToGrayscale` | `crs.rs:310-312`; `settings.rs:182-188` |
@@ -719,7 +717,7 @@ states which of those names are confirmed and which remain open.
 | Lightroom setting | Why it cannot be carried over | LightCraft behaviour today | Report behaviour | Source |
 | --- | --- | --- | --- | --- |
 | `ProcessVersion` | names Lightroom's rendering algorithm | LightCraft keeps its own latest process | **silent**: listed as bookkeeping, not in `unmapped` | `crs.rs:63-107`; `docs/lightroom-catalog-import.md:103-105` |
-| `CameraProfile` | profile name carries no rendering data; LightCraft has its own profiles | profile untouched; read since P6-5 and counted per profile name | **not** in `unmapped` for a text value: counted in `develop.camera_profiles`, `develop.camera_profiles_count` and `develop.photos_with_profile` (`photos with camera profile N` in the summary); a non-textual value stays unmapped as `CameraProfile` | `xmp-interop.md:178`; test `lightroom_catalog.rs:1255` |
+| `CameraProfile` | profile name carries no rendering data; LightCraft has its own profiles | profile untouched; read since P6-5 and counted per profile name | **not** in `unmapped` for a non-empty text value: counted in `develop.camera_profiles`, `develop.camera_profiles_count` and `develop.photos_with_profile` (`photos with camera profile N` in the summary); a non-textual value stays unmapped as `CameraProfile` | `xmp-interop.md:178`; `crates/lr-reader/src/develop.rs:1055-1061`; `crates/lr2lc/tests/camera_profiles_report.rs:152`; test `lightroom_catalog.rs:1255` |
 | `Look` (a named profile/preset) | LightCraft's catalog import does not resolve a Look to a profile | profile untouched | reported as `Look` | `crs.rs:498-516`; test `crs.rs:893-894` |
 | non-empty `PointColors` | mapper has no Point Color conversion | model and `pointColor.*` controls exist, but stay at defaults | reported as `PointColors` | `crs.rs:498-508`; test `crs.rs:876-884` |
 | red-eye corrections | not read by the mapper | `red_eye` model and `redEye.*` controls exist | reported as `RedEyeInfo` (container name confirmed, 2026-11-04; inner fields not read) | `xmp-interop.md:191-192`; section 4.12 |
@@ -1075,7 +1073,7 @@ is of that kind. The "decision" column is what P6-1…P6-7 implement.
 | 1 | Which route takes the develop settings? | `develop.set` and `develop.merge` exist and cover sliders and a partial settings object (`develop.rs:167-263`; `crates/develop/src/lib.rs:45-57`). `library.importLightroom` always imports a whole catalog (`lightroom_catalog.rs:481`, `:1096`), so it cannot be a develop-only call. | **Own mapper.** lr2lc reads `Adobe_imageDevelopSettings.text` itself and writes through `develop.set` / `develop.merge`. `library.importLightroom` is not used for develop settings. | User (released 2026-11-04) |
 | 2 | White balance on raws. | Kelvin handling needs source info from the original file (`crs.rs:250-306`, `:40-57`); lr2lc must not touch originals (principle 2). | **Probe originals read-only only when original paths are released; otherwise do not map `Temperature`/`Tint` and report them as not carried.** The mode (`WhiteBalance`) is always mapped. Enabling the probe is the one residual question (see 8.2). | Open (section 8.2): until answered, only the WB mode is mapped; `Temperature`/`Tint` are reported as not carried |
 | 3 | Scope of phase 6. | Masks and spots are the bulk (`crs_masks.rs:23-24`, `:252-431`); sliders, curves and crop are bounded and testable from generated fixtures. | **6a = sliders, tone curves and crop. 6b = masks and spots, and 6b must not delay the import** (P6-7 runs last). | User (released 2026-11-04) |
-| 4 | Model shape. | 122 controls would duplicate a table LightCraft owns (`controls.rs:144-166`, `:171-292`); tone curves, the crop rectangle, masks and spots have no slider (`settings.rs:332-374`, `:815-822`, `:1015-1073`), though `crop.angle` is a control (`controls.rs:292`). | **Hybrid:** a generic control-id map for sliders (LightCraft's control list contains `crop.angle` at `controls.rs:292`, but lr2lc's `CONTROL_IDS` and writer do not use it; the angle rides in the typed `crop.geometry`), typed fields for tone curves, the crop rectangle, masks and spots. | User (released 2026-11-04) |
+| 4 | Model shape. | 122 controls would duplicate a table LightCraft owns (`controls.rs:144-166`, `:171-292`); tone curves, the crop rectangle, masks and spots have no slider (`settings.rs:332-374`, `:815-822`, `:1015-1073`), though `crop.angle` is a control (`controls.rs:292`). | **Hybrid:** a generic control-id map for sliders (including `crop.angle`), typed fields for tone curves, the crop rectangle, masks and spots. | User (released 2026-11-04) |
 | 5 | Re-sync policy for changed edits. | The plan only adds; the mapping file records the base values (`state.rs:87-105`); `develop.merge` can overwrite. | **Report changed settings by default; overwrite only with explicit `--overwrite-develop`.** | User (released 2026-11-04) |
 | 6 | Report size. | `report.json` has one area per kind plus `skipped_by_code` (`crates/lr2lc/src/output.rs:11-40`); per-field entries can explode. | **Capped detail per field and per photo in `report.json`, plus a counter; the readable summary aggregates.** | User (released 2026-11-04) |
 | 7 | Fields that are assumed. | P6-6 confirmed the names `HDRMaxValue` and the seven `SDR*` keys, plus the container names `RedEyeInfo`, `LensBlur` and `PointColors` (section 4.12). The inner fields of those three containers, the manual CA sliders (`optics.ca_red`, `optics.ca_blue`), the crop flip fields and the Adobe AI-denoise fields were not observed in that copy and remain assumptions. `SDRBlend` has no LightCraft counterpart and stays reported. Some assumed names are also not mapped by LightCraft's importer (`xmp-interop.md:191-192`). | **The confirmed names are implemented; the remaining assumed names stay reported, never silently dropped.** | User (released 2026-11-04); the names were confirmed read-only on a catalog copy in P6-6 |
@@ -1121,7 +1119,7 @@ work and can run in parallel; P6-7 comes last because it is 6b.
 | P6-4 | White balance: read-only probe behind a flag, only when original paths are released; otherwise report | P6-1; answer to 8.2 for switching the probe on | Mode mapping without a probe first, then the "not carried" report path. A generated placeholder only exercises the undecidable path; the probe itself is checked read-only on a released original. |
 | P6-5 | Camera profile: read the name, report it, aggregate per profile name | P6-1 reader; P6-2 report area | A generated fixture with two profile names and a count assertion; no pixel or profile data involved. |
 | P6-6 | Confirm the assumed field names read-only on a catalog copy (HDR SDR, red eye, lens blur, AI denoise, Point Color, CA) | none (parallel to P6-1) | A read-only query that lists table and column names and counts rows; never values, never the original catalog. |
-| P6-7 | 6b: masks and spots through `develop.merge`, without delaying the import. Masks are done as P6-7a; spots are P6-7b. | P6-2 merge step; P6-3 model types | Mask and spot JSON against the fake port; a timing check that the 6a path does not wait for 6b. |
+| P6-7 | 6b: masks and spots through `develop.merge`, without delaying the import. Masks are done as P6-7a and spots as P6-7b. | P6-2 merge step; P6-3 model types | Mask and spot JSON against the fake port; a timing check that the 6a path does not wait for 6b. |
 
 Dependency rule: P6-1 can start on the confirmed keys before P6-6 finishes;
 only the assumed keys wait for it. P6-2 can be built against the P6-1 types
