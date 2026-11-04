@@ -1155,6 +1155,10 @@ fn field_flag(table: &Table, name: &str) -> Option<bool> {
     table_field(table, name).and_then(as_bool)
 }
 
+// Provenance: the mask and spot mapping below leans on LightCraft's
+// `crates/engine/src/crs_masks.rs` (MIT OR Apache-2.0, license-compatible).
+// No code was copied from lrcat-extractor (MPL-2.0).
+
 /// Reads the four mask containers into `develop`, in the fixed container
 /// order. Unsupported components, local sliders and a container that is not a
 /// list are reported by a stable `Mask: <kind>` name, never dropped silently.

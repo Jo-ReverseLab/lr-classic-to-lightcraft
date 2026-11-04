@@ -529,7 +529,7 @@ full number of distinct names and `photos_with_profile` the number of
 converted photos with a profile. Neither the report nor the summary ever
 holds a value.
 
-Spots (healing and cloning) follow in a later change.
+Spots (healing and cloning) are converted and written through `develop.merge`.
 
 ### `--apply`
 
@@ -791,9 +791,10 @@ counts the smart collections converted as smart albums.
 - The collapsed or expanded state of stacks is only counted, not written;
   stacks are always written expanded.
 - Development settings are written as sliders, tone curves, crop geometry and
-  the white-balance mode. Spots (healing and cloning) follow in a later change. The
-  camera profile and look are only reported by name, never written, as are
-  temperature, tint and the other unmapped fields. Temperature and tint wait
+  the white-balance mode. Spots (healing and cloning) are written through
+  `develop.merge`. The camera profile and look are only reported by name,
+  never written, as are temperature, tint and the other unmapped fields.
+  Temperature and tint wait
   for a probe of the original file because their stored scale is ambiguous.
   That probe is not released (F-032); `--probe-white-balance` is refused with
   exit code 2 before the catalog is opened.

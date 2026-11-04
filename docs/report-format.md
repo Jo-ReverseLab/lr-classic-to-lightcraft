@@ -157,6 +157,7 @@ rendering value.
 | `develop.photos_with_profile` | integer | always | converted photos with a non-empty profile name |
 | `develop.masks` | integer | always | converted photos with at least one mask (local correction) |
 | `develop.spots` | integer | always | converted photos with at least one spot (heal/clone/remove/fill) |
+| `develop.white_balance_not_carried` | integer | always | converted photos with a temperature or tint pair that was not carried over |
 
 **Guarantee.** A camera profile name is reported byte for byte and only when
 it is non-empty; it is never a rendering value and never triggers a develop
