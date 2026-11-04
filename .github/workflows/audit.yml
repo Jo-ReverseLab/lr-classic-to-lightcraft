@@ -1,0 +1,49 @@
+name: Security audit
+
+# Weekly advisory check against the RustSec database, report-only by default.
+# A finding fails the job only when the advisory carries an explicit `high` or
+# `critical` severity. The RustSec advisory format does not require a severity
+# field, so many advisories have none; those stay report-only and must be read
+# in the log. This is the documented limit of the check, not an oversight.
+#
+# cargo-audit is installed from source because the workflow deliberately uses
+# no extra action for it.
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run cargo audit
+        run: |
+          # cargo audit exits 1 when it finds vulnerabilities and 2 on an
+          # operational error. Keep the JSON output in both cases.
+          status=0
+          cargo audit --json > audit.json || status=$?
+          if [ "$status" -gt 1 ]; then
+            cat audit.json
+            exit "$status"
+          fi
+          jq -r '.vulnerabilities.list[]?
+            | "\(.advisory.id) severity=\(.advisory.severity // "none") \(.package.name) \(.package.version)"' \
+            audit.json
+          blocking="$(jq '[.vulnerabilities.list[]?
+            | (.advisory.severity // "") | ascii_downcase
+            | select(. == "high" or . == "critical")] | length' audit.json)"
+          if [ "$blocking" -gt 0 ]; then
+            echo "::error::$blocking high or critical advisories"
+            exit 1
+          fi
+          echo "No high or critical advisories."
