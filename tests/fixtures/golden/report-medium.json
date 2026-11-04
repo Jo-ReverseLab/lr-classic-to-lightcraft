@@ -25,6 +25,15 @@
     ],
     "smart": 0
   },
+  "develop": {
+    "not_applied": 0,
+    "overwritten": 0,
+    "photos": 0,
+    "planned": 0,
+    "unmapped": [],
+    "unmapped_count": 0,
+    "written": 0
+  },
   "dry_run": true,
   "folders": {
     "by_code": {},

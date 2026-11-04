@@ -89,7 +89,8 @@ fn run_and_report(options: &RunOptions, labels: &LabelMode, targets: &Targets) -
 /// `--apply`, writes them through the LightCraft control port.
 fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()> {
     let mut outcome = dry_run::run(&options.catalog, &options.mappings, labels)?;
-    let input = writer::input(std::mem::take(&mut outcome.converted));
+    let mut input = writer::input(std::mem::take(&mut outcome.converted));
+    input.overwrite_develop = options.overwrite_develop;
     let state = writer::load_state(options.library.as_deref())?;
     // Without a connection the library's own keywords are unknown; the
     // plan assumes none beyond the mapping file.
@@ -99,7 +100,7 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
             .with_context(|| format!("cannot write script to {}", given.display()))?;
     }
 
-    let (text, json, stop) = match (&options.library, options.apply) {
+    let (text, json, develop, stop) = match (&options.library, options.apply) {
         (Some(library), true) => {
             if !outcome.catalog_unchanged {
                 bail!(
@@ -121,6 +122,7 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
             (
                 writer::applied_summary(&summary),
                 writer::applied_json(&summary, stop.as_ref()),
+                writer::applied_develop(&summary),
                 stop,
             )
         }
@@ -129,6 +131,7 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
             (
                 writer::planned_summary(&plan),
                 writer::planned_json(&plan),
+                writer::planned_develop(&plan),
                 None,
             )
         }
@@ -139,7 +142,7 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
     outcome.catalog_unchanged = outcome.catalog_unchanged
         && lr_reader::checksum(&options.catalog).ok() == Some(outcome.catalog_checksum);
     if let (Some(target), Some(given)) = (&targets.report, &options.report) {
-        let report = output::report_json_with(&outcome, !options.apply, Some(&json));
+        let report = output::report_json_with(&outcome, !options.apply, Some(&json), &develop);
         report_file::write(target, &report)
             .with_context(|| format!("cannot write report to {}", given.display()))?;
     }
@@ -171,6 +174,7 @@ mod tests {
             port: crate::args::DEFAULT_PORT,
             allow_xmp: false,
             script,
+            overwrite_develop: false,
         }
     }
 

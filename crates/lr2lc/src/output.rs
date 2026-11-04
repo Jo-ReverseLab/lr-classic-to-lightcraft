@@ -2,7 +2,7 @@
 
 use crate::dry_run::{CollectionCounts, FlagCounts, KeywordAttributes, Outcome, StackCounts};
 use crate::labels::LabelCounts;
-use crate::writer::WriterJson;
+use crate::writer::{DevelopJson, WriterJson};
 use model::{Report, Skipped};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -29,6 +29,9 @@ pub struct ReportJson<'a> {
     pub skipped_by_code: BTreeMap<&'static str, usize>,
     /// Converted photos per star rating, keys "0" to "5".
     pub ratings: BTreeMap<String, usize>,
+    /// Development settings: what the writer plans or wrote. Counts and
+    /// unmapped field names only, never values.
+    pub develop: &'a DevelopJson,
     /// What the writer plans (dry run) or did (`--apply`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub writer: Option<&'a WriterJson>,
@@ -214,11 +217,16 @@ impl<'a> AreaJson<'a> {
 /// Builds the JSON report of a dry run without writer section.
 #[cfg(test)]
 pub fn report_json(outcome: &Outcome) -> String {
-    report_json_with(outcome, true, None)
+    report_json_with(outcome, true, None, &DevelopJson::default())
 }
 
 /// Builds the JSON report of a run.
-pub fn report_json_with(outcome: &Outcome, dry_run: bool, writer: Option<&WriterJson>) -> String {
+pub fn report_json_with(
+    outcome: &Outcome,
+    dry_run: bool,
+    writer: Option<&WriterJson>,
+    develop: &DevelopJson,
+) -> String {
     let json = ReportJson {
         tool_version: env!("CARGO_PKG_VERSION"),
         catalog_version: &outcome.catalog_version,
@@ -258,6 +266,7 @@ pub fn report_json_with(outcome: &Outcome, dry_run: bool, writer: Option<&Writer
             .enumerate()
             .map(|(stars, count)| (stars.to_string(), *count))
             .collect(),
+        develop,
         writer,
     };
     let mut text = serde_json::to_string_pretty(&json).expect("report serializes");
@@ -865,6 +874,7 @@ mod tests {
                 "catalog_version",
                 "collection_members",
                 "collections",
+                "develop",
                 "dry_run",
                 "folders",
                 "keyword_assignments",

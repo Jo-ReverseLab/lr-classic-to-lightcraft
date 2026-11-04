@@ -25,6 +25,90 @@ pub enum WriterJson {
     Applied(Box<AppliedJson>),
 }
 
+/// The top-level `develop` section of `report.json`.
+#[derive(Debug, Default, Serialize)]
+pub struct DevelopJson {
+    /// Converted photos that carry development settings.
+    pub photos: usize,
+    /// Photos the plan sends develop commands for.
+    pub planned: usize,
+    /// Photos whose develop commands all succeeded (0 in a dry run).
+    pub written: usize,
+    /// Distinct field names that could not be carried over, sorted, at most
+    /// [`UNMAPPED_LIMIT`] entries. Names only, never values.
+    pub unmapped: Vec<String>,
+    /// Number of distinct unmapped field names, also above the listing cap.
+    pub unmapped_count: usize,
+    /// Known photos whose settings changed in Lightroom and were left alone
+    /// because `--overwrite-develop` was not given.
+    pub not_applied: usize,
+    /// Photos written because `--overwrite-develop` was given.
+    pub overwritten: usize,
+}
+
+/// At most this many unmapped field names are listed in the report.
+pub const UNMAPPED_LIMIT: usize = 20;
+
+/// The `develop` section of a dry run.
+pub fn planned_develop(plan: &Plan) -> DevelopJson {
+    develop_json(
+        plan.develop_photos(),
+        plan.develop_planned(),
+        0,
+        plan.develop_unmapped(),
+        plan.develop_not_applied(),
+        plan.develop_overwritten(),
+    )
+}
+
+/// The `develop` section of an applied run.
+pub fn applied_develop(s: &ApplySummary) -> DevelopJson {
+    develop_json(
+        s.develop_photos,
+        s.develop_planned,
+        s.develop_written,
+        &s.develop_unmapped,
+        s.develop_not_applied,
+        s.develop_overwritten,
+    )
+}
+
+fn develop_json(
+    photos: usize,
+    planned: usize,
+    written: usize,
+    unmapped: &[String],
+    not_applied: usize,
+    overwritten: usize,
+) -> DevelopJson {
+    DevelopJson {
+        photos,
+        planned,
+        written,
+        unmapped: unmapped.iter().take(UNMAPPED_LIMIT).cloned().collect(),
+        unmapped_count: unmapped.len(),
+        not_applied,
+        overwritten,
+    }
+}
+
+/// Formats the `develop` counts as one summary line. Names only, never
+/// values.
+fn develop_line(out: &mut String, d: &DevelopJson) {
+    let _ = writeln!(
+        out,
+        "develop: photos with settings {}, commands planned {}, written {}, \
+         unmapped fields {} ({} listed), changed and not applied {}, overwritten {}",
+        d.photos,
+        d.planned,
+        d.written,
+        d.unmapped_count,
+        d.unmapped.len(),
+        d.not_applied,
+        d.overwritten
+    );
+}
+
 /// The `writer` section of a dry run.
 #[derive(Debug, Serialize)]
 pub struct PlannedSectionJson {
@@ -186,6 +270,8 @@ pub fn input(converted: Converted) -> WriteInput {
         quick: converted.quick,
         smart: converted.smart,
         smart_untranslatable_ids: converted.smart_untranslatable_ids,
+        // Set from the command line before the plan is built.
+        overwrite_develop: false,
         // A dry run never connects; an apply run reads the live state itself.
         live: None,
     }
@@ -234,6 +320,8 @@ pub fn planned(plan: &Plan) -> PlannedJson {
             Step::GroupStack { .. } => out.stacks += 1,
             Step::QuickAdd { gids } => out.quick_add += gids.len(),
             Step::CreateSmart { .. } => out.smart_albums += 1,
+            // Counted in the develop section, not in `planned`.
+            Step::DevelopSet { .. } | Step::DevelopMerge { .. } => {}
         }
     }
     out
@@ -396,6 +484,7 @@ pub fn planned_summary(plan: &Plan) -> String {
         "writer would skip smart collections",
         plan.smart_skips(),
     );
+    develop_line(&mut out, &planned_develop(plan));
     out
 }
 
@@ -513,6 +602,7 @@ pub fn applied_summary(s: &ApplySummary) -> String {
     skipped_lines(&mut out, "skipped quick collection", &s.quick_skipped);
     skipped_lines(&mut out, "incomplete quick collection", &s.quick_incomplete);
     skipped_lines(&mut out, "skipped smart collections", &s.smart_skipped);
+    develop_line(&mut out, &applied_develop(s));
     out
 }
 

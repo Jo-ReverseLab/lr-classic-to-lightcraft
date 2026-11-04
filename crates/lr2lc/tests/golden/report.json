@@ -513,6 +513,15 @@
     "4": 2,
     "5": 1
   },
+  "develop": {
+    "photos": 0,
+    "planned": 0,
+    "written": 0,
+    "unmapped": [],
+    "unmapped_count": 0,
+    "not_applied": 0,
+    "overwritten": 0
+  },
   "writer": {
     "planned": {
       "keywords": 12,

@@ -29,6 +29,9 @@ Options:
   --script FILE    Also write the planned commands as JSON lines to FILE
   --apply          Actually write the LightCraft library through the
                    running app (default: dry run); needs --library
+  --overwrite-develop
+                   Also rewrite the development settings of known photos
+                   that changed in Lightroom (default: left alone)
   -h, --help       Print this help
   -V, --version    Print the version
 
@@ -55,6 +58,7 @@ pub struct RunOptions {
     pub port: u16,
     pub allow_xmp: bool,
     pub script: Option<PathBuf>,
+    pub overwrite_develop: bool,
 }
 
 /// The default control port of the LightCraft app.
@@ -72,12 +76,14 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
     let mut port: Option<u16> = None;
     let mut allow_xmp = false;
     let mut script: Option<PathBuf> = None;
+    let mut overwrite_develop = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("-h" | "--help") => return Ok(Command::Help),
             Some("-V" | "--version") => return Ok(Command::Version),
             Some("--apply") => apply = true,
             Some("--allow-xmp") => allow_xmp = true,
+            Some("--overwrite-develop") => overwrite_develop = true,
             Some("--library") => {
                 if library.is_some() {
                     return Err("--library given more than once".to_string());
@@ -154,6 +160,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
         port: port.unwrap_or(DEFAULT_PORT),
         allow_xmp,
         script,
+        overwrite_develop,
     }))
 }
 
@@ -240,6 +247,15 @@ mod tests {
         assert_eq!(o.port, 8000);
         assert!(o.allow_xmp);
         assert_eq!(o.script, Some(PathBuf::from("s.jsonl")));
+    }
+
+    #[test]
+    fn overwrite_develop_is_opt_in_and_works_without_apply() {
+        assert!(!run(&["cat.lrcat"]).overwrite_develop);
+        assert!(run(&["cat.lrcat", "--overwrite-develop"]).overwrite_develop);
+        // Meaningful in a dry run too: it plans the overwrite.
+        let o = run(&["cat.lrcat", "--overwrite-develop"]);
+        assert!(!o.apply);
     }
 
     #[test]
@@ -354,6 +370,7 @@ mod tests {
             "--port",
             "--allow-xmp",
             "--script",
+            "--overwrite-develop",
             "--help",
             "--version",
         ] {
