@@ -1151,8 +1151,57 @@ fn field_text<'a>(table: &'a Table, name: &str) -> Option<&'a str> {
     }
 }
 
-fn field_flag(table: &Table, name: &str) -> Option<bool> {
-    table_field(table, name).and_then(as_bool)
+/// A numeric field with a fallback. A missing field keeps `default` silently;
+/// a present value of the wrong type is reported under the stable `report`
+/// name and `default` is used only as a fallback, never silently.
+fn number_or_default(
+    table: &Table,
+    name: &str,
+    default: f64,
+    report: &str,
+    skipped: &mut Vec<String>,
+) -> f64 {
+    match table_field(table, name) {
+        None => default,
+        Some(LuaValue::Number(number)) => *number,
+        Some(_) => {
+            skipped.push(report.to_owned());
+            default
+        }
+    }
+}
+
+/// A flag field with a fallback, reported like [`number_or_default`].
+fn flag_or_default(
+    table: &Table,
+    name: &str,
+    default: bool,
+    report: &str,
+    skipped: &mut Vec<String>,
+) -> bool {
+    match table_field(table, name) {
+        None => default,
+        Some(value) => match as_bool(value) {
+            Some(flag) => flag,
+            None => {
+                skipped.push(report.to_owned());
+                default
+            }
+        },
+    }
+}
+
+/// A component's `Version`, or `None` when the field is missing or unreadable.
+/// An unreadable value is reported and treated like a missing one.
+fn component_version(component: &Table, skipped: &mut Vec<String>) -> Option<f64> {
+    match table_field(component, "Version") {
+        None => None,
+        Some(LuaValue::Number(version)) => Some(*version),
+        Some(_) => {
+            skipped.push("version".to_owned());
+            None
+        }
+    }
 }
 
 /// Reads the four mask containers into `develop`, in the fixed container
@@ -1201,7 +1250,7 @@ fn read_spots(table: &Table, aspect: f64, develop: &mut Develop) {
                     skipped.push("unknown spot".to_owned());
                     continue;
                 };
-                match read_spot(area, aspect) {
+                match read_spot(area, aspect, &mut skipped) {
                     Ok(spot) => spots.push(spot),
                     Err(kind) => skipped.push(kind),
                 }
@@ -1220,7 +1269,7 @@ fn read_spots(table: &Table, aspect: f64, develop: &mut Develop) {
                         skipped.push("unknown spot".to_owned());
                         continue;
                     };
-                    match legacy_spot(line, aspect) {
+                    match legacy_spot(line, aspect, &mut skipped) {
                         Some(spot) => spots.push(spot),
                         None => skipped.push("legacy line".to_owned()),
                     }
@@ -1239,10 +1288,17 @@ fn read_spots(table: &Table, aspect: f64, develop: &mut Develop) {
 
 /// One `RetouchAreas` entry. `Err(kind)` names what cannot be carried over.
 /// `aspect` is the displayed photo's width divided by its height.
-fn read_spot(area: &Table, aspect: f64) -> Result<Spot, String> {
-    let mode = match field_text(area, "SpotType") {
-        Some("clone") => SpotMode::Clone,
-        _ => SpotMode::Heal,
+fn read_spot(area: &Table, aspect: f64, skipped: &mut Vec<String>) -> Result<Spot, String> {
+    let mode = match table_field(area, "SpotType") {
+        None => SpotMode::Heal,
+        Some(LuaValue::Text(text)) if text == "clone" => SpotMode::Clone,
+        Some(LuaValue::Text(_)) => SpotMode::Heal,
+        // A present value of the wrong type is reported; `heal` is only the
+        // fallback.
+        Some(_) => {
+            skipped.push("spot type".to_owned());
+            SpotMode::Heal
+        }
     };
     let mask = match table_field(area, "Masks") {
         Some(LuaValue::Table(masks)) => match masks.fields.first() {
@@ -1282,27 +1338,53 @@ fn read_spot(area: &Table, aspect: f64) -> Result<Spot, String> {
         }
         "Mask/Paint" => {
             let points: Vec<Point> = match table_field(mask, "Dabs") {
-                Some(LuaValue::Table(dabs)) => dabs
-                    .fields
-                    .iter()
-                    .filter_map(|(_, value)| match value {
-                        LuaValue::Text(dab) => parse_dab(dab),
-                        _ => None,
-                    })
-                    .collect(),
-                _ => Vec::new(),
+                Some(LuaValue::Table(dabs)) => {
+                    let mut points = Vec::new();
+                    let mut invalid = false;
+                    for (_, value) in &dabs.fields {
+                        match value {
+                            LuaValue::Text(dab) => match parse_dab(dab) {
+                                Some(point) => points.push(point),
+                                None => invalid = true,
+                            },
+                            _ => invalid = true,
+                        }
+                    }
+                    if invalid {
+                        skipped.push("dabs".to_owned());
+                    }
+                    points
+                }
+                Some(_) => {
+                    skipped.push("dabs".to_owned());
+                    Vec::new()
+                }
+                None => Vec::new(),
             };
             if points.is_empty() {
                 return Err("empty brush".to_owned());
             }
-            (points, field_number(mask, "Radius").unwrap_or(0.02))
+            (
+                points,
+                number_or_default(mask, "Radius", 0.02, "radius", skipped),
+            )
         }
         "" => return Err("unknown spot".to_owned()),
         other => return Err(other.trim_start_matches("Mask/").to_owned()),
     };
     let size = size.clamp(0.001, 0.25);
-    let feather = (field_number(area, "Feather").unwrap_or(0.0) * 100.0).clamp(0.0, 100.0);
-    let opacity = (field_number(area, "Opacity").unwrap_or(1.0) * 100.0).clamp(0.0, 100.0);
+    let feather =
+        (number_or_default(area, "Feather", 0.0, "feather", skipped) * 100.0).clamp(0.0, 100.0);
+    let opacity =
+        (number_or_default(area, "Opacity", 1.0, "opacity", skipped) * 100.0).clamp(0.0, 100.0);
+    let source_state = match table_field(area, "SourceState") {
+        None => None,
+        Some(LuaValue::Text(text)) => Some(text.as_str()),
+        Some(_) => {
+            skipped.push("source state".to_owned());
+            None
+        }
+    };
     Ok(Spot {
         mode,
         points: points.clone(),
@@ -1313,38 +1395,33 @@ fn read_spot(area: &Table, aspect: f64) -> Result<Spot, String> {
             area,
             "SourceX",
             "OffsetY",
-            field_text(area, "SourceState"),
+            source_state,
             points.first().copied(),
+            skipped,
         ),
     })
 }
 
 /// One `RetouchInfo` line as a spot, or `None` when a required value is
 /// missing or unreadable.
-fn legacy_spot(line: &str, aspect: f64) -> Option<Spot> {
+fn legacy_spot(line: &str, aspect: f64, skipped: &mut Vec<String>) -> Option<Spot> {
     let mut values: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
     for part in line.split(',') {
         if let Some((key, value)) = part.split_once('=') {
             values.insert(key.trim(), value.trim());
         }
     }
-    let number = |key: &str| {
-        values
-            .get(key)
-            .and_then(|value| value.parse::<f64>().ok())
-            .filter(|value| value.is_finite())
-    };
-    let x = number("centerX")?;
-    let y = number("centerY")?;
-    let radius = number("radius")?;
+    let x = legacy_number(&values, "centerX", skipped)?;
+    let y = legacy_number(&values, "centerY", skipped)?;
+    let radius = legacy_number(&values, "radius", skipped)?;
     let mode = match values.get("spotType") {
         Some(&"clone") => SpotMode::Clone,
         _ => SpotMode::Heal,
     };
     let source_offset = match (
         values.get("sourceState").copied(),
-        number("sourceX"),
-        number("sourceY"),
+        legacy_number(&values, "sourceX", skipped),
+        legacy_number(&values, "sourceY", skipped),
     ) {
         (None | Some("sourceSetExplicitly"), Some(source_x), Some(source_y))
             if source_x != x || source_y != y =>
@@ -1356,7 +1433,8 @@ fn legacy_spot(line: &str, aspect: f64) -> Option<Spot> {
         }
         _ => None,
     };
-    let opacity = (number("opacity").unwrap_or(1.0) * 100.0).clamp(0.0, 100.0);
+    let opacity =
+        (legacy_number(&values, "opacity", skipped).unwrap_or(1.0) * 100.0).clamp(0.0, 100.0);
     Some(Spot {
         mode,
         points: vec![Point { x, y }],
@@ -1367,6 +1445,30 @@ fn legacy_spot(line: &str, aspect: f64) -> Option<Spot> {
     })
 }
 
+/// One numeric value of a legacy comma-separated line. A missing key returns
+/// `None` silently; a present value that is not a finite number is reported
+/// under the key name and also returns `None`.
+fn legacy_number(
+    values: &std::collections::BTreeMap<&str, &str>,
+    key: &str,
+    skipped: &mut Vec<String>,
+) -> Option<f64> {
+    match values.get(key) {
+        None => None,
+        Some(value) => match value
+            .parse::<f64>()
+            .ok()
+            .filter(|number| number.is_finite())
+        {
+            Some(number) => Some(number),
+            None => {
+                skipped.push(key.to_owned());
+                None
+            }
+        },
+    }
+}
+
 /// The offset from a spot's first target point to an explicit source, or
 /// `None` when the source is automatic, missing or at the same position.
 fn spot_source_offset(
@@ -1375,13 +1477,26 @@ fn spot_source_offset(
     source_y_field: &str,
     source_state: Option<&str>,
     target: Option<Point>,
+    skipped: &mut Vec<String>,
 ) -> Option<Point> {
     let explicit = source_state.is_none_or(|state| state == "sourceSetExplicitly");
-    let (Some(source_x), Some(source_y), Some(target)) = (
-        field_number(area, source_x_field),
-        field_number(area, source_y_field),
-        target,
-    ) else {
+    let source_x = match table_field(area, source_x_field) {
+        None => None,
+        Some(LuaValue::Number(number)) => Some(*number),
+        Some(_) => {
+            skipped.push("source x".to_owned());
+            None
+        }
+    };
+    let source_y = match table_field(area, source_y_field) {
+        None => None,
+        Some(LuaValue::Number(number)) => Some(*number),
+        Some(_) => {
+            skipped.push("source y".to_owned());
+            None
+        }
+    };
+    let (Some(source_x), Some(source_y), Some(target)) = (source_x, source_y, target) else {
         return None;
     };
     if !explicit {
@@ -1400,7 +1515,7 @@ fn read_correction(
     develop: &Develop,
     skipped: &mut Vec<String>,
 ) -> Option<Mask> {
-    if field_flag(correction, "CorrectionActive") == Some(false) {
+    if !flag_or_default(correction, "CorrectionActive", true, "active flag", skipped) {
         return None;
     }
     // Unsupported local sliders are reported even when every component of the
@@ -1419,7 +1534,7 @@ fn read_correction(
             skipped.push("unknown mask".to_owned());
             continue;
         };
-        match read_component(component, container, aspect) {
+        match read_component(component, container, aspect, skipped) {
             Ok(part) => parts.push(part),
             Err(kind) => skipped.push(kind),
         }
@@ -1428,16 +1543,22 @@ fn read_correction(
         return None;
     }
     let id = u32::try_from(develop.masks.len() + 1).unwrap_or(u32::MAX);
-    let name = field_text(correction, "CorrectionName")
-        .map(str::to_owned)
-        .unwrap_or_else(|| format!("Mask {id}"));
+    let name = match table_field(correction, "CorrectionName") {
+        Some(LuaValue::Text(text)) if !text.is_empty() => text.clone(),
+        Some(LuaValue::Text(_)) => format!("Mask {id}"),
+        Some(_) => {
+            skipped.push("name".to_owned());
+            format!("Mask {id}")
+        }
+        None => format!("Mask {id}"),
+    };
     Some(Mask {
         id,
         name,
         visible: true,
-        invert: field_flag(correction, "MaskInverted").unwrap_or(false),
+        invert: flag_or_default(correction, "MaskInverted", false, "inverted", skipped),
         components: merge_brush_parts(parts),
-        adjust: local_adjust(correction),
+        adjust: local_adjust(correction, skipped),
     })
 }
 
@@ -1463,14 +1584,21 @@ fn merge_brush_parts(parts: Vec<MaskComponent>) -> Vec<MaskComponent> {
 }
 
 /// The correction's `adjust` object: the mapped local sliders plus `amount`,
-/// which is `CorrectionAmount × 100` clamped to 0..200.
-fn local_adjust(correction: &Table) -> std::collections::BTreeMap<String, f64> {
+/// which is `CorrectionAmount × 100` clamped to 0..200. A present slider of
+/// the wrong type is reported under its Lightroom name and left out.
+fn local_adjust(
+    correction: &Table,
+    skipped: &mut Vec<String>,
+) -> std::collections::BTreeMap<String, f64> {
     let mut adjust = std::collections::BTreeMap::new();
     for (field, ours, scale) in LOCAL_SLIDERS {
         if adjust.contains_key(ours) {
             continue;
         }
         let Some(value) = field_number(correction, field).filter(|v| v.is_finite()) else {
+            if table_field(correction, field).is_some() {
+                skipped.push((*field).to_owned());
+            }
             continue;
         };
         let limit = match ours {
@@ -1481,13 +1609,20 @@ fn local_adjust(correction: &Table) -> std::collections::BTreeMap<String, f64> {
         let lower = if ours == "color_hue" { 0.0 } else { -limit };
         adjust.insert(ours.to_owned(), (value * scale).clamp(lower, limit));
     }
-    let amount = field_number(correction, "CorrectionAmount").unwrap_or(1.0);
+    let amount = number_or_default(
+        correction,
+        "CorrectionAmount",
+        1.0,
+        "correction amount",
+        skipped,
+    );
     adjust.insert("amount".to_owned(), (amount * 100.0).clamp(0.0, 200.0));
     adjust
 }
 
 /// Reports `Local*` sliders without a counterpart when they are set. A
-/// `LocalCurveRefineSaturation` of 100 is neutral, not a value.
+/// `LocalCurveRefineSaturation` of 100 is neutral, not a value. A present
+/// slider of the wrong type is always reported, never dropped silently.
 fn report_unmapped_locals(correction: &Table, skipped: &mut Vec<String>) {
     for (name, value) in &correction.fields {
         let Some(name) = name.as_deref().filter(|n| n.starts_with("Local")) else {
@@ -1501,8 +1636,9 @@ fn report_unmapped_locals(correction: &Table, skipped: &mut Vec<String>) {
         } else {
             0.0
         };
-        if as_number(value).is_some_and(|v| v != neutral) {
-            skipped.push(name.to_owned());
+        match as_number(value) {
+            Some(v) if v == neutral => {}
+            Some(_) | None => skipped.push(name.to_owned()),
         }
     }
 }
@@ -1512,6 +1648,7 @@ fn read_component(
     component: &Table,
     container: &str,
     aspect: f64,
+    skipped: &mut Vec<String>,
 ) -> Result<MaskComponent, String> {
     let op = match table_field(component, "MaskBlendMode") {
         None => MaskOp::Add,
@@ -1520,13 +1657,20 @@ fn read_component(
         Some(LuaValue::Number(mode)) if *mode == 2.0 => MaskOp::Intersect,
         // An unknown mode must not silently become `add`.
         Some(LuaValue::Number(mode)) => return Err(format!("blend mode {mode}")),
-        Some(_) => MaskOp::Add,
+        // A present value of the wrong type is reported and `add` is only the
+        // fallback.
+        Some(_) => {
+            skipped.push("blend mode".to_owned());
+            MaskOp::Add
+        }
     };
-    let invert = field_flag(component, "MaskInverted").unwrap_or(false);
+    let invert = flag_or_default(component, "MaskInverted", false, "inverted", skipped);
     let what = field_text(component, "What").unwrap_or("");
     let shape = match what {
         "Mask/Gradient" => {
-            let g = |key: &str, default: f64| field_number(component, key).unwrap_or(default);
+            let mut g = |key: &str, default: f64| {
+                number_or_default(component, key, default, "gradient position", skipped)
+            };
             MaskShape::Linear {
                 start: Point {
                     x: g("FullX", 0.5),
@@ -1539,7 +1683,9 @@ fn read_component(
             }
         }
         "Mask/CircularGradient" => {
-            let g = |key: &str, default: f64| field_number(component, key).unwrap_or(default);
+            let mut g = |key: &str, default: f64| {
+                number_or_default(component, key, default, "radial bounds", skipped)
+            };
             let (left, right, top, bottom) = (
                 g("Left", 0.25),
                 g("Right", 0.75),
@@ -1558,36 +1704,62 @@ fn read_component(
                 },
                 rx: ((right - left).abs() / 2.0 * sx).max(1e-3),
                 ry: ((bottom - top).abs() / 2.0 * sy).max(1e-3),
-                angle: g("Angle", 0.0),
-                feather: radial_feather(component, container),
-                invert: !radial_inside(component, container),
+                angle: number_or_default(component, "Angle", 0.0, "angle", skipped),
+                feather: radial_feather(component, container, skipped),
+                invert: !radial_inside(component, container, skipped),
             }
         }
         "Mask/Paint" => {
             let points: Vec<Point> = match table_field(component, "Dabs") {
-                Some(LuaValue::Table(dabs)) => dabs
-                    .fields
-                    .iter()
-                    .filter_map(|(_, value)| match value {
-                        LuaValue::Text(dab) => parse_dab(dab),
-                        _ => None,
-                    })
-                    .collect(),
-                _ => Vec::new(),
+                Some(LuaValue::Table(dabs)) => {
+                    let mut points = Vec::new();
+                    let mut invalid = false;
+                    for (_, value) in &dabs.fields {
+                        match value {
+                            LuaValue::Text(dab) => match parse_dab(dab) {
+                                Some(point) => points.push(point),
+                                None => invalid = true,
+                            },
+                            _ => invalid = true,
+                        }
+                    }
+                    if invalid {
+                        skipped.push("dabs".to_owned());
+                    }
+                    points
+                }
+                Some(_) => {
+                    skipped.push("dabs".to_owned());
+                    Vec::new()
+                }
+                None => Vec::new(),
             };
             if points.is_empty() {
                 return Err("empty brush".to_owned());
             }
-            let mask_value = field_number(component, "MaskValue");
+            let mask_value = match table_field(component, "MaskValue") {
+                None => None,
+                Some(LuaValue::Number(value)) => Some(*value),
+                Some(_) => {
+                    skipped.push("brush density".to_owned());
+                    None
+                }
+            };
             MaskShape::Brush {
                 strokes: vec![BrushStroke {
                     points,
-                    size: field_number(component, "Radius")
-                        .unwrap_or(0.03)
+                    size: number_or_default(component, "Radius", 0.03, "brush radius", skipped)
                         .clamp(0.001, 1.0),
-                    feather: (field_number(component, "CenterWeight").unwrap_or(0.5) * 100.0)
+                    feather: (number_or_default(
+                        component,
+                        "CenterWeight",
+                        0.5,
+                        "brush feather",
+                        skipped,
+                    ) * 100.0)
                         .clamp(0.0, 100.0),
-                    flow: (field_number(component, "Flow").unwrap_or(1.0) * 100.0)
+                    flow: (number_or_default(component, "Flow", 1.0, "brush flow", skipped)
+                        * 100.0)
                         .clamp(0.0, 100.0),
                     density: (mask_value.unwrap_or(1.0).abs() * 100.0).clamp(0.0, 100.0),
                     erase: mask_value.is_some_and(|value| value <= 0.0),
@@ -1608,7 +1780,7 @@ fn read_component(
             };
             match field_text(range, "Type") {
                 Some("2") => {
-                    let values = range_values(range, "LumRange", "0 0 1 1");
+                    let values = range_values(range, "LumRange", "0 0 1 1", skipped);
                     let [a, b, c, d] = values[..] else {
                         return Err("luminance range".to_owned());
                     };
@@ -1632,7 +1804,7 @@ fn read_component(
                     }
                 }
                 Some("3") => {
-                    let values = range_values(range, "DepthRange", "0 0 1 1");
+                    let values = range_values(range, "DepthRange", "0 0 1 1", skipped);
                     let [a, b, c, _] = values[..] else {
                         return Err("depth range".to_owned());
                     };
@@ -1651,13 +1823,32 @@ fn read_component(
     Ok(MaskComponent { op, invert, shape })
 }
 
-/// Four whitespace-separated numbers of a range field.
-fn range_values(range: &Table, name: &str, default: &str) -> Vec<f64> {
-    match field_text(range, name) {
-        Some(text) => text
-            .split_whitespace()
-            .filter_map(|v| v.parse::<f64>().ok())
-            .collect(),
+/// Four whitespace-separated numbers of a range field. A missing field keeps
+/// the default silently; a present field of the wrong type or with a token
+/// that is not a number is reported as `range values`.
+fn range_values(range: &Table, name: &str, default: &str, skipped: &mut Vec<String>) -> Vec<f64> {
+    match table_field(range, name) {
+        Some(LuaValue::Text(text)) => {
+            let mut values = Vec::new();
+            let mut invalid = false;
+            for token in text.split_whitespace() {
+                match token.parse::<f64>() {
+                    Ok(value) => values.push(value),
+                    Err(_) => invalid = true,
+                }
+            }
+            if invalid {
+                skipped.push("range values".to_owned());
+            }
+            values
+        }
+        Some(_) => {
+            skipped.push("range values".to_owned());
+            default
+                .split_whitespace()
+                .filter_map(|v| v.parse::<f64>().ok())
+                .collect()
+        }
         None => default
             .split_whitespace()
             .filter_map(|v| v.parse::<f64>().ok())
@@ -1679,24 +1870,23 @@ fn parse_dab(dab: &str) -> Option<Point> {
 
 /// Whether a radial component puts its effect inside the ellipse. `Flipped`
 /// means different things per container, as in LightCraft's importer.
-fn radial_inside(component: &Table, container: &str) -> bool {
-    let flipped = field_flag(component, "Flipped");
+fn radial_inside(component: &Table, container: &str, skipped: &mut Vec<String>) -> bool {
     if container == "MaskGroupBasedCorrections" {
-        if field_number(component, "Version").is_some_and(|v| v >= 2.0) {
-            flipped.unwrap_or(true)
+        if component_version(component, skipped).is_some_and(|v| v >= 2.0) {
+            flag_or_default(component, "Flipped", true, "flipped", skipped)
         } else {
             true
         }
     } else {
-        flipped.unwrap_or(false)
+        flag_or_default(component, "Flipped", false, "flipped", skipped)
     }
 }
 
 /// A radial component's feather on LightCraft's 0..100 scale.
-fn radial_feather(component: &Table, container: &str) -> f64 {
-    let feather = field_number(component, "Feather").unwrap_or(50.0);
+fn radial_feather(component: &Table, container: &str, skipped: &mut Vec<String>) -> f64 {
+    let feather = number_or_default(component, "Feather", 50.0, "feather", skipped);
     let versionless_group = container == "MaskGroupBasedCorrections"
-        && !field_number(component, "Version").is_some_and(|v| v >= 2.0);
+        && !component_version(component, skipped).is_some_and(|v| v >= 2.0);
     (if versionless_group {
         feather / 2.0
     } else {
@@ -2238,6 +2428,167 @@ mod tests {
         assert_eq!(components[2].op, MaskOp::Intersect);
         assert_eq!(components.len(), 3, "an unknown mode builds no component");
         assert_eq!(develop.unmapped, ["Mask: blend mode 7"]);
+    }
+
+    #[test]
+    fn wrongly_typed_mask_fields_are_reported_and_fall_back() {
+        let develop = parse(
+            r#"s = { MaskGroupBasedCorrections = { {
+                CorrectionActive = "yes", MaskInverted = "yes", CorrectionAmount = "full",
+                CorrectionMasks = {
+                    { What = "Mask/Gradient", MaskBlendMode = "add", FullX = "half" },
+                } } } }"#,
+        );
+        let mask = &develop.masks[0];
+        assert!(!mask.invert);
+        assert_eq!(mask.adjust.get("amount"), Some(&100.0));
+        let component = &mask.components[0];
+        assert_eq!(component.op, MaskOp::Add);
+        let MaskShape::Linear { start, end } = component.shape else {
+            panic!("{:?}", component.shape);
+        };
+        assert_eq!(start, Point { x: 0.5, y: 0.0 });
+        assert_eq!(end, Point { x: 0.5, y: 1.0 });
+        assert_eq!(
+            develop.unmapped,
+            [
+                "Mask: active flag",
+                "Mask: blend mode",
+                "Mask: correction amount",
+                "Mask: gradient position",
+                "Mask: inverted",
+            ]
+        );
+    }
+
+    #[test]
+    fn wrongly_typed_radial_fields_are_reported_and_fall_back() {
+        let develop = parse(
+            r#"s = { CircularGradientBasedCorrections = { { CorrectionMasks = {
+                { What = "Mask/CircularGradient", Left = "left",
+                  Feather = "soft", Flipped = "yes" } } } } }"#,
+        );
+        let MaskShape::Radial {
+            center,
+            feather,
+            invert,
+            ..
+        } = develop.masks[0].components[0].shape
+        else {
+            panic!("{:?}", develop.masks[0].components[0].shape);
+        };
+        assert_eq!(center, Point { x: 0.5, y: 0.5 });
+        assert_eq!(feather, 50.0);
+        assert!(invert);
+        assert_eq!(
+            develop.unmapped,
+            ["Mask: feather", "Mask: flipped", "Mask: radial bounds"]
+        );
+    }
+
+    #[test]
+    fn wrongly_typed_brush_fields_are_reported_and_fall_back() {
+        let develop = parse(
+            r#"s = { PaintBasedCorrections = { { CorrectionMasks = {
+                { What = "Mask/Paint", Dabs = { "d 0.1 0.2", 5 },
+                  Radius = "wide", CenterWeight = "soft", Flow = "full",
+                  MaskValue = "erase" } } } } }"#,
+        );
+        let MaskShape::Brush { strokes } = &develop.masks[0].components[0].shape else {
+            panic!("{:?}", develop.masks[0].components[0].shape);
+        };
+        let stroke = &strokes[0];
+        assert_eq!(stroke.points.len(), 1);
+        assert_eq!(stroke.size, 0.03);
+        assert_eq!(stroke.feather, 50.0);
+        assert_eq!(stroke.flow, 100.0);
+        assert_eq!(stroke.density, 100.0);
+        assert!(!stroke.erase);
+        assert_eq!(
+            develop.unmapped,
+            [
+                "Mask: brush density",
+                "Mask: brush feather",
+                "Mask: brush flow",
+                "Mask: brush radius",
+                "Mask: dabs",
+            ]
+        );
+    }
+
+    #[test]
+    fn missing_mask_fields_keep_the_defaults_without_a_report() {
+        let develop = parse(
+            r#"s = { MaskGroupBasedCorrections = { { CorrectionMasks = {
+                { What = "Mask/Gradient" } } } } }"#,
+        );
+        assert!(develop.unmapped.is_empty());
+        let MaskShape::Linear { start, end } = develop.masks[0].components[0].shape else {
+            panic!("{:?}", develop.masks[0].components[0].shape);
+        };
+        assert_eq!(start, Point { x: 0.5, y: 0.0 });
+        assert_eq!(end, Point { x: 0.5, y: 1.0 });
+    }
+
+    #[test]
+    fn wrongly_typed_spot_fields_are_reported_and_fall_back() {
+        let develop = parse(
+            r#"s = { RetouchAreas = { {
+                SpotType = 1, Feather = "soft", Opacity = "half",
+                SourceState = 2, SourceX = "left", OffsetY = "up",
+                Masks = { { What = "Mask/Ellipse", X = 0.4, Y = 0.3, SizeX = 0.08 } } } } }"#,
+        );
+        let spot = &develop.spots[0];
+        assert_eq!(spot.mode, SpotMode::Heal);
+        assert_eq!((spot.feather, spot.opacity), (0.0, 100.0));
+        assert_eq!(spot.source_offset, None);
+        assert_eq!(
+            develop.unmapped,
+            [
+                "Spot: feather",
+                "Spot: opacity",
+                "Spot: source state",
+                "Spot: source x",
+                "Spot: source y",
+                "Spot: spot type",
+            ]
+        );
+    }
+
+    #[test]
+    fn wrong_typed_brush_spot_fields_are_reported_and_fall_back() {
+        let develop = parse(
+            r#"s = { RetouchAreas = { { Masks = { {
+                What = "Mask/Paint", Dabs = { "d 0.1 0.2", 7 },
+                Radius = "wide" } } } } }"#,
+        );
+        let spot = &develop.spots[0];
+        assert_eq!(spot.points.len(), 1);
+        assert_eq!(spot.size, 0.02);
+        assert_eq!(develop.unmapped, ["Spot: dabs", "Spot: radius"]);
+    }
+
+    #[test]
+    fn missing_spot_fields_keep_the_defaults_without_a_report() {
+        let develop = parse(
+            r#"s = { RetouchAreas = { { Masks = { { What = "Mask/Ellipse",
+                X = 0.4, Y = 0.3, SizeX = 0.08 } } } } }"#,
+        );
+        assert!(develop.unmapped.is_empty());
+        let spot = &develop.spots[0];
+        assert_eq!(spot.mode, SpotMode::Heal);
+        assert_eq!((spot.feather, spot.opacity), (0.0, 100.0));
+        assert_eq!(spot.source_offset, None);
+    }
+
+    #[test]
+    fn a_wrongly_typed_legacy_opacity_is_reported() {
+        let develop = parse(
+            r#"s = { RetouchInfo = {
+                "centerX = 0.5, centerY = 0.5, radius = 0.04, opacity = lots" } }"#,
+        );
+        assert_eq!(develop.spots[0].opacity, 100.0);
+        assert_eq!(develop.unmapped, ["Spot: opacity"]);
     }
 
     #[test]
