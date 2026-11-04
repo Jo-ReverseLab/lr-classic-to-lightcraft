@@ -32,6 +32,9 @@ Options:
   --overwrite-develop
                    Also rewrite the development settings of known photos
                    that changed in Lightroom (default: left alone)
+  --probe-white-balance
+                   Read the original file to derive a white-balance scale
+                   (not released yet: the run stops with exit code 2)
   -h, --help       Print this help
   -V, --version    Print the version
 
@@ -59,6 +62,9 @@ pub struct RunOptions {
     pub allow_xmp: bool,
     pub script: Option<PathBuf>,
     pub overwrite_develop: bool,
+    /// Opt-in probe of the original file for a white-balance scale. Not
+    /// released yet: a run given this option stops before it reads anything.
+    pub probe_white_balance: bool,
 }
 
 /// The default control port of the LightCraft app.
@@ -77,6 +83,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
     let mut allow_xmp = false;
     let mut script: Option<PathBuf> = None;
     let mut overwrite_develop = false;
+    let mut probe_white_balance = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("-h" | "--help") => return Ok(Command::Help),
@@ -84,6 +91,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
             Some("--apply") => apply = true,
             Some("--allow-xmp") => allow_xmp = true,
             Some("--overwrite-develop") => overwrite_develop = true,
+            Some("--probe-white-balance") => probe_white_balance = true,
             Some("--library") => {
                 if library.is_some() {
                     return Err("--library given more than once".to_string());
@@ -161,6 +169,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
         allow_xmp,
         script,
         overwrite_develop,
+        probe_white_balance,
     }))
 }
 
@@ -256,6 +265,12 @@ mod tests {
         // Meaningful in a dry run too: it plans the overwrite.
         let o = run(&["cat.lrcat", "--overwrite-develop"]);
         assert!(!o.apply);
+    }
+
+    #[test]
+    fn probe_white_balance_is_off_by_default_and_opt_in() {
+        assert!(!run(&["cat.lrcat"]).probe_white_balance);
+        assert!(run(&["cat.lrcat", "--probe-white-balance"]).probe_white_balance);
     }
 
     #[test]
@@ -371,6 +386,7 @@ mod tests {
             "--allow-xmp",
             "--script",
             "--overwrite-develop",
+            "--probe-white-balance",
             "--help",
             "--version",
         ] {
