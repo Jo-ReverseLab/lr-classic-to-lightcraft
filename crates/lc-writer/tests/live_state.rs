@@ -5,14 +5,18 @@
 //! API under test:
 //! - `read_live(client: &mut ControlClient, state: &State) -> Result<LiveState, WriteError>`;
 //! - `LiveState` derives Debug, Clone, PartialEq and has public fields
-//!   - `photos: BTreeMap<String, LivePhoto>`, keyed by global id; only photos
-//!     of the mapping file that LightCraft still has;
+//!   - `photos: BTreeMap<String, LivePhoto>`, keyed by global id; every photo
+//!     of the mapping file that LightCraft lists in either query, including
+//!     photos in the trash (Recently Deleted);
 //!   - `missing_photos: BTreeSet<String>`: global ids that the mapping file
-//!     has but LightCraft does not list (deleted or removed). Not an error;
-//!   - `foreign_photos: usize`: photos LightCraft lists that the mapping
-//!     file does not know. DECISION: they are counted, never stored. They
-//!     are the user's own photos; keeping their values would be data we have
-//!     no use for, and the count lets the report show the library is bigger;
+//!     has but neither query lists (removed for good). A photo LightCraft
+//!     deleted but still lists under `deleted: true` is present, never
+//!     missing. Not an error;
+//!   - `foreign_photos: usize`: photos either query lists that the mapping
+//!     file does not know; a photo listed by both queries counts once.
+//!     DECISION: they are counted, never stored. They are the user's own
+//!     photos; keeping their values would be data we have no use for, and the
+//!     count lets the report show the library is bigger;
 //!   - `albums: BTreeMap<i64, LiveAlbum>`, keyed by Lightroom collection id,
 //!     for every mapped collection that `albums.list` still shows;
 //!   - `missing_albums: BTreeSet<i64>`: mapped collections not in the list;
@@ -26,13 +30,17 @@
 //!   as global ids; members the mapping file does not know are dropped
 //!   (they are foreign photos).
 //!
-//! Requests, in total for a library of N listed photos, M mapped photos
-//! present, A mapped collections present, page size P <= 200:
-//! `ceil(N/P)` x `catalog.query {filter: {}, offset, limit}` (all pages, in
-//! order), M x `photo.inspect` (caption, copyright and creator are not in the
-//! summary, so every present mapped photo is inspected; foreign and missing
-//! ones are not), 1 x `albums.list`, 1 x `keyword.list`, and per present
-//! album `ceil(members/P)` (at least 1) x `catalog.query {filter: {album}}`.
+//! Requests, in total for a library of N listed non-deleted photos, D listed
+//! deleted photos, M mapped photos present (deleted ones included),
+//! A mapped collections present, page size P <= 200:
+//! max(1, ceil(N/P)) x `catalog.query {filter: {}, offset, limit}` and
+//! max(1, ceil(D/P)) x `catalog.query {filter: {deleted: true}, offset,
+//! limit}` (all pages of each stream, in order; the ids of the two streams are
+//! merged, each id once), M x `photo.inspect` (caption, copyright and creator
+//! are not in the summary, so every present mapped photo, deleted or not, is
+//! inspected once; foreign and missing ones are not), 1 x `albums.list`,
+//! 1 x `keyword.list`, and per present album `ceil(members/P)` (at least 1) x
+//! `catalog.query {filter: {album}}`.
 //! Only these four commands are sent: never a setter, `album.create`,
 //! `album.addPhotos`, `library.import` or `library.select`.
 //!
@@ -134,7 +142,8 @@ fn only_read_commands_are_sent() {
 }
 
 #[test]
-fn paging_reads_every_page_in_order() {
+#[ignore = "waiting for A26 implementation"]
+fn paging_reads_every_page_of_both_queries_in_order() {
     let fake = start(|c| c.seed_photos = seeds(1..=450));
     let ids: Vec<i64> = (1..=450).collect();
     let live = read(&fake, &state_with(&ids)).unwrap();
@@ -147,17 +156,30 @@ fn paging_reads_every_page_in_order() {
         .filter(|(c, _)| c == "catalog.query")
         .map(|(_, p)| p)
         .collect();
-    let limit = pages[0]["limit"].as_u64().expect("limit is sent") as usize;
+    let (listed, deleted): (Vec<&Value>, Vec<&Value>) =
+        pages.iter().partition(|p| p["filter"] == json!({}));
+    assert_eq!(
+        deleted.len() + listed.len(),
+        pages.len(),
+        "only the two photo streams and no third filter shape"
+    );
+    // The non-deleted stream covers all 450 photos, page by page.
+    let limit = listed[0]["limit"].as_u64().expect("limit is sent") as usize;
     assert!((1..=200).contains(&limit));
-    assert_eq!(pages.len(), 450_usize.div_ceil(limit));
-    for (i, p) in pages.iter().enumerate() {
-        assert_eq!(p["filter"], json!({}), "never the current UI view");
+    assert_eq!(listed.len(), 450_usize.div_ceil(limit));
+    for (i, p) in listed.iter().enumerate() {
         assert_eq!(p["offset"].as_u64(), Some((i * limit) as u64));
         assert_eq!(p["limit"].as_u64(), Some(limit as u64));
     }
+    // The deleted stream is sent too; with no deleted photos it is one page.
+    assert_eq!(deleted.len(), 1, "the deleted query is always sent");
+    assert_eq!(deleted[0]["filter"], json!({"deleted": true}));
+    assert_eq!(deleted[0]["offset"].as_u64(), Some(0));
+    assert!((1..=200).contains(&deleted[0]["limit"].as_u64().unwrap()));
 }
 
 #[test]
+#[ignore = "waiting for A26 implementation"]
 fn request_counts_are_the_expected_ones() {
     let fake = start(|c| {
         c.seed_photos = seeds(1..=5);
@@ -167,11 +189,20 @@ fn request_counts_are_the_expected_ones() {
     let mut state = state_with(&[1, 2, 3, 4]); // photo 5 is foreign
     state.record_collection(10, album_entry(5001, "Set", EntryKind::Album, &[1, 2]));
     read(&fake, &state).unwrap();
-    assert_eq!(count(&fake, "catalog.query"), 2); // all photos + album members
+    // Listed photos (one page), deleted photos (one page), album members.
+    assert_eq!(count(&fake, "catalog.query"), 3);
     assert_eq!(count(&fake, "photo.inspect"), 4); // mapped photos only
     assert_eq!(count(&fake, "albums.list"), 1);
     assert_eq!(count(&fake, "keyword.list"), 1);
-    assert_eq!(fake.commands().len(), 8);
+    assert_eq!(fake.commands().len(), 9);
+    let filters: Vec<Value> = fake
+        .commands()
+        .into_iter()
+        .filter(|(c, _)| c == "catalog.query")
+        .map(|(_, p)| p["filter"].clone())
+        .collect();
+    assert!(filters.contains(&json!({})));
+    assert!(filters.contains(&json!({"deleted": true})));
 }
 
 #[test]
