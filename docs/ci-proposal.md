@@ -144,12 +144,13 @@ change.
 promise and catches accidental use of an API newer than the declared version.
 The workspace uses `edition = "2024"` (`Cargo.toml:7`), which is stable since
 Rust 1.85.0 (Rust 1.85.0 release notes, retrieved 2026-11-04), so the MSRV
-cannot be lower than 1.85.0. The code, however, needs more than that floor: it
-uses `slice::as_chunks` and let-chains (`crates/lc-writer/src/apply.rs`), both
-stable since Rust 1.88.0 (Rust 1.88.0 release notes, retrieved 2026-11-05;
-let-chains are stable in the 2024 edition). The MSRV promise is therefore
-1.88.0, declared as `rust-version = "1.88.0"` in `[workspace.package]`
-(`Cargo.toml:8`).
+cannot be lower than 1.85.0. The code, however, needs more than that floor:
+`crates/lr-reader/src/develop.rs` uses `slice::as_chunks`, and let-chains appear
+in `crates/lc-writer/src/apply.rs` and `crates/lr2lc/tests/collections_report.rs`.
+Both are stable since Rust 1.88.0 (Rust 1.88.0 release notes, retrieved
+2026-11-05; let-chains are stable in the 2024 edition). The MSRV promise is
+therefore 1.88.0, declared as `rust-version = "1.88.0"` in
+`[workspace.package]` (`Cargo.toml:8`).
 
 **Run time.** One Linux job with a cold build and
 `cargo check --workspace --all-targets --locked`: about 4–6 minutes
@@ -531,7 +532,9 @@ Ranking by benefit per billed minute, with the risk above:
 3. Add the weekly performance measurements (C5) and the weekly audit (C3)
    once the owner approves the tools.
 4. Add the MSRV job (C2) with 1.88.0: edition 2024 sets the floor at 1.85.0,
-   and the code uses `slice::as_chunks` and let-chains, stable since 1.88.0.
+   and the code uses `slice::as_chunks` (`crates/lr-reader/src/develop.rs`) and
+   let-chains (`crates/lc-writer/src/apply.rs`,
+   `crates/lr2lc/tests/collections_report.rs`), stable since 1.88.0.
 5. Defer coverage (C4) and the external link/prose tools (C6). The in-repo
    relative-link check can go in immediately at no cost.
 
