@@ -15,8 +15,11 @@ Sources read for this proposal:
   (<https://docs.github.com/en/billing/concepts/product-billing/github-actions>,
   retrieved and read 2026-11-04; the per-minute rates quoted below match the
   table on that page)
-- one external page: Rust 1.85.0 release notes
+- two external pages: Rust 1.85.0 release notes
   (<https://github.com/rust-lang/rust/releases/tag/1.85.0>, retrieved 2026-11-04)
+  for the edition-2024 floor, and Rust 1.88.0 release notes
+  (<https://github.com/rust-lang/rust/releases/tag/1.88.0>, retrieved
+  2026-11-05) for `slice::as_chunks` and let-chains
 - `cargo-audit` source, for the exit codes of `cargo audit`
   (<https://github.com/rustsec/rustsec/blob/main/cargo-audit/src/commands/audit.rs>,
   read 2026-11-04)
@@ -141,8 +144,12 @@ change.
 promise and catches accidental use of an API newer than the declared version.
 The workspace uses `edition = "2024"` (`Cargo.toml:7`), which is stable since
 Rust 1.85.0 (Rust 1.85.0 release notes, retrieved 2026-11-04), so the MSRV
-cannot be lower than 1.85.0. No `rust-version` is declared in any
-`Cargo.toml` today (grep over the workspace), so nothing is promised yet.
+cannot be lower than 1.85.0. The code, however, needs more than that floor: it
+uses `slice::as_chunks` and let-chains (`crates/lc-writer/src/apply.rs`), both
+stable since Rust 1.88.0 (Rust 1.88.0 release notes, retrieved 2026-11-05;
+let-chains are stable in the 2024 edition). The MSRV promise is therefore
+1.88.0, declared as `rust-version = "1.88.0"` in `[workspace.package]`
+(`Cargo.toml:8`).
 
 **Run time.** One Linux job with a cold build and
 `cargo check --workspace --all-targets --locked`: about 4–6 minutes
@@ -160,18 +167,18 @@ already forces a recent compiler, so the practical window is small.
 
 ```yaml
   msrv:
-    name: MSRV (1.85.0)
+    name: MSRV (1.88.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@1.88.0
       - name: Check
         run: cargo check --workspace --all-targets --locked
 ```
 
-The matching code change is `rust-version = "1.85"` in
-`[workspace.package]` and `rust-version.workspace = true` in every crate — a
-separate change outside `.github/`.
+The matching code change is the value in `[workspace.package]`:
+`rust-version = "1.88.0"` (`Cargo.toml:8`). Every crate already inherits it
+with `rust-version.workspace = true`, so no crate manifest changes.
 
 ### C3 – Dependency advisories (`cargo audit` or `cargo deny`)
 
@@ -509,7 +516,7 @@ Ranking by benefit per billed minute, with the risk above:
 | 3 | C9 cache | cuts compile time, biggest on macOS | saves ≈9–18 billed min per matrix run | third-party action, stale cache | adopt after C10 |
 | 4 | C7 `tasks/` release gate | protects the first release | ≈0 (tags only) | tag convention | adopt now |
 | 5 | C8 personal-data scan | enforces principle 11 | 0 (inside the Linux job) | false positives, allowlist needed | adopt with allowlist |
-| 6 | C2 MSRV | concrete compiler promise | ≈4–6 billed min per run | version choice, maintenance | adopt after the owner picks 1.85 |
+| 6 | C2 MSRV | concrete compiler promise | ≈4–6 billed min per run | version choice, maintenance | adopt with 1.88.0 |
 | 7 | C5 scheduled measurements | catches scale regressions | ≈3–6 billed min per weekly run | noise, no threshold | adopt weekly |
 | 8 | C3 cargo audit | advisory and license signal | ≈1–2 billed min per weekly run | new tool, owner approval | adopt once approved |
 | 9 | C6 links/prose | catches broken docs | ≈0 for the script | third-party tools, noise | adopt the script; defer lychee/vale |
@@ -523,8 +530,8 @@ Ranking by benefit per billed minute, with the risk above:
    macOS cost.
 3. Add the weekly performance measurements (C5) and the weekly audit (C3)
    once the owner approves the tools.
-4. Add the MSRV job (C2) only after the owner declares a version; 1.85 is the
-   floor because of edition 2024.
+4. Add the MSRV job (C2) with 1.88.0: edition 2024 sets the floor at 1.85.0,
+   and the code uses `slice::as_chunks` and let-chains, stable since 1.88.0.
 5. Defer coverage (C4) and the external link/prose tools (C6). The in-repo
    relative-link check can go in immediately at no cost.
 
@@ -567,8 +574,10 @@ dominant cost. If the repository becomes public, standard runners are free
    `Swatinem/rust-cache`, lychee and vale be introduced, and must every action
    be pinned to a commit SHA? The repository already uses `dtolnay/rust-toolchain`
    (`ci.yml:20`), but each new tool needs approval under the project rules.
-4. **MSRV.** Declare 1.85.0 (the edition-2024 floor), a newer version, or none
-   at all? Should `rust-version` be added to every crate?
+4. **MSRV.** Decided on 2026-11-05: declare 1.88.0. Edition 2024 sets the floor
+   at 1.85.0, but the code uses `slice::as_chunks` and let-chains, both stable
+   since 1.88.0. `rust-version` lives in `[workspace.package]` and every crate
+   inherits it, so no crate manifest needs its own value.
 5. **Advisories.** `cargo audit` or `cargo deny`? Weekly or per push? Block
    the merge or only report? May the action open issues?
 6. **Coverage.** Ever, or not? Weekly or per push? No upload to an external
