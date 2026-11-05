@@ -417,7 +417,7 @@ fn added_keyword_gives_one_setmeta_with_addkeywords() {
 
 #[test]
 fn a_keyword_removed_in_lightroom_is_only_reported() {
-    // F-022 (a): LightCraft keeps every keyword it has; nothing is removed.
+    // LightCraft keeps every keyword it has; nothing is removed.
     let p = change(
         full_photo(),
         full_photo(),

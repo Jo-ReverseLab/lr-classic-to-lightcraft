@@ -1,4 +1,4 @@
-//! Acceptance tests for the three-way reconciliation (F-022 (a)): the plan
+//! Acceptance tests for the three-way reconciliation: the plan
 //! compares, per known photo, the last imported value (mapping file), the
 //! Lightroom value (model) and the value LightCraft has now (live state).
 //!
