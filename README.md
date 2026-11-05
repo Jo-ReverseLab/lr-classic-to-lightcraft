@@ -45,7 +45,7 @@ CI runs formatting, lint and tests on Linux, macOS and Windows.
 | `--port N` | Control port of the running LightCraft app (default 7980) |
 | `--allow-xmp` | Write even if the library writes XMP sidecars next to the originals |
 | `--overwrite-develop` | Also rewrite the development settings of known photos that changed in Lightroom |
-| `--probe-white-balance` | Read an original file to derive the white-balance scale (not released: the run stops with exit code 2) |
+| `--probe-white-balance` | Read an original file to derive the white-balance scale (not implemented yet: the run stops with exit code 2) |
 | `--map OLD=NEW` | Replace a path prefix, repeatable |
 | `--label-set SET` | Names of the colour labels: `en`, `de`, `auto` (default) or a JSON file |
 | `--report FILE` | Write `report.json` |
