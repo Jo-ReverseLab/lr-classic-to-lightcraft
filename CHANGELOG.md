@@ -63,7 +63,7 @@ The project has not made a release yet.
   The counter `white_balance_not_carried` counts photos whose temperature or
   tint pair was not carried over; only the number is reported.
 - `--probe-white-balance` is reserved for reading an original file to derive
-  a white-balance scale. It is not released (F-032) and a run given it stops
+  a white-balance scale. It is not implemented yet and a run given it stops
   with exit code 2 before the catalog is opened. Without it lr2lc never opens
   an original photo; temperature and tint are only reported.
 - Dry run by default. The summary and `--report FILE` (`report.json`) list

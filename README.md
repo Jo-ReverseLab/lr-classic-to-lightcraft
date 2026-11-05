@@ -452,7 +452,7 @@ Temperature and tint themselves are never written, and neither is any value
 of an unmapped field: those are collected and reported by name.
 
 Deriving the scale of a stored temperature needs the original file. That
-probe is not released yet (open question F-032) and never runs implicitly:
+probe is not implemented yet and never runs implicitly:
 `--probe-white-balance` exists as an explicit opt-in, but a run given it
 stops with exit code 2 before the catalog is opened or anything is written.
 Without it lr2lc never opens an original photo. The `develop` area therefore
@@ -796,7 +796,7 @@ counts the smart collections converted as smart albums.
   written, as are temperature, tint and the other unmapped fields. Temperature
   and tint wait for a probe of the original file because their stored scale is
   ambiguous.
-  That probe is not released (F-032); `--probe-white-balance` is refused with
+  That probe is not implemented yet; `--probe-white-balance` is refused with
   exit code 2 before the catalog is opened.
 - A known photo whose development settings changed in Lightroom is left alone
   unless `--overwrite-develop` is given (see
