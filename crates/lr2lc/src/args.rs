@@ -34,7 +34,7 @@ Options:
                    that changed in Lightroom (default: left alone)
   --probe-white-balance
                    Read the original file to derive a white-balance scale
-                   (not released yet: the run stops with exit code 2)
+                   (not implemented yet: the run stops with exit code 2)
   -h, --help       Print this help
   -V, --version    Print the version
 
@@ -63,7 +63,7 @@ pub struct RunOptions {
     pub script: Option<PathBuf>,
     pub overwrite_develop: bool,
     /// Opt-in probe of the original file for a white-balance scale. Not
-    /// released yet: a run given this option stops before it reads anything.
+    /// implemented yet: a run given this option stops before it reads anything.
     pub probe_white_balance: bool,
 }
 
