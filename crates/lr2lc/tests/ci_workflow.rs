@@ -164,15 +164,15 @@ fn ci_cargo_commands_use_locked() {
 }
 
 #[test]
-fn ci_checks_msrv_1_85_0() {
+fn ci_checks_msrv_1_88_0() {
     let text = read(CI);
     assert!(
-        text.contains("1.85.0"),
-        "{CI}: no MSRV job or step with `1.85.0`"
+        text.contains("1.88.0"),
+        "{CI}: no MSRV job or step with `1.88.0`"
     );
     assert!(
         text.to_lowercase().contains("msrv"),
-        "{CI}: the `1.85.0` entry must be a named MSRV job or step"
+        "{CI}: the `1.88.0` entry must be a named MSRV job or step"
     );
 }
 
@@ -235,8 +235,8 @@ fn link_check_script_exists_and_is_not_empty() {
 fn workspace_declares_msrv() {
     let text = read(WORKSPACE_MANIFEST);
     assert!(
-        text.contains("rust-version = \"1.85.0\""),
-        "{WORKSPACE_MANIFEST}: the workspace must declare `rust-version = \"1.85.0\"`"
+        text.contains("rust-version = \"1.88.0\""),
+        "{WORKSPACE_MANIFEST}: the workspace must declare `rust-version = \"1.88.0\"`"
     );
 }
 
