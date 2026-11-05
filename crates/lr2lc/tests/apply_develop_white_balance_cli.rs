@@ -1,13 +1,13 @@
 //! CLI acceptance tests for the white-balance safety switch (P6-4, phase 6a).
 //!
-//! Contract checked here (Lead, P6-4). The question F-032 (may lr2lc read
-//! originals read-only for a white-balance probe?) is still open, so:
+//! Contract checked here (Lead, P6-4). The probe is not implemented yet, so:
 //!
 //! - `--probe-white-balance` exists and is off by default.
-//! - Given without a release, the run aborts with exit code 2 and a clear
-//!   message that says `white balance probe` and names `F-032`, before the
-//!   catalog is opened and before any original file is opened. Nothing is
-//!   written: no report, no mapping file, the catalog stays byte-identical.
+//! - Given while the probe is not implemented, the run aborts with exit code
+//!   2 and a clear message that says `white balance probe` and `not
+//!   implemented`, before the catalog is opened and before any original file
+//!   is opened. Nothing is written: no report, no mapping file, the catalog
+//!   stays byte-identical.
 //! - Without the option a dry run behaves as before and never opens an
 //!   original file, even when the placeholder originals are unreadable.
 //! - `report.json`, top-level area `develop`, gains the counter
@@ -150,8 +150,8 @@ fn the_probe_is_refused_before_the_catalog_is_read() {
         "the message must name the probe: {stderr}"
     );
     assert!(
-        lower.contains("f-032"),
-        "the message must name the open question: {stderr}"
+        lower.contains("not implemented"),
+        "the message must say the probe is not implemented: {stderr}"
     );
     assert!(
         !s.report_path().exists(),
@@ -167,8 +167,8 @@ fn the_probe_is_refused_before_the_catalog_is_read() {
 #[test]
 fn the_probe_is_refused_even_before_a_missing_catalog_is_reported() {
     // A path that cannot be opened: if the tool tried the catalog first, it
-    // would report a different error and exit 1. The F-032 message proves the
-    // switch is checked before any catalog access.
+    // would report a different error and exit 1. The "not implemented" message
+    // proves the switch is checked before any catalog access.
     let s = Setup::white_balance();
     let missing = s.work.path().join("does-not-exist.lrcat");
 
@@ -176,7 +176,7 @@ fn the_probe_is_refused_even_before_a_missing_catalog_is_reported() {
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert_eq!(out.status.code(), Some(2), "{stderr}");
     assert!(
-        stderr.to_lowercase().contains("f-032"),
+        stderr.to_lowercase().contains("not implemented"),
         "the probe refusal must come before the catalog: {stderr}"
     );
     assert!(
@@ -210,7 +210,10 @@ fn a_refused_probe_run_creates_no_mapping_file_next_to_the_library() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert_eq!(out.status.code(), Some(2), "{stderr}");
-    assert!(stderr.to_lowercase().contains("f-032"), "{stderr}");
+    assert!(
+        stderr.to_lowercase().contains("not implemented"),
+        "{stderr}"
+    );
     assert!(!s.report_path().exists(), "a refused run writes no report");
     assert!(
         !s.state_path().exists(),
