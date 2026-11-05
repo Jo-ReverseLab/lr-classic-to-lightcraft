@@ -2,7 +2,7 @@ name: Performance measurements
 
 # Weekly measurement runs for the ignored 10k/100k/500k-photo tests. The
 # numbers are logged only; no threshold is applied yet. A threshold follows
-# after several measurement series (decision F-031, point 7). The 2,000-photo
+# after several measurement series (see `docs/ci-proposal.md`). The 2,000-photo
 # guard stays in the normal test job.
 
 on:
