@@ -1,4 +1,4 @@
-//! Acceptance tests for task T24: expand CI after finding F-031.
+//! Acceptance tests for the expanded CI configuration.
 //!
 //! The repository configuration is read as plain text: no YAML crate, no
 //! network, no execution of the workflows themselves. Each test pins one part
