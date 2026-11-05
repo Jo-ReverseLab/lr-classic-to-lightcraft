@@ -2,12 +2,13 @@
 
 > **Status:** Phase-6 groundwork, updated in P6-0 (2026-11-04), with the P6-6
 > confirmation and the implementation through P6-7b carried in. The scope and
-> seven of the eight open decisions are settled (section 8); the white-balance
-> probe is still open (section 8.2). Development settings are implemented for
-> phase 6a (sliders, tone curves, crop, white-balance mode and camera profiles)
-> and for P6-7 (masks in P6-7a, spots in P6-7b). P6-4 took the cautious route:
-> only the white-balance mode is mapped, and reading the originals remains an
-> open probe (section 8.2). The lr2lc citations were re-checked against commit
+> all eight decisions are settled (section 8); the read-only white-balance
+> probe is released but not implemented yet (section 8.2). Development settings
+> are implemented for phase 6a (sliders, tone curves, crop, white-balance mode
+> and camera profiles) and for P6-7 (masks in P6-7a, spots in P6-7b). P6-4
+> took the cautious route: only the white-balance mode is mapped, and reading
+> the originals is released but not implemented yet (section 8.2). The lr2lc
+> citations were re-checked against commit
 > `04ee6f5` (section 0).
 
 This document answers four questions:
@@ -1059,19 +1060,21 @@ as expected (`docs/lightroom-catalog-import.md:100-107`).
 
 ---
 
-## 8. Decisions (2026-11-04; seven settled, one open)
+## 8. Decisions (2026-11-04; seven settled, the eighth released 2026-11-05)
 
-Seven of the eight questions T12 left open are settled. The phase-6 scope and
-these seven decisions were **released by the owner on 2026-11-04**; the project
-only carried that release out. The white-balance probe (row 2, section 8.2) is
-still open. "User" in the Owner column marks such an owner decision; "Lead"
-would mark a decision the team may take under the project rules — no row here
-is of that kind. The "decision" column is what P6-1…P6-7 implement.
+Seven of the eight questions T12 left open were settled on 2026-11-04. The
+phase-6 scope and these seven decisions were **released by the owner on
+2026-11-04**; the project only carried that release out. The white-balance
+probe (row 2, section 8.2) is **released 2026-11-05, implementation open**:
+the owner allows reading the originals read-only, but the probe is not built
+yet. "User" in the Owner column marks such an owner decision; "Lead" would
+mark a decision the team may take under the project rules — no row here is of
+that kind. The "decision" column is what P6-1…P6-7 implement.
 
 | # | Question | Facts today (evidence) | Decision | Owner |
 | --- | --- | --- | --- | --- |
 | 1 | Which route takes the develop settings? | `develop.set` and `develop.merge` exist and cover sliders and a partial settings object (`develop.rs:167-263`; `crates/develop/src/lib.rs:45-57`). `library.importLightroom` always imports a whole catalog (`lightroom_catalog.rs:481`, `:1096`), so it cannot be a develop-only call. | **Own mapper.** lr2lc reads `Adobe_imageDevelopSettings.text` itself and writes through `develop.set` / `develop.merge`. `library.importLightroom` is not used for develop settings. | User (released 2026-11-04) |
-| 2 | White balance on raws. | Kelvin handling needs source info from the original file (`crs.rs:250-306`, `:40-57`); lr2lc must not touch originals (principle 2). | **Probe originals read-only only when original paths are released; otherwise do not map `Temperature`/`Tint` and report them as not carried.** The mode (`WhiteBalance`) is always mapped. Enabling the probe is the one residual question (see 8.2). | Open (section 8.2): until answered, only the WB mode is mapped; `Temperature`/`Tint` are reported as not carried |
+| 2 | White balance on raws. | Kelvin handling needs source info from the original file (`crs.rs:250-306`, `:40-57`); lr2lc must not touch originals (principle 2). | **Probe originals read-only only when original paths are released; otherwise do not map `Temperature`/`Tint` and report them as not carried.** The mode (`WhiteBalance`) is always mapped. The probe is released 2026-11-05, implementation open (see 8.2). | User (released 2026-11-05; implementation open): until implemented, only the WB mode is mapped; `Temperature`/`Tint` are reported as not carried |
 | 3 | Scope of phase 6. | Masks and spots are the bulk (`crs_masks.rs:23-24`, `:252-431`); sliders, curves and crop are bounded and testable from generated fixtures. | **6a = sliders, tone curves and crop. 6b = masks and spots, and 6b must not delay the import** (P6-7 runs last). | User (released 2026-11-04) |
 | 4 | Model shape. | 122 controls would duplicate a table LightCraft owns (`controls.rs:144-166`, `:171-292`); tone curves, the crop rectangle, masks and spots have no slider (`settings.rs:332-374`, `:815-822`, `:1015-1073`), though `crop.angle` is a control (`controls.rs:292`). | **Hybrid:** a generic control-id map for sliders (including `crop.angle`), typed fields for tone curves, the crop rectangle, masks and spots. | User (released 2026-11-04) |
 | 5 | Re-sync policy for changed edits. | The plan only adds; the mapping file records the base values (`state.rs:87-105`); `develop.merge` can overwrite. | **Report changed settings by default; overwrite only with explicit `--overwrite-develop`.** | User (released 2026-11-04) |
@@ -1093,16 +1096,20 @@ is of that kind. The "decision" column is what P6-1…P6-7 implement.
    before implementing them; until then they stay assumptions and are reported.
 7. Camera profiles: report only; no converter in this project.
 
-The one question left for the owner is in 8.2.
+The eighth decision was released by the owner on 2026-11-05; only its
+implementation is open (8.2).
 
-### 8.2 Open user question
+### 8.2 Released 2026-11-05: read-only white-balance probe
 
 **May lr2lc read the original photo files (read-only) to determine the
-white-balance scale?** Yes → Kelvin/tint are mapped for raws with the correct
-scale. No → only the WB mode is mapped and `Temperature`/`Tint` are reported
-as not carried. Nothing is written to the originals either way. Until the
-answer, P6-4 implements only the "No" default; the probe itself is neither
-implemented nor scheduled and the question remains open.
+white-balance scale?** The owner released this on 2026-11-05: yes, the
+originals may be opened read-only. The decision is settled; the implementation
+is open, because the probe needs RAW metadata and the dependency for reading
+them is still to be decided. With the probe, Kelvin/tint are mapped for raws
+on the correct scale. Until it is implemented, P6-4 keeps the "No" default:
+only the WB mode is mapped, and `Temperature`/`Tint` are reported as not
+carried. Nothing is written to the originals either way; the probe never runs
+implicitly.
 
 ---
 
@@ -1116,7 +1123,7 @@ work and can run in parallel; P6-7 comes last because it is 6b.
 | P6-1 | Reader: read `Adobe_imageDevelopSettings.text`, parse the non-executing Lua subset, map known keys, count and report unknown keys; neutral `Develop` in `crates/model` | generator table (section 7.1), P6-6 for the assumed names only | A unit test that parses a generated `text` value and maps one slider; then the `develop_all_sliders` fixture. |
 | P6-2 | Writer: `develop.set` for sliders, `library.select` + `develop.merge` for structured parts, only with `--apply`; re-sync report, `--overwrite-develop`; capped report area | P6-1 model; `state.rs` hash field; fake port | A dry-run plan test against `fake_lightcraft.rs`: expected `library.select` + `develop.set` / `develop.merge` steps, no command without `--apply`. |
 | P6-3 | Typed 6a parts: tone curves and crop | P6-1 types; P6-2 merge step | Curve identity and channel-completeness tests; crop frame tests per orientation (section 7.2 items 4-5). |
-| P6-4 | White balance: read-only probe behind a flag, only when original paths are released; otherwise report | P6-1; answer to 8.2 for switching the probe on | Mode mapping without a probe first, then the "not carried" report path. A generated placeholder only exercises the undecidable path; the probe itself is checked read-only on a released original. |
+| P6-4 | White balance: read-only probe behind a flag; released 2026-11-05, implementation open; otherwise report | P6-1; 8.2 released 2026-11-05, implementation open (RAW-metadata dependency) | Mode mapping without a probe first, then the "not carried" report path. A generated placeholder only exercises the undecidable path; the probe itself is checked read-only on a released original. |
 | P6-5 | Camera profile: read the name, report it, aggregate per profile name | P6-1 reader; P6-2 report area | A generated fixture with two profile names and a count assertion; no pixel or profile data involved. |
 | P6-6 | Confirm the assumed field names read-only on a catalog copy (HDR SDR, red eye, lens blur, AI denoise, Point Color, CA) | none (parallel to P6-1) | A read-only query that lists table and column names and counts rows; never values, never the original catalog. |
 | P6-7 | 6b: masks and spots through `develop.merge`, without delaying the import. Masks are done as P6-7a and spots as P6-7b. | P6-2 merge step; P6-3 model types | Mask and spot JSON against the fake port; a timing check that the 6a path does not wait for 6b. |
@@ -1200,9 +1207,11 @@ those parts are marked as assumptions and are not upgraded by this section.
 
 ## Open questions
 
-1. **Original paths for white balance (user).** May lr2lc open the original
-   photo files read-only to decide the Kelvin scale? Until the answer, P6-4
-   ships the "No" path and keeps the probe behind a flag.
+1. **Original paths for white balance (released 2026-11-05; implementation
+   open).** The owner allows reading the originals read-only to decide the
+   Kelvin scale. The probe is not implemented yet because it needs RAW
+   metadata, and the dependency for reading them is still to be decided; until
+   then P6-4 ships the "No" path and keeps the probe behind a flag.
 2. **Assumed catalog keys (technical, P6-6).** Are the Lightroom names for the
    HDR SDR group, red eye, lens blur, AI denoise, Point Color and the manual
    CA sliders the ones listed in section 4.12? Only a read-only look at a
@@ -1226,8 +1235,9 @@ Keep the approved scope and order: build P6-1 (reader) and P6-2 (writer,
 dry-run first) against generated fixtures and the fake port; add P6-3
 (curves, crop) as the first structured end-to-end proof. Run P6-6 in parallel
 so the assumed field names are settled before they are implemented, and do
-not start P6-7 until 6a is stable and the import timing is measured. Ask the
-owner only the white-balance path question; the other seven decisions in
-section 8 were released by the owner on 2026-11-04. If the WB probe is refused, P6-4 still
-ships the mode mapping and the report entry, so no photo is left without a
-reason.
+not start P6-7 until 6a is stable and the import timing is measured. The
+white-balance path was released by the owner on 2026-11-05 with the
+implementation still open (the RAW-metadata dependency); the other seven
+decisions in section 8 were released on 2026-11-04. Until the probe is
+implemented, P6-4 ships the mode mapping and the report entry, so no photo is
+left without a reason.
