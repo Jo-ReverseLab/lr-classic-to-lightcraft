@@ -44,9 +44,8 @@ uploads an artefact or creates a GitHub Release; the file ends at line 31.
 ### 1.4 Documentation, licence, metadata
 
 - README: 833 lines; status "Early development; the version is 0.x"
-  (`README.md:10-14`); Known limits (`README.md:783`); licence section linking
-  both files (`README.md:826-833`); `LICENSE-APACHE` is 10,763 bytes,
-  `LICENSE-MIT` 1,074 bytes.
+  (`README.md:10-14`); Known limits (`README.md:783`); licence section
+  (`README.md:826-833`); `LICENSE-APACHE` 10,763 bytes, `LICENSE-MIT` 1,074.
 - Ignored: `/target/`, `/.worktrees/`, the `.lrcat` family, `.DS_Store`,
   `/.claude/` and sandbox placeholders (`.gitignore:1-2`, `.gitignore:4-11`).
 - The root manifest has no `description`, `repository`, `homepage`, `readme`,
@@ -91,11 +90,15 @@ Current practice keeps them; they do not block the release.
 
 ## 3. Changes before the tag
 
-5. **owner** Decide the package metadata (question 1). If yes, add
-   `description` and `repository` under `[workspace.package]` after
-   `Cargo.toml:9`. Check: `cargo metadata --no-deps --offline
-   --format-version 1 | grep -c '"repository": "'` — Expected: `1`, or `0` if
-   the owner declines (Cargo writes `null` for a missing key).
+5. **owner** Decide the package metadata (question 1). The root `Cargo.toml` is
+   a virtual manifest with no `[package]` section (`Cargo.toml:1-9`), so a key
+   under `[workspace.package]` reaches no package unless a member inherits it.
+   Either add `description.workspace = true` and `repository.workspace = true`
+   to the `[package]` section of `crates/lr2lc/Cargo.toml`, or to all four
+   shipped crates (`lr-reader`, `model`, `lc-writer`, `lr2lc`). Check:
+   `cargo metadata --no-deps --offline --format-version 1 |
+   grep -c '"repository": "'` — Expected: `1` for the first variant, `4` for
+   the second, `0` if the owner declines.
 6. Insert the `0.1.0` section from section 6 below `## [Unreleased]`
    (`CHANGELOG.md:8`) and replace line 6, which would contradict it. Check:
    `grep -n '^## \[0\.1\.0\]' CHANGELOG.md` — Expected: one line;
@@ -165,7 +168,8 @@ Current practice keeps them; they do not block the release.
 
 Insert below `## [Unreleased]` (`CHANGELOG.md:8`) and replace line 6, for
 example with "The first release is 0.1.0." It only summarises the
-`Unreleased` section (`CHANGELOG.md:10-148`) and adds no claim that is not
+`Unreleased` section (`CHANGELOG.md:10-148`; the wording follows
+`CHANGELOG.md:39-40` and `CHANGELOG.md:49-51`) and adds no claim that is not
 already there.
 
 ```markdown
@@ -184,8 +188,8 @@ First public release.
   collections as smart albums where every rule translates exactly, stacks,
   the Quick Collection.
 - Development settings: sliders, tone curves, colour grading, masks, spots,
-  crop geometry and the white-balance mode. Temperature, tint, the look and
-  the camera profile are reported by name and never written.
+  crop geometry and the white-balance mode. Temperature, tint and the look are
+  reported, never written; the camera profile is read and reported by name.
 - Dry run by default, a readable summary, and `report.json` with a fixed
   reason code for everything not converted; read equals converted plus
   skipped.
@@ -210,8 +214,7 @@ A bare header with no body also satisfies the gate (`release.yml:28-31`).
 ## 7. What this checklist cannot cover
 
 - **No binaries.** The workflow builds and uploads nothing
-  (`release.yml:11-31`); 0.1.0 ships source only. A build-and-upload job is a
-  separate change and needs its own platform matrix.
+  (`release.yml:11-31`); 0.1.0 ships source only, and a build job is a separate change.
 - **No crates.io publication.** No shipped crate sets `publish = false`
   (section 1.4) and no publishing step exists. Publication would also need a
   licence decision.
@@ -223,13 +226,11 @@ A bare header with no body also satisfies the gate (`release.yml:28-31`).
 
 ## Open questions
 
-1. Should `[workspace.package]` gain `description` and `repository` before the
-   tag, which freezes the manifest (`Cargo.toml:1-9`)?
-2. Public before or after the tag? Before: free Actions minutes, and the
-   release is public from the first second. After: the owner can watch the
-   release run while the repository is still private.
-3. Should `tasks/` be removed in its own commit (step 10) or with the
-   changelog entry?
+1. Should the shipped crates inherit `description` and `repository` from
+   `[workspace.package]` before the tag, which pins the manifest (`Cargo.toml:1-9`)?
+2. Public before or after the tag? Before: free Actions minutes and a public
+   release from the first second. After: the owner watches the run in private.
+3. Should `tasks/` be removed in its own commit (step 10) or with the changelog entry?
 4. Should a GitHub Release with notes be created by hand after the tag? The
    workflow does not create one (`release.yml:11-31`).
 5. Should the shipped crates get `publish = false` so an accidental
