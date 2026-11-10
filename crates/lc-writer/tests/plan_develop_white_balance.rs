@@ -5,8 +5,8 @@
 //!   written through `develop.merge` as `wb.mode`.
 //! - `Temperature`, `Tint`, `IncrementalTemperature` and
 //!   `IncrementalTint` are never part of a command; only the mode is carried
-//!   while the probe is not released. Their names live in `Develop::unmapped`
-//!   and are not sent.
+//!   while the probe is not implemented. Their names live in
+//!   `Develop::unmapped` and are not sent.
 //! - `wb.scale: "kelvin"` is added only for `WhiteBalanceHint::Kelvin`; the
 //!   reader never produces that hint in P6-4 (no original probe).
 //! - A hint without a mode plans no merge: nothing to write, nothing to

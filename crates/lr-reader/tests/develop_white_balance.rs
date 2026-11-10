@@ -1,6 +1,6 @@
 //! Acceptance tests for white balance in the reader (P6-4, phase 6a).
 //!
-//! Contract checked here (Lead, P6-4, with F-032 still open):
+//! Contract checked here (Lead, P6-4, the probe is not implemented yet):
 //! - `WhiteBalance` is normalised to LightCraft's `wb.mode` spelling
 //!   (`asShot`, `auto`, `daylight`, `cloudy`, `shade`, `tungsten`,
 //!   `fluorescent`, `flash`, `custom`); the stored spelling is not kept.
@@ -203,7 +203,7 @@ fn a_second_read_returns_identical_white_balance_data() {
     );
 }
 
-/// The probe is not released: reading a catalog must never open a photo file.
+/// The probe is not implemented: reading a catalog must never open a photo file.
 /// The placeholder originals are made unreadable; a reader that opened them
 /// would have to fail (or at least lose the photo). The read still succeeds.
 #[cfg(unix)]

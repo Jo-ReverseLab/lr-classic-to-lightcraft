@@ -25,13 +25,13 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(Command::Run(options)) => {
-            // The white-balance probe is not released: stop before touching
-            // the catalog or any original file (F-032 is still open).
+            // The white-balance probe is not implemented yet: stop before
+            // touching the catalog or any original file.
             if options.probe_white_balance {
                 eprintln!(
-                    "error: --probe-white-balance is not released: the white balance probe \
-                     would read an original photo and waits for the decision in F-032. \
-                     Nothing was read or written."
+                    "error: --probe-white-balance is not implemented yet: the white balance probe \
+                     would read technical metadata from an original photo. Nothing was read or \
+                     written."
                 );
                 return ExitCode::from(2);
             }
