@@ -1,0 +1,32 @@
+name: Performance measurements
+
+# Weekly measurement runs for the ignored 10k/100k/500k-photo tests. The
+# numbers are logged only; no threshold is applied yet. A threshold follows
+# after several measurement series (see `docs/ci-proposal.md`). The 2,000-photo
+# guard stays in the normal test job.
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: Measurements
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: Toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # master
+        with:
+          toolchain: stable
+      - name: Cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
+        with:
+          shared-key: performance
+      - name: Measure
+        run: cargo test --release --locked -p lr2lc --test performance -- --ignored --nocapture
