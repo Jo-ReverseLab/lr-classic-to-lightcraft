@@ -1204,9 +1204,10 @@ fn has_develop_content(develop: &Develop) -> bool {
 /// The nested `settings` object of `develop.merge`: dotted `partial` paths
 /// are nested (`hdr.enabled` -> `{"hdr": {"enabled": ...}}`), the
 /// white-balance mode becomes `wb.mode`, and a Kelvin hint adds
-/// `wb.scale: "kelvin"`. The tone curves become `curve.master` and the three
-/// channel lists, and the crop becomes `crop.geometry` with its rectangle and
-/// angle. Temperature and tint never appear: they stay in `unmapped` only.
+/// `wb.scale: "kelvin"`. The tone curves (delivered by P6-3) become
+/// `curve.master` and the three channel lists, and the crop (also P6-3)
+/// becomes `crop.geometry` with its rectangle and angle. Temperature and tint
+/// never appear: they stay in `unmapped` only.
 fn develop_settings(develop: &Develop) -> Option<Value> {
     let mut settings = Map::new();
     for (path, value) in &develop.partial {

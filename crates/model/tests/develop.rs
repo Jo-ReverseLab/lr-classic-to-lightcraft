@@ -12,8 +12,7 @@
 //! * The merge-only values carry booleans and text; the white-balance hint
 //!   distinguishes "no field", "Kelvin", "relative" and "undecidable".
 //!
-//! The types do not exist yet, so this file does not compile until the
-//! developer lands P6-1. That is expected: the tests define the target.
+//! The types were added in P6-1; these tests pin their target shape.
 
 use model::{
     CropGeometry, CurvePoint, Curves, Develop, MergeValue, Photo, Rating, WhiteBalance,

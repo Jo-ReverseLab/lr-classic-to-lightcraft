@@ -1,10 +1,15 @@
 # Development settings: mapping from Lightroom Classic to LightCraft
 
-> **Status:** Phase-6 groundwork, updated in P6-0 (2026-11-04). The scope and
-> seven of the eight open decisions are settled (section 8); the white-balance
-> probe is still open (section 8.2). Nothing is implemented yet and development
-> settings are not converted by lr2lc. The lr2lc citations were re-checked
-> against commit `04ee6f5` (section 0).
+> **Status:** Phase-6 groundwork, updated in P6-0 (2026-11-04), with the P6-6
+> confirmation and the implementation through P6-7b carried in. The scope and
+> all eight decisions are settled (section 8); the read-only white-balance
+> probe is released but not implemented yet (section 8.2). Development settings
+> are implemented for phase 6a (sliders, tone curves, crop, white-balance mode
+> and camera profiles) and for P6-7 (masks in P6-7a, spots in P6-7b). P6-4
+> took the cautious route: only the white-balance mode is mapped, and reading
+> the originals is released but not implemented yet (section 8.2). The lr2lc
+> citations were re-checked against commit
+> `04ee6f5` (section 0).
 
 This document answers four questions:
 
@@ -47,9 +52,9 @@ Source roots used below:
   https://github.com/hfiguiere/lrcat-extractor (§10). Only read, no code copied
   (MPL-2.0). Its format notes are `doc/lrcat_format.md`.
 
-No real catalog was opened for this document. No values, names, paths or
-keywords from any catalog appear here. The only examples are synthetic field
-names and invented numbers.
+P6-6 added the confirmed field names from a read-only inspection of a catalog
+copy. No setting values, photo names, paths or keywords from any catalog appear
+here; the only examples are synthetic field names and invented numbers.
 
 ---
 
@@ -73,7 +78,7 @@ than assumed away.
 | `tests/fixtures/generator` (§7) | valid | Workspace crate `lrcat-fixtures` (`tests/fixtures/generator/Cargo.toml:2`). |
 | `docs/research/lightcraft-develop.md:20`, `:22-29`, `:27`, `:32` | valid | Storage, command list, `develop.merge` line and importer flow are at those lines. |
 | `docs/research/lrcat-schema-lrc15.md:18-33` | valid | The `Adobe_images` column table starts at `:18`. |
-| `crates/model/src/lib.rs` (`Photo`, §6.2) | exists, no develop field | `Photo` is at `crates/model/src/lib.rs:103-131` and has no `develop` field. No `Develop` type exists anywhere under `crates/` (grep, P6-0). |
+| `crates/model/src/lib.rs` (`Photo`, §6.2) | exists; P6-0 state noted | `Photo` is at `crates/model/src/lib.rs:103-131`. P6-0 history (before P6-1): the struct had no `develop` field and no `Develop` type existed anywhere under `crates/` (grep); both were added in P6-1. |
 | `crates/lr2lc/src/output.rs:11-40` (cited at §8, decision 6) | valid | `ReportJson` with one area per kind and `skipped_by_code` is at `crates/lr2lc/src/output.rs:11-35`; `AreaJson` is declared at `:39`. |
 | `docs/research/reconciliation.md:1-10` (cited at §6.4) | valid | The status note at `docs/research/reconciliation.md:3` marks the default-only overwrite rule as planned, not implemented. |
 | `crates/catalog/src/model.rs:248-254` (§1.1) | valid, but **LightCraft** path | Not an lr2lc path: it is `Photo.develop` in the LightCraft tree at the cited commit. The document says so at the point of use. |
@@ -487,6 +492,13 @@ the reciprocal) for radial and spot masks (`crs_masks.rs:253-254`); presets
 assume 3:2 (`xmp-interop.md:227`). lr2lc must pass the real photo aspect, which
 it knows from the catalog's `fileWidth`/`fileHeight` (section 2.1).
 
+**Status (P6-7b):** the mask and spot paths are implemented. The four
+containers, the linear, radial, brush, luminance, depth, subject and sky
+components, the blend mode and the inversion are written through
+`develop.merge`; spots are written as well. A shape or slider LightCraft
+cannot express is reported under a stable `Mask: …` name, never written as a
+partial mask.
+
 ### 4.12 Field-name list for the reader and writer
 
 Source table for every row: `Adobe_imageDevelopSettings`, column `text`
@@ -522,7 +534,7 @@ Yellow, Green, Aqua, Blue, Purple, Magenta` (`crs.rs:60`;
 | LightCraft `develop.set` id | `develop.merge` JSON path | Lightroom key in `text` | Evidence |
 | --- | --- | --- | --- |
 | `profile.amount` | `profile.amount` | — (no Lightroom counterpart) | `controls.rs:171`; `settings.rs:191-207`; no mapping in `crs.rs:202-460` |
-| `wb.temp`, `wb.tint` | `wb.temp`, `wb.tint` (+ `wb.scale`) | `Temperature`, `Tint`; `IncrementalTemperature`, `IncrementalTint`; `AsShotTemperature`, `AsShotTint` | `controls.rs:172-173`; `crs.rs:250-306`; `settings.rs:300-309` |
+| `wb.temp`, `wb.tint` | `wb.temp`, `wb.tint` (+ `wb.scale`) | `Temperature`, `Tint`; `IncrementalTemperature`, `IncrementalTint`; `AsShotTemperature`, `AsShotTint` (the `AsShot*` names are assumed and were not observed in the P6-6 copy) | `controls.rs:172-173`; `crs.rs:250-306`; `settings.rs:300-309` |
 | — (merge only) | `wb.mode` (`asShot`, `auto`, `daylight`, …) | `WhiteBalance` | `crs.rs:250-260`; `settings.rs:210-267` |
 | — (merge only) | `wb.scale: "kelvin"` | written by LightCraft, not read from Lightroom | `crs.rs:294-296`; `settings.rs:278-286` |
 | `light.exposure` | `light.exposure` | `Exposure2012`; old `Exposure` | `controls.rs:174`; `crs.rs:210`, `:235` |
@@ -645,8 +657,9 @@ it rather than dropping it (section 5.1).
 Method: a catalog copy provided for this task, 2026-11-04, opened read-only
 (`mode=ro`, `immutable=1`); checksums of the source are unchanged before and
 after. Catalog schema version (`Adobe_DBVersion`) 1500000, Camera Raw version
-18.0.0. Only table, column and field names plus row counts were extracted from
-`Adobe_imageDevelopSettings`; no value was read out or recorded. The settings
+18.0.0. Only table, column and field names, row counts and the feature-column
+counters (0, 1 or −1) were extracted from `Adobe_imageDevelopSettings`; no
+setting value was read out or recorded. The settings
 text is Lightroom output: no generator in this repository writes develop
 settings.
 
@@ -669,18 +682,19 @@ Confirmed top-level field names (number of the 11 non-empty rows):
   from the manual `optics.ca_red`/`ca_blue` sliders;
 - already-documented names seen as expected: `WhiteBalance` (11),
   `Temperature`, `Tint`, `IncrementalTemperature`, `IncrementalTint` (3 each),
-  `ProcessVersion` (11). `AsShotTemperature` and `AsShotTint` (listed in the
-  table above, not marked as assumptions) did not occur in this copy.
+  `ProcessVersion` (11). `AsShotTemperature` and `AsShotTint` (assumed names,
+  section 4.12) did not occur in this copy.
 
 Structure: the HDR keys are siblings at the top level, not fields of an `HDR`
 table; `HDRMaxValue` and the seven `SDR*` keys are separate top-level keys.
 `SDRBlend` has no counterpart in LightCraft's `Hdr` model (section 1.2 does
-not list it), so it currently would be reported as unmapped. `HDRMaxValue`,
-`SDRBrightness` and the other `SDR*` values are numeric.
+not list it), so it is reported as unmapped. `HDRMaxValue` and the seven
+`SDR*` names are the confirmed ones; this document makes no statement about
+the Lua type of their values.
 
 Limits: `RedEyeInfo`, `LensBlur` and `PointColors` are empty table literals in
-every row of this copy (matching the zero feature flags), so the names of
-their inner fields could not be observed. No field name containing `Crop`,
+every non-empty row of this copy (matching the zero feature flags), so the
+names of their inner fields could not be observed. No field name containing `Crop`,
 `Flip` or `Chromatic` occurs in this copy; the only CA-related name is
 `AutoLateralCA` (automatic). Likewise none contains `Denoise`, `Enhance`,
 `RawDetails` or `SuperResolution`.
@@ -704,13 +718,13 @@ states which of those names are confirmed and which remain open.
 | Lightroom setting | Why it cannot be carried over | LightCraft behaviour today | Report behaviour | Source |
 | --- | --- | --- | --- | --- |
 | `ProcessVersion` | names Lightroom's rendering algorithm | LightCraft keeps its own latest process | **silent**: listed as bookkeeping, not in `unmapped` | `crs.rs:63-107`; `docs/lightroom-catalog-import.md:103-105` |
-| `CameraProfile` | profile name carries no rendering data; LightCraft has its own profiles | profile untouched | reported as `CameraProfile` | `xmp-interop.md:178`; test `lightroom_catalog.rs:1255` |
+| `CameraProfile` | profile name carries no rendering data; LightCraft has its own profiles | profile untouched; read since P6-5 and counted per profile name | **not** in `unmapped` for a non-empty text value: counted in `develop.camera_profiles`, `develop.camera_profiles_count` and `develop.photos_with_profile` (`photos with camera profile N` in the summary); a non-textual value stays unmapped as `CameraProfile` | `xmp-interop.md:178`; `crates/lr-reader/src/develop.rs:1055-1061`; `crates/lr2lc/tests/camera_profiles_report.rs:152`; test `lightroom_catalog.rs:1255` |
 | `Look` (a named profile/preset) | LightCraft's catalog import does not resolve a Look to a profile | profile untouched | reported as `Look` | `crs.rs:498-516`; test `crs.rs:893-894` |
 | non-empty `PointColors` | mapper has no Point Color conversion | model and `pointColor.*` controls exist, but stay at defaults | reported as `PointColors` | `crs.rs:498-508`; test `crs.rs:876-884` |
-| red-eye corrections | not read by the mapper | `red_eye` model and `redEye.*` controls exist | reported (field name) — **(assumption:** that catalogs use a `RedEyeInfo` field and it lands in `unmapped`; the field name was not verified) | `xmp-interop.md:191-192` |
+| red-eye corrections | not read by the mapper | `red_eye` model and `redEye.*` controls exist | reported as `RedEyeInfo` (container name confirmed, 2026-11-04; inner fields not read) | `xmp-interop.md:191-192`; section 4.12 |
 | lens blur | not read by the mapper | `lens_blur` model field exists | reported (field names not verified) — **(assumption)** | `xmp-interop.md:191-192` |
 | Adobe AI denoise | not read by the mapper | `enhance.denoise` control exists | reported (field names not verified) — **(assumption)** | `xmp-interop.md:191-192`; `controls.rs:254` |
-| HDR SDR/headroom sliders | mapper reads only `HDREditMode` | `hdr.*` controls exist, stay at defaults | reported when the catalog contains those fields — **(assumption:** field names not verified) | `crs.rs:217-220`; `settings.rs:116-119` |
+| `SDRBlend` | LightCraft's `Hdr` model has no field for it (section 1.2) | no matching control | reported as `SDRBlend` | section 1.2; `settings.rs:1126-1137`; confirmed on a catalog copy, 2026-11-04 |
 | saved Upright matrices | coordinate convention not imported | geometry mode is recalculated | reported | `crs.rs:528-536` |
 | AI masks other than subject/sky | no counterpart | mask is skipped, other components of the same correction survive | `Mask: AI mask (n)` | `crs_masks.rs:221-225` |
 | colour-range masks | LightCraft has no colour range shape | mask component skipped | `Mask: colour range` | `crs_masks.rs:240-245` |
@@ -955,8 +969,9 @@ deterministically (`tests/fixtures/README.md:6-9`).
    - `develop_curves` — master only, master + one channel, and all four;
    - `develop_crop_orientation` — crop with each of the eight orientations;
    - `develop_virtual_copy` — different settings on master and copy;
-   - `develop_unmapped` — unknown field, `PointColors`, `CameraProfile`,
-     AI mask, colour range, `LocalGrain`;
+   - `develop_unmapped` — unknown field, `PointColors`, AI mask, colour range,
+     `LocalGrain`; the `Look` that must stay unmapped is exercised by the
+     camera-profile fixture instead;
    - `develop_deferred` — `-999999` in several places;
    - `develop_malformed` — unbalanced table, a string where a number belongs,
      a 20 MiB text, a 1,000-deep nested table;
@@ -1045,24 +1060,26 @@ as expected (`docs/lightroom-catalog-import.md:100-107`).
 
 ---
 
-## 8. Decisions (settled 2026-11-04)
+## 8. Decisions (2026-11-04; seven settled, the eighth released 2026-11-05)
 
-Seven of the eight questions T12 left open are settled. The phase-6 scope and
-these seven decisions were **released by the owner on 2026-11-04**; the project
-only carried that release out. The white-balance probe (row 2, section 8.2) is
-still open. "User" in the Owner column marks such an owner decision; "Lead"
-would mark a decision the team may take under the project rules — no row here
-is of that kind. The "decision" column is what P6-1…P6-7 implement.
+Seven of the eight questions T12 left open were settled on 2026-11-04. The
+phase-6 scope and these seven decisions were **released by the owner on
+2026-11-04**; the project only carried that release out. The white-balance
+probe (row 2, section 8.2) is **released 2026-11-05, implementation open**:
+the owner allows reading the originals read-only, but the probe is not built
+yet. "User" in the Owner column marks such an owner decision; "Lead" would
+mark a decision the team may take under the project rules — no row here is of
+that kind. The "decision" column is what P6-1…P6-7 implement.
 
 | # | Question | Facts today (evidence) | Decision | Owner |
 | --- | --- | --- | --- | --- |
 | 1 | Which route takes the develop settings? | `develop.set` and `develop.merge` exist and cover sliders and a partial settings object (`develop.rs:167-263`; `crates/develop/src/lib.rs:45-57`). `library.importLightroom` always imports a whole catalog (`lightroom_catalog.rs:481`, `:1096`), so it cannot be a develop-only call. | **Own mapper.** lr2lc reads `Adobe_imageDevelopSettings.text` itself and writes through `develop.set` / `develop.merge`. `library.importLightroom` is not used for develop settings. | User (released 2026-11-04) |
-| 2 | White balance on raws. | Kelvin handling needs source info from the original file (`crs.rs:250-306`, `:40-57`); lr2lc must not touch originals (principle 2). | **Probe originals read-only only when original paths are released; otherwise do not map `Temperature`/`Tint` and report them as not carried.** The mode (`WhiteBalance`) is always mapped. Enabling the probe is the one residual question (see 8.2). | Open (section 8.2): until answered, only the WB mode is mapped; `Temperature`/`Tint` are reported as not carried |
+| 2 | White balance on raws. | Kelvin handling needs source info from the original file (`crs.rs:250-306`, `:40-57`); lr2lc must not touch originals (principle 2). | **Probe originals read-only only when original paths are released; otherwise do not map `Temperature`/`Tint` and report them as not carried.** The mode (`WhiteBalance`) is always mapped. The probe is released 2026-11-05, implementation open (see 8.2). | User (released 2026-11-05; implementation open): until implemented, only the WB mode is mapped; `Temperature`/`Tint` are reported as not carried |
 | 3 | Scope of phase 6. | Masks and spots are the bulk (`crs_masks.rs:23-24`, `:252-431`); sliders, curves and crop are bounded and testable from generated fixtures. | **6a = sliders, tone curves and crop. 6b = masks and spots, and 6b must not delay the import** (P6-7 runs last). | User (released 2026-11-04) |
 | 4 | Model shape. | 122 controls would duplicate a table LightCraft owns (`controls.rs:144-166`, `:171-292`); tone curves, the crop rectangle, masks and spots have no slider (`settings.rs:332-374`, `:815-822`, `:1015-1073`), though `crop.angle` is a control (`controls.rs:292`). | **Hybrid:** a generic control-id map for sliders (including `crop.angle`), typed fields for tone curves, the crop rectangle, masks and spots. | User (released 2026-11-04) |
 | 5 | Re-sync policy for changed edits. | The plan only adds; the mapping file records the base values (`state.rs:87-105`); `develop.merge` can overwrite. | **Report changed settings by default; overwrite only with explicit `--overwrite-develop`.** | User (released 2026-11-04) |
 | 6 | Report size. | `report.json` has one area per kind plus `skipped_by_code` (`crates/lr2lc/src/output.rs:11-40`); per-field entries can explode. | **Capped detail per field and per photo in `report.json`, plus a counter; the readable summary aggregates.** | User (released 2026-11-04) |
-| 7 | Fields that are assumed. | These catalog key names are unverified (section 4.12): the whole `hdr.*` SDR group (`hdr.max_ev`, `hdr.sdr_brightness`, `hdr.sdr_contrast`, `hdr.sdr_highlights`, `hdr.sdr_shadows`, `hdr.sdr_whites`, `hdr.sdr_clarity`), red eye, lens blur, AI denoise (`enhance.*`), Point Color (`point_colors`), the manual CA sliders (`optics.ca_red`, `optics.ca_blue`) and the crop flip fields. Some of these are also not mapped by LightCraft's importer (`xmp-interop.md:191-192`). | **Confirm the names read-only on a catalog copy in P6-6 (including Point Color and CA) before implementing them; until then they stay assumptions and are reported, never silently dropped.** | User (released 2026-11-04); the names are confirmed read-only on a catalog copy in P6-6 |
+| 7 | Fields that are assumed. | P6-6 confirmed the names `HDRMaxValue` and the seven `SDR*` keys, plus the container names `RedEyeInfo`, `LensBlur` and `PointColors` (section 4.12). The inner fields of those three containers, the manual CA sliders (`optics.ca_red`, `optics.ca_blue`), the crop flip fields and the Adobe AI-denoise fields were not observed in that copy and remain assumptions. `SDRBlend` has no LightCraft counterpart and stays reported. Some assumed names are also not mapped by LightCraft's importer (`xmp-interop.md:191-192`). | **The confirmed names are implemented; the remaining assumed names stay reported, never silently dropped.** | User (released 2026-11-04); the names were confirmed read-only on a catalog copy in P6-6 |
 | 8 | Camera profile handling. | The profile name is metadata only and carries no rendering data (`crs.rs:522-526`); LightCraft does not apply Adobe profiles. | **Do not rebuild profiles.** Report the name and aggregate by profile name; a profile/LUT converter is a separate research project. | User (released 2026-11-04) |
 
 ### 8.1 Recorded as released by the owner on 2026-11-04
@@ -1079,15 +1096,20 @@ is of that kind. The "decision" column is what P6-1…P6-7 implement.
    before implementing them; until then they stay assumptions and are reported.
 7. Camera profiles: report only; no converter in this project.
 
-The one question left for the owner is in 8.2.
+The eighth decision was released by the owner on 2026-11-05; only its
+implementation is open (8.2).
 
-### 8.2 Open user question
+### 8.2 Released 2026-11-05: read-only white-balance probe
 
 **May lr2lc read the original photo files (read-only) to determine the
-white-balance scale?** Yes → Kelvin/tint are mapped for raws with the correct
-scale. No → only the WB mode is mapped and `Temperature`/`Tint` are reported
-as not carried. Nothing is written to the originals either way. Until the
-answer, P6-4 implements the "No" default and keeps the probe behind a flag.
+white-balance scale?** The owner released this on 2026-11-05: yes, the
+originals may be opened read-only. The decision is settled; the implementation
+is open, because the probe needs RAW metadata and the dependency for reading
+them is still to be decided. With the probe, Kelvin/tint are mapped for raws
+on the correct scale. Until it is implemented, P6-4 keeps the "No" default:
+only the WB mode is mapped, and `Temperature`/`Tint` are reported as not
+carried. Nothing is written to the originals either way; the probe never runs
+implicitly.
 
 ---
 
@@ -1101,10 +1123,10 @@ work and can run in parallel; P6-7 comes last because it is 6b.
 | P6-1 | Reader: read `Adobe_imageDevelopSettings.text`, parse the non-executing Lua subset, map known keys, count and report unknown keys; neutral `Develop` in `crates/model` | generator table (section 7.1), P6-6 for the assumed names only | A unit test that parses a generated `text` value and maps one slider; then the `develop_all_sliders` fixture. |
 | P6-2 | Writer: `develop.set` for sliders, `library.select` + `develop.merge` for structured parts, only with `--apply`; re-sync report, `--overwrite-develop`; capped report area | P6-1 model; `state.rs` hash field; fake port | A dry-run plan test against `fake_lightcraft.rs`: expected `library.select` + `develop.set` / `develop.merge` steps, no command without `--apply`. |
 | P6-3 | Typed 6a parts: tone curves and crop | P6-1 types; P6-2 merge step | Curve identity and channel-completeness tests; crop frame tests per orientation (section 7.2 items 4-5). |
-| P6-4 | White balance: read-only probe behind a flag, only when original paths are released; otherwise report | P6-1; answer to 8.2 for switching the probe on | Mode mapping without a probe first, then the "not carried" report path. A generated placeholder only exercises the undecidable path; the probe itself is checked read-only on a released original. |
+| P6-4 | White balance: read-only probe behind a flag; released 2026-11-05, implementation open; otherwise report | P6-1; 8.2 released 2026-11-05, implementation open (RAW-metadata dependency) | Mode mapping without a probe first, then the "not carried" report path. A generated placeholder only exercises the undecidable path; the probe itself is checked read-only on a released original. |
 | P6-5 | Camera profile: read the name, report it, aggregate per profile name | P6-1 reader; P6-2 report area | A generated fixture with two profile names and a count assertion; no pixel or profile data involved. |
 | P6-6 | Confirm the assumed field names read-only on a catalog copy (HDR SDR, red eye, lens blur, AI denoise, Point Color, CA) | none (parallel to P6-1) | A read-only query that lists table and column names and counts rows; never values, never the original catalog. |
-| P6-7 | 6b: masks and spots through `develop.merge`, without delaying the import | P6-2 merge step; P6-3 model types | Mask and spot JSON against the fake port; a timing check that the 6a path does not wait for 6b. |
+| P6-7 | 6b: masks and spots through `develop.merge`, without delaying the import. Masks are done as P6-7a and spots as P6-7b. | P6-2 merge step; P6-3 model types | Mask and spot JSON against the fake port; a timing check that the 6a path does not wait for 6b. |
 
 Dependency rule: P6-1 can start on the confirmed keys before P6-6 finishes;
 only the assumed keys wait for it. P6-2 can be built against the P6-1 types
@@ -1185,9 +1207,11 @@ those parts are marked as assumptions and are not upgraded by this section.
 
 ## Open questions
 
-1. **Original paths for white balance (user).** May lr2lc open the original
-   photo files read-only to decide the Kelvin scale? Until the answer, P6-4
-   ships the "No" path and keeps the probe behind a flag.
+1. **Original paths for white balance (released 2026-11-05; implementation
+   open).** The owner allows reading the originals read-only to decide the
+   Kelvin scale. The probe is not implemented yet because it needs RAW
+   metadata, and the dependency for reading them is still to be decided; until
+   then P6-4 ships the "No" path and keeps the probe behind a flag.
 2. **Assumed catalog keys (technical, P6-6).** Are the Lightroom names for the
    HDR SDR group, red eye, lens blur, AI denoise, Point Color and the manual
    CA sliders the ones listed in section 4.12? Only a read-only look at a
@@ -1211,8 +1235,9 @@ Keep the approved scope and order: build P6-1 (reader) and P6-2 (writer,
 dry-run first) against generated fixtures and the fake port; add P6-3
 (curves, crop) as the first structured end-to-end proof. Run P6-6 in parallel
 so the assumed field names are settled before they are implemented, and do
-not start P6-7 until 6a is stable and the import timing is measured. Ask the
-owner only the white-balance path question; the other seven decisions in
-section 8 were released by the owner on 2026-11-04. If the WB probe is refused, P6-4 still
-ships the mode mapping and the report entry, so no photo is left without a
-reason.
+not start P6-7 until 6a is stable and the import timing is measured. The
+white-balance path was released by the owner on 2026-11-05 with the
+implementation still open (the RAW-metadata dependency); the other seven
+decisions in section 8 were released on 2026-11-04. Until the probe is
+implemented, P6-4 ships the mode mapping and the report entry, so no photo is
+left without a reason.

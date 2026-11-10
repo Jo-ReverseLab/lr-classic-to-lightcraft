@@ -25,8 +25,9 @@
 //! test: checksum before/after, `read == converted + skipped`, no mapping file
 //! without `--apply`, and an identical second dry run.
 //!
-//! The tests need product code that does not exist yet, so they are ignored
-//! until P6-5 lands.
+//! P6-5 is implemented: the reader fills `Develop::camera_profile`, the plan
+//! counts the names, and the report and summary carry them. These tests run
+//! with the normal suite.
 
 #[path = "perf_support/mod.rs"]
 mod perf_support;

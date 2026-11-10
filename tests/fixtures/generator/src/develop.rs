@@ -1120,7 +1120,7 @@ pub mod profile {
     pub const UNMAPPED_NAMES: [&str; 2] = ["CameraProfile", "Look"];
 }
 
-/// The camera-profile fixture: ten rows, profile-only except the `Look` and
+/// The camera-profile fixture: nine rows, profile-only except the `Look` and
 /// the wrong-typed value.
 pub fn write_camera_profile_catalog_with_files(dir: &Path) -> Result<PathBuf> {
     use profile as p;

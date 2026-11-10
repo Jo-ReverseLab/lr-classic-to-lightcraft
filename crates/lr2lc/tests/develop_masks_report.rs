@@ -30,8 +30,8 @@
 //!
 //! Every fixture is generated; nothing here touches a real catalog. The
 //! mandatory invariants (checksum, balance, dry run, identical second run)
-//! are checked in the dedicated tests. The tests need product code that does
-//! not exist yet, so they are ignored until P6-7 lands.
+//! are checked in the dedicated tests. The mask path (P6-7a) is implemented;
+//! spots (P6-7b) are not covered by this file.
 
 use lrcat_fixtures::develop::{masks as m, settings, write_develop_catalog_with_files};
 use serde_json::{Value, json};

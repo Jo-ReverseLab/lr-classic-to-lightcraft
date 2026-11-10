@@ -452,7 +452,7 @@ Temperature and tint themselves are never written, and neither is any value
 of an unmapped field: those are collected and reported by name.
 
 Deriving the scale of a stored temperature needs the original file. That
-probe is not released yet (open question F-032) and never runs implicitly:
+probe is not implemented yet and never runs implicitly:
 `--probe-white-balance` exists as an explicit opt-in, but a run given it
 stops with exit code 2 before the catalog is opened or anything is written.
 Without it lr2lc never opens an original photo. The `develop` area therefore
@@ -527,7 +527,7 @@ is the full count. `camera_profiles` maps each profile name to the number of
 converted photos, sorted, at most 20 entries; `camera_profiles_count` is the
 full number of distinct names and `photos_with_profile` the number of
 converted photos with a profile. Neither the report nor the summary ever
-holds a value.
+holds a rendering value.
 
 Spots (healing and cloning) are converted and written through `develop.merge`.
 
@@ -790,13 +790,13 @@ counts the smart collections converted as smart albums.
   reported, with a code.
 - The collapsed or expanded state of stacks is only counted, not written;
   stacks are always written expanded.
-- Development settings are written as sliders, tone curves, crop geometry and
-  the white-balance mode. Spots (healing and cloning) are written through
-  `develop.merge`. The camera profile and look are only reported by name,
-  never written, as are temperature, tint and the other unmapped fields.
-  Temperature and tint wait
-  for a probe of the original file because their stored scale is ambiguous.
-  That probe is not released (F-032); `--probe-white-balance` is refused with
+- Development settings are written as sliders, tone curves, crop geometry, the
+  white-balance mode and masks. Spots (healing and cloning) are written through
+  `develop.merge`. The camera profile and look are only reported by name, never
+  written, as are temperature, tint and the other unmapped fields. Temperature
+  and tint wait for a probe of the original file because their stored scale is
+  ambiguous.
+  That probe is not implemented yet; `--probe-white-balance` is refused with
   exit code 2 before the catalog is opened.
 - A known photo whose development settings changed in Lightroom is left alone
   unless `--overwrite-develop` is given (see

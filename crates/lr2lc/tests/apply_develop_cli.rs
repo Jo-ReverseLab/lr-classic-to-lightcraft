@@ -20,8 +20,9 @@
 //!
 //! The readable summary contains one line:
 //! `develop: photos with settings N, commands planned N, written N, unmapped
-//! fields N (N listed), changed and not applied N, overwritten N, white
-//! balance not carried N`.
+//! fields N (N listed), changed and not applied N, overwritten N, photos with
+//! camera profile N, photos with masks N, photos with spots N, white balance
+//! not carried N`.
 //!
 //! Always: the catalog is byte-identical after every run, a dry run connects
 //! to nothing and writes no mapping file, a second run sends no `develop.*`
