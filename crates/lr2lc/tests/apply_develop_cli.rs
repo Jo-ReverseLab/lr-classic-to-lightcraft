@@ -13,11 +13,15 @@
 //! - `unmapped_count`: the number of distinct field names (may exceed 20);
 //! - `not_applied`: known photos whose settings changed in Lightroom and were
 //!   left alone because `--overwrite-develop` was not given;
-//! - `overwritten`: photos written because `--overwrite-develop` was given.
+//! - `overwritten`: photos written because `--overwrite-develop` was given;
+//! - `white_balance_not_carried` (P6-4): converted photos whose
+//!   `Temperature`/`Tint` pair was not carried over (see
+//!   `apply_develop_white_balance_cli.rs`; only the count, never a value).
 //!
 //! The readable summary contains one line:
 //! `develop: photos with settings N, commands planned N, written N, unmapped
-//! fields N (N listed), changed and not applied N, overwritten N`.
+//! fields N (N listed), changed and not applied N, overwritten N, white
+//! balance not carried N`.
 //!
 //! Always: the catalog is byte-identical after every run, a dry run connects
 //! to nothing and writes no mapping file, a second run sends no `develop.*`

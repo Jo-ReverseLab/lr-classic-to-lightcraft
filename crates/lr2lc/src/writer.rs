@@ -55,6 +55,10 @@ pub struct DevelopJson {
     pub masks: usize,
     /// Converted photos with at least one spot.
     pub spots: usize,
+    /// Converted photos whose white balance holds a temperature or tint
+    /// (absolute or incremental) that was not carried over. Only the count,
+    /// never a value or a photo id.
+    pub white_balance_not_carried: usize,
 }
 
 /// At most this many unmapped field names are listed in the report.
@@ -76,6 +80,7 @@ pub fn planned_develop(plan: &Plan) -> DevelopJson {
         plan.develop_photos_with_profile(),
         plan.develop_masks(),
         plan.develop_spots(),
+        plan.develop_white_balance_not_carried(),
     )
 }
 
@@ -92,6 +97,7 @@ pub fn applied_develop(s: &ApplySummary) -> DevelopJson {
         s.develop_photos_with_profile,
         s.develop_masks,
         s.develop_spots,
+        s.develop_white_balance_not_carried,
     )
 }
 
@@ -107,6 +113,7 @@ fn develop_json(
     photos_with_profile: usize,
     masks: usize,
     spots: usize,
+    white_balance_not_carried: usize,
 ) -> DevelopJson {
     DevelopJson {
         photos,
@@ -125,6 +132,7 @@ fn develop_json(
         photos_with_profile,
         masks,
         spots,
+        white_balance_not_carried,
     }
 }
 
@@ -135,7 +143,8 @@ fn develop_line(out: &mut String, d: &DevelopJson) {
         out,
         "develop: photos with settings {}, commands planned {}, written {}, \
          unmapped fields {} ({} listed), changed and not applied {}, overwritten {}, \
-         photos with camera profile {}, photos with masks {}, photos with spots {}",
+         photos with camera profile {}, photos with masks {}, photos with spots {}, \
+         white balance not carried {}",
         d.photos,
         d.planned,
         d.written,
@@ -145,7 +154,8 @@ fn develop_line(out: &mut String, d: &DevelopJson) {
         d.overwritten,
         d.photos_with_profile,
         d.masks,
-        d.spots
+        d.spots,
+        d.white_balance_not_carried
     );
 }
 
@@ -697,7 +707,7 @@ pub fn stop_error(e: &WriteError) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::{Develop, Photo, Rating, SkipCode};
+    use model::{Develop, Photo, Rating, SkipCode, WhiteBalanceHint};
 
     fn plan_of(photos: Vec<Photo>) -> Plan {
         let input = WriteInput {
@@ -816,6 +826,37 @@ mod tests {
             assert!(v[key].is_array(), "{key}");
         }
         assert!(v.get("aborted").is_none());
+    }
+
+    #[test]
+    fn white_balance_count_is_reported_and_ends_the_summary_line() {
+        let mut absolute = Develop::default();
+        absolute.white_balance.hint = WhiteBalanceHint::Undecidable;
+        let mut relative = Develop::default();
+        relative.white_balance.hint = WhiteBalanceHint::Relative;
+        let plan = plan_of(vec![
+            Photo::new("a.jpg", 1, Rating::default())
+                .with_global_id("a")
+                .with_develop(absolute),
+            Photo::new("b.jpg", 2, Rating::default())
+                .with_global_id("b")
+                .with_develop(relative),
+            Photo::new("c.jpg", 3, Rating::default()).with_global_id("c"),
+        ]);
+
+        let d = planned_develop(&plan);
+        assert_eq!(d.white_balance_not_carried, 2);
+        assert_eq!(
+            serde_json::to_value(&d).unwrap()["white_balance_not_carried"],
+            2
+        );
+
+        let text = planned_summary(&plan);
+        let line = text
+            .lines()
+            .find(|line| line.starts_with("develop:"))
+            .expect("one develop line");
+        assert!(line.ends_with(", white balance not carried 2"), "{line}");
     }
 
     #[test]

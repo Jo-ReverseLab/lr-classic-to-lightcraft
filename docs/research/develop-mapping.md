@@ -460,6 +460,10 @@ identical).
 
 ### 4.11 Local corrections (masks) and spot removal
 
+The mapping below leans on LightCraft's `crates/engine/src/crs_masks.rs`
+(MIT OR Apache-2.0, license-compatible). No code was copied from
+lrcat-extractor (MPL-2.0).
+
 | Lightroom field | LightCraft field | Conversion / status | Source |
 | --- | --- | --- | --- |
 | `MaskGroupBasedCorrections`, `GradientBasedCorrections`, `CircularGradientBasedCorrections`, `PaintBasedCorrections` | `masks[]` | one correction → one mask; four containers supported | `crs_masks.rs:23-24`, `:252-296` |

@@ -323,6 +323,10 @@ pub struct Plan {
     develop_masks: usize,
     /// Converted photos with at least one spot.
     develop_spots: usize,
+    /// Converted photos whose white balance holds a temperature or tint
+    /// (absolute or incremental) that was not carried over. Only counted,
+    /// never named or valued.
+    develop_white_balance_not_carried: usize,
 }
 
 impl Plan {
@@ -535,6 +539,12 @@ impl Plan {
     /// Converted photos with at least one spot.
     pub fn develop_spots(&self) -> usize {
         self.develop_spots
+    }
+
+    /// Converted photos whose white balance holds a temperature or tint
+    /// (absolute or incremental) that was not carried over.
+    pub fn develop_white_balance_not_carried(&self) -> usize {
+        self.develop_white_balance_not_carried
     }
 
     /// The plan as a script: one JSON line per step, each an
@@ -1021,6 +1031,9 @@ fn plan_photos(
             }
             out.develop_unmapped
                 .extend(develop.unmapped.iter().cloned());
+            if develop.white_balance.hint != WhiteBalanceHint::None {
+                out.develop_white_balance_not_carried += 1;
+            }
         }
         let keywords = input
             .photo_keywords

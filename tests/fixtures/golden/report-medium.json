@@ -37,6 +37,7 @@
     "spots": 0,
     "unmapped": [],
     "unmapped_count": 0,
+    "white_balance_not_carried": 0,
     "written": 0
   },
   "dry_run": true,
