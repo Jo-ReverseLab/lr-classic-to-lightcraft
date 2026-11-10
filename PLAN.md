@@ -98,9 +98,9 @@ high multiplier on private repositories), so small, single-purpose commits.
 14. `--report` and `--script` must differ (`main.rs:70-74`) and most options
     may appear once (`args.rs:79,86,93,111,118`): both exit with code 2, both
     missing from README and `USAGE`.
-15. CI does not check: `--locked` builds, MSRV, `cargo audit`/`deny`,
-    coverage, the `large` fixture as a performance guard, a real LightCraft
-    app, or link and prose checks in README and CHANGELOG.
+15. CI now checks `--locked` builds, MSRV 1.88.0, a weekly `cargo audit`,
+    and relative links. It still does not check coverage, the `large` fixture
+    as a performance guard, or a real LightCraft app (updated 2026-11-10).
 16. `docs/research/` carries about 59 "assumption" markers. Example:
     `albums.list` nests folders "up to a depth limit" with no documented
     number (`albums.md:52`, `lc-writer/src/query.rs:36-46`, README:538-540).

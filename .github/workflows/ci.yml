@@ -76,4 +76,4 @@ jobs:
           shared-key: msrv
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check
-        run: cargo check --workspace --locked
+        run: cargo check --workspace --all-targets --locked

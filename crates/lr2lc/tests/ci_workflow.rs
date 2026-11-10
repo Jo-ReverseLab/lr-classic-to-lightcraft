@@ -243,9 +243,13 @@ fn workspace_declares_msrv() {
 #[test]
 fn release_workflow_guards_the_tag() {
     let text = read(RELEASE);
-    for needle in ["refs/tags/v*", "test ! -e tasks", "CHANGELOG", "version"] {
+    for needle in ["- 'v*'", "test ! -e tasks", "CHANGELOG", "version"] {
         assert!(text.contains(needle), "{RELEASE}: missing `{needle}`");
     }
+    assert!(
+        !text.contains("refs/tags/v*"),
+        "{RELEASE}: `*` is not a glob in an Actions expression; the job would never run"
+    );
 }
 
 #[test]
