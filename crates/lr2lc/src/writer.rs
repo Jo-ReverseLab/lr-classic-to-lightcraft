@@ -51,6 +51,10 @@ pub struct DevelopJson {
     pub camera_profiles_count: usize,
     /// Converted photos that carry a non-empty camera profile name.
     pub photos_with_profile: usize,
+    /// Converted photos with at least one mask.
+    pub masks: usize,
+    /// Converted photos with at least one spot.
+    pub spots: usize,
 }
 
 /// At most this many unmapped field names are listed in the report.
@@ -70,6 +74,8 @@ pub fn planned_develop(plan: &Plan) -> DevelopJson {
         plan.develop_overwritten(),
         plan.develop_camera_profiles(),
         plan.develop_photos_with_profile(),
+        plan.develop_masks(),
+        plan.develop_spots(),
     )
 }
 
@@ -84,6 +90,8 @@ pub fn applied_develop(s: &ApplySummary) -> DevelopJson {
         s.develop_overwritten,
         &s.develop_camera_profiles,
         s.develop_photos_with_profile,
+        s.develop_masks,
+        s.develop_spots,
     )
 }
 
@@ -97,6 +105,8 @@ fn develop_json(
     overwritten: usize,
     camera_profiles: &BTreeMap<String, usize>,
     photos_with_profile: usize,
+    masks: usize,
+    spots: usize,
 ) -> DevelopJson {
     DevelopJson {
         photos,
@@ -113,6 +123,8 @@ fn develop_json(
             .collect(),
         camera_profiles_count: camera_profiles.len(),
         photos_with_profile,
+        masks,
+        spots,
     }
 }
 
@@ -123,7 +135,7 @@ fn develop_line(out: &mut String, d: &DevelopJson) {
         out,
         "develop: photos with settings {}, commands planned {}, written {}, \
          unmapped fields {} ({} listed), changed and not applied {}, overwritten {}, \
-         photos with camera profile {}",
+         photos with camera profile {}, photos with masks {}, photos with spots {}",
         d.photos,
         d.planned,
         d.written,
@@ -131,7 +143,9 @@ fn develop_line(out: &mut String, d: &DevelopJson) {
         d.unmapped.len(),
         d.not_applied,
         d.overwritten,
-        d.photos_with_profile
+        d.photos_with_profile,
+        d.masks,
+        d.spots
     );
 }
 

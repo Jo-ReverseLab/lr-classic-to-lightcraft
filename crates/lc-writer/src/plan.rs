@@ -48,8 +48,9 @@ use crate::live::{LivePhoto, LiveState};
 use crate::smart::{convertible, translate};
 use crate::state::{EntryKind, PhotoFields, State, hex_hash, keyword_text, snapshot};
 use model::{
-    Collection, CollectionKind, CurvePoint, Curves, Develop, Keyword, MergeValue, Photo,
-    QuickCollection, SkipCode, Skipped, SmartCollection, Stack, WhiteBalanceHint,
+    Collection, CollectionKind, CurvePoint, Curves, Develop, Keyword, Mask, MaskComponent, MaskOp,
+    MaskShape, MergeValue, Photo, Point, QuickCollection, SkipCode, Skipped, SmartCollection, Spot,
+    SpotMode, Stack, WhiteBalanceHint,
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -318,6 +319,10 @@ pub struct Plan {
     develop_camera_profiles: BTreeMap<String, usize>,
     /// Converted photos that carry a non-empty camera profile name.
     develop_photos_with_profile: usize,
+    /// Converted photos with at least one mask.
+    develop_masks: usize,
+    /// Converted photos with at least one spot.
+    develop_spots: usize,
 }
 
 impl Plan {
@@ -520,6 +525,16 @@ impl Plan {
     /// Converted photos that carry a non-empty camera profile name.
     pub fn develop_photos_with_profile(&self) -> usize {
         self.develop_photos_with_profile
+    }
+
+    /// Converted photos with at least one mask.
+    pub fn develop_masks(&self) -> usize {
+        self.develop_masks
+    }
+
+    /// Converted photos with at least one spot.
+    pub fn develop_spots(&self) -> usize {
+        self.develop_spots
     }
 
     /// The plan as a script: one JSON line per step, each an
@@ -998,6 +1013,12 @@ fn plan_photos(
                     .or_default() += 1;
                 out.develop_photos_with_profile += 1;
             }
+            if !develop.masks.is_empty() {
+                out.develop_masks += 1;
+            }
+            if !develop.spots.is_empty() {
+                out.develop_spots += 1;
+            }
             out.develop_unmapped
                 .extend(develop.unmapped.iter().cloned());
         }
@@ -1163,6 +1184,8 @@ fn has_develop_content(develop: &Develop) -> bool {
         || develop.white_balance.mode.is_some()
         || !curves_are_empty(&develop.curves)
         || develop.crop.is_some()
+        || !develop.masks.is_empty()
+        || !develop.spots.is_empty()
 }
 
 /// The nested `settings` object of `develop.merge`: dotted `partial` paths
@@ -1201,7 +1224,129 @@ fn develop_settings(develop: &Develop) -> Option<Value> {
             }),
         );
     }
+    add_masks(&mut settings, &develop.masks);
+    add_spots(&mut settings, &develop.spots);
     (!settings.is_empty()).then_some(Value::Object(settings))
+}
+
+/// Adds the masks as LightCraft's `masks` array. Only the set local sliders
+/// appear in `adjust`; `amount` is always present. Masks travel only through
+/// `develop.merge`, never through `develop.set`.
+fn add_masks(settings: &mut Map<String, Value>, masks: &[Mask]) {
+    if masks.is_empty() {
+        return;
+    }
+    settings.insert(
+        "masks".to_owned(),
+        Value::Array(masks.iter().map(mask_json).collect()),
+    );
+}
+
+/// Adds the spots as LightCraft's `spots` array. Spots travel only through
+/// `develop.merge`, never through `develop.set`.
+fn add_spots(settings: &mut Map<String, Value>, spots: &[Spot]) {
+    if spots.is_empty() {
+        return;
+    }
+    settings.insert(
+        "spots".to_owned(),
+        Value::Array(spots.iter().map(spot_json).collect()),
+    );
+}
+
+fn spot_json(spot: &Spot) -> Value {
+    json!({
+        "mode": match spot.mode {
+            SpotMode::Remove => "remove",
+            SpotMode::Heal => "heal",
+            SpotMode::Clone => "clone",
+            SpotMode::Fill => "fill",
+        },
+        "points": spot.points.iter().map(point_json).collect::<Vec<_>>(),
+        "size": spot.size,
+        "feather": spot.feather,
+        "opacity": spot.opacity,
+        "source_offset": spot.source_offset.as_ref().map(point_json),
+    })
+}
+
+fn mask_json(mask: &Mask) -> Value {
+    json!({
+        "id": mask.id,
+        "name": mask.name,
+        "visible": mask.visible,
+        "invert": mask.invert,
+        "components": mask.components.iter().map(component_json).collect::<Vec<_>>(),
+        "adjust": mask.adjust.iter().map(|(key, value)| (key.clone(), json!(value))).collect::<Map<String, Value>>(),
+    })
+}
+
+fn component_json(component: &MaskComponent) -> Value {
+    json!({
+        "op": match component.op {
+            MaskOp::Add => "add",
+            MaskOp::Subtract => "subtract",
+            MaskOp::Intersect => "intersect",
+        },
+        "invert": component.invert,
+        "shape": shape_json(&component.shape),
+    })
+}
+
+fn shape_json(shape: &MaskShape) -> Value {
+    match shape {
+        MaskShape::Linear { start, end } => {
+            json!({"kind": "linear", "start": point_json(start), "end": point_json(end)})
+        }
+        MaskShape::Radial {
+            center,
+            rx,
+            ry,
+            angle,
+            feather,
+            invert,
+        } => json!({
+            "kind": "radial",
+            "center": point_json(center),
+            "rx": rx,
+            "ry": ry,
+            "angle": angle,
+            "feather": feather,
+            "invert": invert,
+        }),
+        MaskShape::Brush { strokes } => json!({
+            "kind": "brush",
+            "strokes": strokes.iter().map(|stroke| json!({
+                "points": stroke.points.iter().map(point_json).collect::<Vec<_>>(),
+                "size": stroke.size,
+                "feather": stroke.feather,
+                "flow": stroke.flow,
+                "density": stroke.density,
+                "erase": stroke.erase,
+            })).collect::<Vec<_>>(),
+        }),
+        MaskShape::LuminanceRange {
+            lo,
+            hi,
+            lo_feather,
+            hi_feather,
+        } => json!({
+            "kind": "luminanceRange",
+            "lo": lo,
+            "hi": hi,
+            "lo_feather": lo_feather,
+            "hi_feather": hi_feather,
+        }),
+        MaskShape::DepthRange { lo, hi, feather } => {
+            json!({"kind": "depthRange", "lo": lo, "hi": hi, "feather": feather})
+        }
+        MaskShape::Subject => json!({"kind": "subject"}),
+        MaskShape::Sky => json!({"kind": "sky"}),
+    }
+}
+
+fn point_json(point: &Point) -> Value {
+    json!({"x": point.x, "y": point.y})
 }
 
 /// Whether every tone curve is empty.
@@ -1721,7 +1866,7 @@ fn reconcile(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::{ColorLabel, CropGeometry, Flag, Rating};
+    use model::{BrushStroke, ColorLabel, CropGeometry, Flag, Rating};
 
     fn kw(parts: &[&str]) -> Keyword {
         Keyword::new(parts.iter().map(|s| s.to_string()).collect()).unwrap()
@@ -2434,5 +2579,287 @@ mod tests {
                 "angle": -2.5,
             }}}))
         );
+    }
+
+    fn sample_mask(id: u32) -> Mask {
+        Mask {
+            id,
+            name: "Mask".into(),
+            visible: true,
+            invert: false,
+            components: vec![
+                MaskComponent {
+                    op: MaskOp::Add,
+                    invert: false,
+                    shape: MaskShape::Linear {
+                        start: Point { x: 0.1, y: 0.2 },
+                        end: Point { x: 0.9, y: 0.8 },
+                    },
+                },
+                MaskComponent {
+                    op: MaskOp::Subtract,
+                    invert: true,
+                    shape: MaskShape::Brush {
+                        strokes: vec![BrushStroke {
+                            points: vec![Point { x: 0.1, y: 0.2 }],
+                            size: 0.05,
+                            feather: 40.0,
+                            flow: 75.0,
+                            density: 80.0,
+                            erase: false,
+                        }],
+                    },
+                },
+            ],
+            adjust: BTreeMap::from([("amount".to_string(), 100.0), ("exposure".to_string(), 2.0)]),
+        }
+    }
+
+    #[test]
+    fn masks_serialize_in_lightcrafts_shape() {
+        let develop = Develop {
+            masks: vec![sample_mask(1)],
+            ..Develop::default()
+        };
+        assert_eq!(
+            develop_settings(&develop),
+            Some(json!({"masks": [{
+                "id": 1,
+                "name": "Mask",
+                "visible": true,
+                "invert": false,
+                "components": [
+                    {
+                        "op": "add",
+                        "invert": false,
+                        "shape": {
+                            "kind": "linear",
+                            "start": {"x": 0.1, "y": 0.2},
+                            "end": {"x": 0.9, "y": 0.8},
+                        },
+                    },
+                    {
+                        "op": "subtract",
+                        "invert": true,
+                        "shape": {
+                            "kind": "brush",
+                            "strokes": [{
+                                "points": [{"x": 0.1, "y": 0.2}],
+                                "size": 0.05,
+                                "feather": 40.0,
+                                "flow": 75.0,
+                                "density": 80.0,
+                                "erase": false,
+                            }],
+                        },
+                    },
+                ],
+                "adjust": {"amount": 100.0, "exposure": 2.0},
+            }]}))
+        );
+    }
+
+    #[test]
+    fn every_mask_shape_serializes_with_its_kind() {
+        let shapes = vec![
+            (
+                MaskShape::Radial {
+                    center: Point { x: 0.5, y: 0.35 },
+                    rx: 0.3,
+                    ry: 0.125,
+                    angle: 15.0,
+                    feather: 40.0,
+                    invert: false,
+                },
+                json!({
+                    "kind": "radial",
+                    "center": {"x": 0.5, "y": 0.35},
+                    "rx": 0.3,
+                    "ry": 0.125,
+                    "angle": 15.0,
+                    "feather": 40.0,
+                    "invert": false,
+                }),
+            ),
+            (
+                MaskShape::LuminanceRange {
+                    lo: 0.2,
+                    hi: 0.8,
+                    lo_feather: 0.1,
+                    hi_feather: 0.05,
+                },
+                json!({
+                    "kind": "luminanceRange",
+                    "lo": 0.2,
+                    "hi": 0.8,
+                    "lo_feather": 0.1,
+                    "hi_feather": 0.05,
+                }),
+            ),
+            (
+                MaskShape::DepthRange {
+                    lo: 0.2,
+                    hi: 0.8,
+                    feather: 0.1,
+                },
+                json!({"kind": "depthRange", "lo": 0.2, "hi": 0.8, "feather": 0.1}),
+            ),
+            (MaskShape::Subject, json!({"kind": "subject"})),
+            (MaskShape::Sky, json!({"kind": "sky"})),
+        ];
+        for (shape, expected) in shapes {
+            assert_eq!(shape_json(&shape), expected);
+        }
+    }
+
+    #[test]
+    fn masks_travel_only_through_develop_merge() {
+        let develop = Develop {
+            controls: BTreeMap::from([("light.exposure".to_string(), 0.5)]),
+            masks: vec![sample_mask(1)],
+            ..Develop::default()
+        };
+        let mut out = Plan::default();
+        plan_develop("gid", None, &develop, false, &mut out);
+        assert_eq!(out.steps.len(), 2);
+        let Step::DevelopSet { values, .. } = &out.steps[0] else {
+            panic!("{:?}", out.steps[0]);
+        };
+        assert_eq!(values.get("light.exposure"), Some(&0.5));
+        assert!(!values.contains_key("masks"));
+        let Step::DevelopMerge { settings, .. } = &out.steps[1] else {
+            panic!("{:?}", out.steps[1]);
+        };
+        assert!(settings["masks"].is_array());
+        assert_eq!(settings.as_object().map(|map| map.len()), Some(1));
+    }
+
+    #[test]
+    fn a_recorded_hash_leaves_masks_unwritten() {
+        let source = [7u8; 32];
+        let develop = Develop {
+            source_hash: Some(source),
+            masks: vec![sample_mask(1)],
+            ..Develop::default()
+        };
+        assert!(has_develop_content(&develop));
+        let known = crate::state::PhotoEntry {
+            lightroom_id: 1,
+            lightcraft_id: json!(5),
+            fields: crate::state::PhotoFields::default(),
+            path: None,
+            copy_of: None,
+            develop_hash: Some(hex_hash(&source)),
+        };
+        let mut out = Plan::default();
+        plan_develop("gid", Some(&known), &develop, false, &mut out);
+        assert!(out.steps.is_empty(), "{:?}", out.steps);
+        assert_eq!(out.develop_planned, 0);
+    }
+
+    #[test]
+    fn masks_alone_make_develop_content() {
+        let develop = Develop {
+            masks: vec![sample_mask(1)],
+            ..Develop::default()
+        };
+        assert!(has_develop_content(&develop));
+        assert_eq!(
+            develop_settings(&Develop::default()),
+            None,
+            "an empty develop sends nothing"
+        );
+    }
+
+    fn sample_spot() -> Spot {
+        Spot {
+            mode: SpotMode::Heal,
+            points: vec![Point { x: 0.4, y: 0.3 }],
+            size: 0.04,
+            feather: 50.0,
+            opacity: 80.0,
+            source_offset: Some(Point { x: 0.2, y: 0.2 }),
+        }
+    }
+
+    #[test]
+    fn spots_alone_make_develop_content() {
+        let develop = Develop {
+            spots: vec![sample_spot()],
+            ..Develop::default()
+        };
+        assert!(has_develop_content(&develop));
+        let settings = develop_settings(&develop).expect("spots are merge content");
+        assert_eq!(
+            settings,
+            json!({
+                "spots": [{
+                    "mode": "heal",
+                    "points": [{"x": 0.4, "y": 0.3}],
+                    "size": 0.04,
+                    "feather": 50.0,
+                    "opacity": 80.0,
+                    "source_offset": {"x": 0.2, "y": 0.2},
+                }]
+            })
+        );
+    }
+
+    #[test]
+    fn every_spot_mode_serializes_with_its_name() {
+        for (mode, name) in [
+            (SpotMode::Remove, "remove"),
+            (SpotMode::Heal, "heal"),
+            (SpotMode::Clone, "clone"),
+            (SpotMode::Fill, "fill"),
+        ] {
+            let spot = Spot {
+                mode,
+                ..sample_spot()
+            };
+            assert_eq!(spot_json(&spot)["mode"], json!(name));
+        }
+    }
+
+    #[test]
+    fn a_recorded_hash_leaves_spots_unwritten() {
+        let source = [9u8; 32];
+        let develop = Develop {
+            source_hash: Some(source),
+            spots: vec![sample_spot()],
+            ..Develop::default()
+        };
+        let known = crate::state::PhotoEntry {
+            lightroom_id: 1,
+            lightcraft_id: json!(5),
+            fields: crate::state::PhotoFields::default(),
+            path: None,
+            copy_of: None,
+            develop_hash: Some(hex_hash(&source)),
+        };
+        let mut out = Plan::default();
+        plan_develop("gid", Some(&known), &develop, false, &mut out);
+        assert!(out.steps.is_empty(), "{:?}", out.steps);
+        assert_eq!(out.develop_planned, 0);
+    }
+
+    #[test]
+    fn spots_travel_only_through_develop_merge() {
+        let develop = Develop {
+            controls: BTreeMap::from([("light.exposure".to_string(), 0.5)]),
+            spots: vec![sample_spot()],
+            ..Develop::default()
+        };
+        let mut out = Plan::default();
+        plan_develop("gid", None, &develop, false, &mut out);
+        assert_eq!(out.steps.len(), 2);
+        let Step::DevelopSet { values, .. } = &out.steps[0] else {
+            panic!("{:?}", out.steps[0]);
+        };
+        assert!(!values.contains_key("spots"));
+        let Step::DevelopMerge { settings, .. } = &out.steps[1] else {
+            panic!("{:?}", out.steps[1]);
+        };
+        assert!(settings["spots"].is_array());
     }
 }

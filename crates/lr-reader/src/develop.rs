@@ -10,7 +10,10 @@
 //! subset does not cover is a parse error. Every error keeps the photo; the
 //! caller records it and continues.
 
-use model::{CropGeometry, CurvePoint, Curves, Develop, MergeValue, WhiteBalanceHint};
+use model::{
+    BrushStroke, CropGeometry, CurvePoint, Curves, Develop, Mask, MaskComponent, MaskOp, MaskShape,
+    MergeValue, Point, Spot, SpotMode, WhiteBalanceHint,
+};
 use sha2::{Digest, Sha256};
 
 /// The largest settings text the reader accepts. A larger text is treated as
@@ -103,6 +106,17 @@ impl StoredGeometry {
                 width / height
             }
             _ => 1.0,
+        }
+    }
+
+    /// Width divided by height of the displayed image. A stored quarter turn
+    /// swaps the axes, so the displayed aspect is the reciprocal.
+    fn displayed_aspect(self) -> f64 {
+        let aspect = self.aspect();
+        if self.orientation.swaps_axes() {
+            1.0 / aspect
+        } else {
+            aspect
         }
     }
 }
@@ -1038,6 +1052,15 @@ fn map_table(
                     push_unmapped(&mut develop.unmapped, name);
                 }
             },
+            // Mask containers are read after the loop, in their fixed order,
+            // so their order in the settings text does not matter.
+            "MaskGroupBasedCorrections"
+            | "GradientBasedCorrections"
+            | "CircularGradientBasedCorrections"
+            | "PaintBasedCorrections" => {}
+            // Spot containers are read after the loop as well, so their
+            // position in the settings text does not matter.
+            "RetouchAreas" | "RetouchInfo" => {}
             // Reported by name only; it never becomes a develop command.
             "CameraProfile" => match value {
                 LuaValue::Text(profile) if !profile.is_empty() => {
@@ -1066,7 +1089,627 @@ fn map_table(
         old_master,
     );
     develop.crop = crop_geometry(&crop, geometry);
+    let aspect = geometry.displayed_aspect();
+    read_masks(table, aspect, develop);
+    read_spots(table, aspect, develop);
     Ok(())
+}
+
+/// The four catalog containers that hold corrections, in the order their
+/// masks are numbered.
+const MASK_CONTAINERS: [&str; 4] = [
+    "MaskGroupBasedCorrections",
+    "GradientBasedCorrections",
+    "CircularGradientBasedCorrections",
+    "PaintBasedCorrections",
+];
+
+/// The `Local*` correction sliders with a LightCraft `adjust` counterpart:
+/// `(catalog field, adjust field, scale)`. The 2012 spellings come first, so
+/// they win over the older ones.
+const LOCAL_SLIDERS: [(&str, &str, f64); 22] = [
+    ("LocalExposure2012", "exposure", 4.0),
+    ("LocalContrast2012", "contrast", 100.0),
+    ("LocalHighlights2012", "highlights", 100.0),
+    ("LocalShadows2012", "shadows", 100.0),
+    ("LocalWhites2012", "whites", 100.0),
+    ("LocalBlacks2012", "blacks", 100.0),
+    ("LocalClarity2012", "clarity", 100.0),
+    ("LocalTexture", "texture", 100.0),
+    ("LocalDehaze", "dehaze", 100.0),
+    ("LocalTemperature", "temp", 100.0),
+    ("LocalTint", "tint", 100.0),
+    ("LocalSaturation", "saturation", 100.0),
+    ("LocalHue", "hue", 100.0),
+    ("LocalSharpness", "sharpness", 100.0),
+    ("LocalLuminanceNoise", "noise", 100.0),
+    ("LocalMoire", "moire", 100.0),
+    ("LocalDefringe", "defringe", 100.0),
+    ("LocalToningSaturation", "color_sat", 100.0),
+    ("LocalToningHue", "color_hue", 1.0),
+    ("LocalExposure", "exposure", 4.0),
+    ("LocalContrast", "contrast", 100.0),
+    ("LocalClarity", "clarity", 100.0),
+];
+
+/// The named field of a table.
+fn table_field<'a>(table: &'a Table, name: &str) -> Option<&'a LuaValue> {
+    table
+        .fields
+        .iter()
+        .find_map(|(key, value)| (key.as_deref() == Some(name)).then_some(value))
+}
+
+fn field_number(table: &Table, name: &str) -> Option<f64> {
+    table_field(table, name).and_then(as_number)
+}
+
+fn field_text<'a>(table: &'a Table, name: &str) -> Option<&'a str> {
+    match table_field(table, name) {
+        Some(LuaValue::Text(text)) if !text.is_empty() => Some(text),
+        _ => None,
+    }
+}
+
+fn field_flag(table: &Table, name: &str) -> Option<bool> {
+    table_field(table, name).and_then(as_bool)
+}
+
+/// Reads the four mask containers into `develop`, in the fixed container
+/// order. Unsupported components, local sliders and a container that is not a
+/// list are reported by a stable `Mask: <kind>` name, never dropped silently.
+/// `aspect` is the displayed photo's width divided by its height.
+fn read_masks(table: &Table, aspect: f64, develop: &mut Develop) {
+    let mut skipped: Vec<String> = Vec::new();
+    for container in MASK_CONTAINERS {
+        let Some(value) = table_field(table, container) else {
+            continue;
+        };
+        let LuaValue::Table(list) = value else {
+            skipped.push(format!("container {container}"));
+            continue;
+        };
+        for (_, value) in &list.fields {
+            let LuaValue::Table(correction) = value else {
+                skipped.push("unknown mask".to_owned());
+                continue;
+            };
+            if let Some(mask) =
+                read_correction(correction, container, aspect, develop, &mut skipped)
+            {
+                develop.masks.push(mask);
+            }
+        }
+    }
+    skipped.sort_unstable();
+    skipped.dedup();
+    for kind in skipped {
+        push_unmapped(&mut develop.unmapped, &format!("Mask: {kind}"));
+    }
+}
+
+/// Reads spot removal into `develop`: the current `RetouchAreas` container,
+/// and the older `RetouchInfo` lines only when that yields no spot. Anything
+/// that cannot be carried over is reported by a stable `Spot: <kind>` name.
+fn read_spots(table: &Table, aspect: f64, develop: &mut Develop) {
+    let mut spots: Vec<Spot> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    match table_field(table, "RetouchAreas") {
+        Some(LuaValue::Table(list)) => {
+            for (_, value) in &list.fields {
+                let LuaValue::Table(area) = value else {
+                    skipped.push("unknown spot".to_owned());
+                    continue;
+                };
+                match read_spot(area, aspect) {
+                    Ok(spot) => spots.push(spot),
+                    Err(kind) => skipped.push(kind),
+                }
+            }
+        }
+        Some(_) => skipped.push("container RetouchAreas".to_owned()),
+        None => {}
+    }
+    if spots.is_empty()
+        && let Some(value) = table_field(table, "RetouchInfo")
+    {
+        match value {
+            LuaValue::Table(lines) => {
+                for (_, value) in &lines.fields {
+                    let LuaValue::Text(line) = value else {
+                        skipped.push("unknown spot".to_owned());
+                        continue;
+                    };
+                    match legacy_spot(line, aspect) {
+                        Some(spot) => spots.push(spot),
+                        None => skipped.push("legacy line".to_owned()),
+                    }
+                }
+            }
+            _ => skipped.push("container RetouchInfo".to_owned()),
+        }
+    }
+    develop.spots = spots;
+    skipped.sort_unstable();
+    skipped.dedup();
+    for kind in skipped {
+        push_unmapped(&mut develop.unmapped, &format!("Spot: {kind}"));
+    }
+}
+
+/// One `RetouchAreas` entry. `Err(kind)` names what cannot be carried over.
+/// `aspect` is the displayed photo's width divided by its height.
+fn read_spot(area: &Table, aspect: f64) -> Result<Spot, String> {
+    let mode = match field_text(area, "SpotType") {
+        Some("clone") => SpotMode::Clone,
+        _ => SpotMode::Heal,
+    };
+    let mask = match table_field(area, "Masks") {
+        Some(LuaValue::Table(masks)) => match masks.fields.first() {
+            Some((_, LuaValue::Table(mask))) => mask,
+            _ => return Err("no mask".to_owned()),
+        },
+        _ => return Err("no mask".to_owned()),
+    };
+    let width_to_long = aspect.min(1.0);
+    let (points, size) = match field_text(mask, "What").unwrap_or("") {
+        "Mask/Ellipse" => {
+            let (Some(x), Some(y), Some(size_x)) = (
+                field_number(mask, "X"),
+                field_number(mask, "Y"),
+                field_number(mask, "SizeX"),
+            ) else {
+                return Err("ellipse spot".to_owned());
+            };
+            (vec![Point { x, y }], size_x * width_to_long)
+        }
+        "Mask/CircularGradient" => {
+            let (Some(top), Some(left), Some(bottom), Some(right)) = (
+                field_number(mask, "Top"),
+                field_number(mask, "Left"),
+                field_number(mask, "Bottom"),
+                field_number(mask, "Right"),
+            ) else {
+                return Err("circular spot".to_owned());
+            };
+            (
+                vec![Point {
+                    x: (left + right) / 2.0,
+                    y: (top + bottom) / 2.0,
+                }],
+                (right - left).abs() / 2.0 * width_to_long,
+            )
+        }
+        "Mask/Paint" => {
+            let points: Vec<Point> = match table_field(mask, "Dabs") {
+                Some(LuaValue::Table(dabs)) => dabs
+                    .fields
+                    .iter()
+                    .filter_map(|(_, value)| match value {
+                        LuaValue::Text(dab) => parse_dab(dab),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            if points.is_empty() {
+                return Err("empty brush".to_owned());
+            }
+            (points, field_number(mask, "Radius").unwrap_or(0.02))
+        }
+        "" => return Err("unknown spot".to_owned()),
+        other => return Err(other.trim_start_matches("Mask/").to_owned()),
+    };
+    let size = size.clamp(0.001, 0.25);
+    let feather = (field_number(area, "Feather").unwrap_or(0.0) * 100.0).clamp(0.0, 100.0);
+    let opacity = (field_number(area, "Opacity").unwrap_or(1.0) * 100.0).clamp(0.0, 100.0);
+    Ok(Spot {
+        mode,
+        points: points.clone(),
+        size,
+        feather,
+        opacity,
+        source_offset: spot_source_offset(
+            area,
+            "SourceX",
+            "OffsetY",
+            field_text(area, "SourceState"),
+            points.first().copied(),
+        ),
+    })
+}
+
+/// One `RetouchInfo` line as a spot, or `None` when a required value is
+/// missing or unreadable.
+fn legacy_spot(line: &str, aspect: f64) -> Option<Spot> {
+    let mut values: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+    for part in line.split(',') {
+        if let Some((key, value)) = part.split_once('=') {
+            values.insert(key.trim(), value.trim());
+        }
+    }
+    let number = |key: &str| {
+        values
+            .get(key)
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite())
+    };
+    let x = number("centerX")?;
+    let y = number("centerY")?;
+    let radius = number("radius")?;
+    let mode = match values.get("spotType") {
+        Some(&"clone") => SpotMode::Clone,
+        _ => SpotMode::Heal,
+    };
+    let source_offset = match (
+        values.get("sourceState").copied(),
+        number("sourceX"),
+        number("sourceY"),
+    ) {
+        (None | Some("sourceSetExplicitly"), Some(source_x), Some(source_y))
+            if source_x != x || source_y != y =>
+        {
+            Some(Point {
+                x: source_x - x,
+                y: source_y - y,
+            })
+        }
+        _ => None,
+    };
+    let opacity = (number("opacity").unwrap_or(1.0) * 100.0).clamp(0.0, 100.0);
+    Some(Spot {
+        mode,
+        points: vec![Point { x, y }],
+        size: (radius * aspect.min(1.0)).clamp(0.001, 0.25),
+        feather: 0.0,
+        opacity,
+        source_offset,
+    })
+}
+
+/// The offset from a spot's first target point to an explicit source, or
+/// `None` when the source is automatic, missing or at the same position.
+fn spot_source_offset(
+    area: &Table,
+    source_x_field: &str,
+    source_y_field: &str,
+    source_state: Option<&str>,
+    target: Option<Point>,
+) -> Option<Point> {
+    let explicit = source_state.is_none_or(|state| state == "sourceSetExplicitly");
+    let (Some(source_x), Some(source_y), Some(target)) = (
+        field_number(area, source_x_field),
+        field_number(area, source_y_field),
+        target,
+    ) else {
+        return None;
+    };
+    if !explicit {
+        return None;
+    }
+    let (dx, dy) = (source_x - target.x, source_y - target.y);
+    (dx.is_finite() && dy.is_finite() && (dx != 0.0 || dy != 0.0)).then_some(Point { x: dx, y: dy })
+}
+
+/// One correction, or `None` when it is inactive or holds no supported
+/// component. `develop` supplies the running mask count for default names.
+fn read_correction(
+    correction: &Table,
+    container: &str,
+    aspect: f64,
+    develop: &Develop,
+    skipped: &mut Vec<String>,
+) -> Option<Mask> {
+    if field_flag(correction, "CorrectionActive") == Some(false) {
+        return None;
+    }
+    // Unsupported local sliders are reported even when every component of the
+    // correction is unsupported and no mask is built from it.
+    report_unmapped_locals(correction, skipped);
+    let components = match table_field(correction, "CorrectionMasks") {
+        Some(LuaValue::Table(components)) if !components.fields.is_empty() => components,
+        _ => {
+            skipped.push("no components".to_owned());
+            return None;
+        }
+    };
+    let mut parts: Vec<MaskComponent> = Vec::new();
+    for (_, value) in &components.fields {
+        let LuaValue::Table(component) = value else {
+            skipped.push("unknown mask".to_owned());
+            continue;
+        };
+        match read_component(component, container, aspect) {
+            Ok(part) => parts.push(part),
+            Err(kind) => skipped.push(kind),
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let id = u32::try_from(develop.masks.len() + 1).unwrap_or(u32::MAX);
+    let name = field_text(correction, "CorrectionName")
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("Mask {id}"));
+    Some(Mask {
+        id,
+        name,
+        visible: true,
+        invert: field_flag(correction, "MaskInverted").unwrap_or(false),
+        components: merge_brush_parts(parts),
+        adjust: local_adjust(correction),
+    })
+}
+
+/// Runs of brush components with the same op become one component, as in
+/// LightCraft's own importer.
+fn merge_brush_parts(parts: Vec<MaskComponent>) -> Vec<MaskComponent> {
+    let mut merged: Vec<MaskComponent> = Vec::new();
+    for part in parts {
+        if let MaskShape::Brush { strokes } = &part.shape
+            && let Some(previous) = merged
+                .iter_mut()
+                .find(|other| other.op == part.op && matches!(other.shape, MaskShape::Brush { .. }))
+            && let MaskShape::Brush {
+                strokes: previous_strokes,
+            } = &mut previous.shape
+        {
+            previous_strokes.extend(strokes.iter().cloned());
+            continue;
+        }
+        merged.push(part);
+    }
+    merged
+}
+
+/// The correction's `adjust` object: the mapped local sliders plus `amount`,
+/// which is `CorrectionAmount × 100` clamped to 0..200.
+fn local_adjust(correction: &Table) -> std::collections::BTreeMap<String, f64> {
+    let mut adjust = std::collections::BTreeMap::new();
+    for (field, ours, scale) in LOCAL_SLIDERS {
+        if adjust.contains_key(ours) {
+            continue;
+        }
+        let Some(value) = field_number(correction, field).filter(|v| v.is_finite()) else {
+            continue;
+        };
+        let limit = match ours {
+            "exposure" => 4.0,
+            "color_hue" => 360.0,
+            _ => 100.0,
+        };
+        let lower = if ours == "color_hue" { 0.0 } else { -limit };
+        adjust.insert(ours.to_owned(), (value * scale).clamp(lower, limit));
+    }
+    let amount = field_number(correction, "CorrectionAmount").unwrap_or(1.0);
+    adjust.insert("amount".to_owned(), (amount * 100.0).clamp(0.0, 200.0));
+    adjust
+}
+
+/// Reports `Local*` sliders without a counterpart when they are set. A
+/// `LocalCurveRefineSaturation` of 100 is neutral, not a value.
+fn report_unmapped_locals(correction: &Table, skipped: &mut Vec<String>) {
+    for (name, value) in &correction.fields {
+        let Some(name) = name.as_deref().filter(|n| n.starts_with("Local")) else {
+            continue;
+        };
+        if LOCAL_SLIDERS.iter().any(|(field, ..)| *field == name) {
+            continue;
+        }
+        let neutral = if name == "LocalCurveRefineSaturation" {
+            100.0
+        } else {
+            0.0
+        };
+        if as_number(value).is_some_and(|v| v != neutral) {
+            skipped.push(name.to_owned());
+        }
+    }
+}
+
+/// One mask component. `Err(kind)` names an unsupported shape.
+fn read_component(
+    component: &Table,
+    container: &str,
+    aspect: f64,
+) -> Result<MaskComponent, String> {
+    let op = match table_field(component, "MaskBlendMode") {
+        None => MaskOp::Add,
+        Some(LuaValue::Number(mode)) if *mode == 0.0 => MaskOp::Add,
+        Some(LuaValue::Number(mode)) if *mode == 1.0 => MaskOp::Subtract,
+        Some(LuaValue::Number(mode)) if *mode == 2.0 => MaskOp::Intersect,
+        // An unknown mode must not silently become `add`.
+        Some(LuaValue::Number(mode)) => return Err(format!("blend mode {mode}")),
+        Some(_) => MaskOp::Add,
+    };
+    let invert = field_flag(component, "MaskInverted").unwrap_or(false);
+    let what = field_text(component, "What").unwrap_or("");
+    let shape = match what {
+        "Mask/Gradient" => {
+            let g = |key: &str, default: f64| field_number(component, key).unwrap_or(default);
+            MaskShape::Linear {
+                start: Point {
+                    x: g("FullX", 0.5),
+                    y: g("FullY", 0.0),
+                },
+                end: Point {
+                    x: g("ZeroX", 0.5),
+                    y: g("ZeroY", 1.0),
+                },
+            }
+        }
+        "Mask/CircularGradient" => {
+            let g = |key: &str, default: f64| field_number(component, key).unwrap_or(default);
+            let (left, right, top, bottom) = (
+                g("Left", 0.25),
+                g("Right", 0.75),
+                g("Top", 0.25),
+                g("Bottom", 0.75),
+            );
+            let (sx, sy) = if aspect >= 1.0 {
+                (1.0, 1.0 / aspect)
+            } else {
+                (aspect, 1.0)
+            };
+            MaskShape::Radial {
+                center: Point {
+                    x: (left + right) / 2.0,
+                    y: (top + bottom) / 2.0,
+                },
+                rx: ((right - left).abs() / 2.0 * sx).max(1e-3),
+                ry: ((bottom - top).abs() / 2.0 * sy).max(1e-3),
+                angle: g("Angle", 0.0),
+                feather: radial_feather(component, container),
+                invert: !radial_inside(component, container),
+            }
+        }
+        "Mask/Paint" => {
+            let points: Vec<Point> = match table_field(component, "Dabs") {
+                Some(LuaValue::Table(dabs)) => dabs
+                    .fields
+                    .iter()
+                    .filter_map(|(_, value)| match value {
+                        LuaValue::Text(dab) => parse_dab(dab),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            if points.is_empty() {
+                return Err("empty brush".to_owned());
+            }
+            let mask_value = field_number(component, "MaskValue");
+            MaskShape::Brush {
+                strokes: vec![BrushStroke {
+                    points,
+                    size: field_number(component, "Radius")
+                        .unwrap_or(0.03)
+                        .clamp(0.001, 1.0),
+                    feather: (field_number(component, "CenterWeight").unwrap_or(0.5) * 100.0)
+                        .clamp(0.0, 100.0),
+                    flow: (field_number(component, "Flow").unwrap_or(1.0) * 100.0)
+                        .clamp(0.0, 100.0),
+                    density: (mask_value.unwrap_or(1.0).abs() * 100.0).clamp(0.0, 100.0),
+                    erase: mask_value.is_some_and(|value| value <= 0.0),
+                }],
+            }
+        }
+        "Mask/Image" => match field_text(component, "MaskSubType") {
+            Some("1") => MaskShape::Subject,
+            Some("2") => MaskShape::Sky,
+            other => {
+                return Err(format!("AI mask ({})", other.unwrap_or("?")));
+            }
+        },
+        "Mask/RangeMask" => {
+            let range = match table_field(component, "CorrectionRangeMask") {
+                Some(LuaValue::Table(range)) => range,
+                _ => component,
+            };
+            match field_text(range, "Type") {
+                Some("2") => {
+                    let values = range_values(range, "LumRange", "0 0 1 1");
+                    let [a, b, c, d] = values[..] else {
+                        return Err("luminance range".to_owned());
+                    };
+                    let open_top = c >= 1.0;
+                    let (a, b, c, d) = (
+                        lightness_to_range(a),
+                        lightness_to_range(b),
+                        lightness_to_range(c),
+                        lightness_to_range(d),
+                    );
+                    let (hi, hi_feather) = if open_top {
+                        (1.0, 0.0)
+                    } else {
+                        (c, (d - c).max(0.0))
+                    };
+                    MaskShape::LuminanceRange {
+                        lo: b,
+                        hi,
+                        lo_feather: (b - a).max(0.0),
+                        hi_feather,
+                    }
+                }
+                Some("3") => {
+                    let values = range_values(range, "DepthRange", "0 0 1 1");
+                    let [a, b, c, _] = values[..] else {
+                        return Err("depth range".to_owned());
+                    };
+                    MaskShape::DepthRange {
+                        lo: b,
+                        hi: c,
+                        feather: (b - a).max(0.0),
+                    }
+                }
+                _ => return Err("colour range".to_owned()),
+            }
+        }
+        "" => return Err("unknown mask".to_owned()),
+        other => return Err(other.trim_start_matches("Mask/").to_owned()),
+    };
+    Ok(MaskComponent { op, invert, shape })
+}
+
+/// Four whitespace-separated numbers of a range field.
+fn range_values(range: &Table, name: &str, default: &str) -> Vec<f64> {
+    match field_text(range, name) {
+        Some(text) => text
+            .split_whitespace()
+            .filter_map(|v| v.parse::<f64>().ok())
+            .collect(),
+        None => default
+            .split_whitespace()
+            .filter_map(|v| v.parse::<f64>().ok())
+            .collect(),
+    }
+}
+
+/// One brush dab (`d x y`) as a point; the leading command word is skipped.
+fn parse_dab(dab: &str) -> Option<Point> {
+    let mut numbers = dab
+        .split_whitespace()
+        .skip(1)
+        .filter_map(|v| v.parse::<f64>().ok());
+    Some(Point {
+        x: numbers.next()?,
+        y: numbers.next()?,
+    })
+}
+
+/// Whether a radial component puts its effect inside the ellipse. `Flipped`
+/// means different things per container, as in LightCraft's importer.
+fn radial_inside(component: &Table, container: &str) -> bool {
+    let flipped = field_flag(component, "Flipped");
+    if container == "MaskGroupBasedCorrections" {
+        if field_number(component, "Version").is_some_and(|v| v >= 2.0) {
+            flipped.unwrap_or(true)
+        } else {
+            true
+        }
+    } else {
+        flipped.unwrap_or(false)
+    }
+}
+
+/// A radial component's feather on LightCraft's 0..100 scale.
+fn radial_feather(component: &Table, container: &str) -> f64 {
+    let feather = field_number(component, "Feather").unwrap_or(50.0);
+    let versionless_group = container == "MaskGroupBasedCorrections"
+        && !field_number(component, "Version").is_some_and(|v| v >= 2.0);
+    (if versionless_group {
+        feather / 2.0
+    } else {
+        feather
+    })
+    .clamp(0.0, 100.0)
+}
+
+/// Perceptual lightness 0..1, as range masks store it, mapped to
+/// LightCraft's log-luminance 0..1 range scale.
+fn lightness_to_range(lightness: f64) -> f64 {
+    let y = lightness.clamp(1e-4, 1.0).powf(2.2);
+    ((y.log2() + 8.0) / 12.0).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
@@ -1484,5 +2127,353 @@ mod tests {
         let develop = parse("s = { CameraProfile = \"A\", Look = \"B\" }");
         assert_eq!(develop.camera_profile.as_deref(), Some("A"));
         assert_eq!(develop.unmapped, ["Look"]);
+    }
+
+    #[test]
+    fn the_four_mask_containers_map_in_a_fixed_order() {
+        let develop = parse(
+            r#"s = {
+                PaintBasedCorrections = {
+                    { CorrectionMasks = { { What = "Mask/Paint", Dabs = { "d 0.1 0.2" } } } },
+                },
+                GradientBasedCorrections = {
+                    { CorrectionName = "Linear", CorrectionMasks = { { What = "Mask/Gradient" } } },
+                },
+                MaskGroupBasedCorrections = {
+                    { CorrectionName = "Luminance", CorrectionMasks = {
+                        { What = "Mask/RangeMask",
+                          CorrectionRangeMask = { Type = "2", LumRange = "0 0 1 1" } } } },
+                    { CorrectionName = "Inactive", CorrectionActive = false,
+                      CorrectionMasks = { { What = "Mask/Gradient" } } },
+                },
+                CircularGradientBasedCorrections = {
+                    { CorrectionName = "Radial", CorrectionMasks = {
+                        { What = "Mask/CircularGradient" } } },
+                },
+            }"#,
+        );
+        let names: Vec<&str> = develop.masks.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["Luminance", "Linear", "Radial", "Mask 4"]);
+        assert_eq!(
+            develop.masks.iter().map(|m| m.id).collect::<Vec<_>>(),
+            [1, 2, 3, 4]
+        );
+        assert!(develop.unmapped.is_empty(), "{:?}", develop.unmapped);
+    }
+
+    #[test]
+    fn every_supported_mask_shape_maps_with_the_stored_geometry() {
+        let geometry = StoredGeometry::new(Some("AB"), Some(2000.0), Some(1000.0));
+        let develop = parse_develop_with_geometry(
+            r#"s = { MaskGroupBasedCorrections = { { CorrectionMasks = {
+                { What = "Mask/CircularGradient", Left = 0.2, Right = 0.8,
+                  Top = 0.1, Bottom = 0.6, Angle = 15, Feather = 40,
+                  Flipped = true, Version = 2 },
+                { What = "Mask/Image", MaskSubType = "1" },
+                { What = "Mask/Image", MaskSubType = "2" },
+                { What = "Mask/RangeMask",
+                  CorrectionRangeMask = { Type = "3", DepthRange = "0.1 0.2 0.8 0.9" } },
+                { What = "Mask/RangeMask",
+                  CorrectionRangeMask = { Type = "2", LumRange = "0.0 0.2 0.8 1.0" } },
+            } } } }"#,
+            geometry,
+        )
+        .expect("valid");
+        let components = &develop.masks[0].components;
+        assert_eq!(components.len(), 5);
+        let MaskShape::Radial {
+            center,
+            rx,
+            ry,
+            angle,
+            feather,
+            invert,
+        } = components[0].shape
+        else {
+            panic!("{:?}", components[0].shape);
+        };
+        assert!((center.x - 0.5).abs() < 1e-9 && (center.y - 0.35).abs() < 1e-9);
+        assert!((rx - 0.3).abs() < 1e-9, "{rx}");
+        assert!((ry - 0.125).abs() < 1e-9, "{ry}");
+        assert_eq!((angle, feather, invert), (15.0, 40.0, false));
+        assert_eq!(components[1].shape, MaskShape::Subject);
+        assert_eq!(components[2].shape, MaskShape::Sky);
+        assert_eq!(
+            components[3].shape,
+            MaskShape::DepthRange {
+                lo: 0.2,
+                hi: 0.8,
+                feather: 0.1
+            }
+        );
+        let MaskShape::LuminanceRange {
+            lo,
+            hi,
+            lo_feather,
+            hi_feather,
+        } = components[4].shape
+        else {
+            panic!("{:?}", components[4].shape);
+        };
+        assert!((lo - 0.24097984927065022).abs() < 1e-12, "{lo}");
+        assert!((hi - 0.6076465159373169).abs() < 1e-12, "{hi}");
+        assert!((lo_feather - 0.24097984927065022).abs() < 1e-12);
+        assert!((hi_feather - 0.0590201507293497).abs() < 1e-12);
+    }
+
+    #[test]
+    fn blend_modes_and_component_inversion_map() {
+        let develop = parse(
+            r#"s = { MaskGroupBasedCorrections = { { CorrectionMasks = {
+                { What = "Mask/Gradient", MaskBlendMode = 0, MaskInverted = true },
+                { What = "Mask/Gradient", MaskBlendMode = 1 },
+                { What = "Mask/Gradient", MaskBlendMode = 2 },
+                { What = "Mask/Gradient", MaskBlendMode = 7 },
+            } } } }"#,
+        );
+        let components = &develop.masks[0].components;
+        assert_eq!(components[0].op, MaskOp::Add);
+        assert!(components[0].invert);
+        assert_eq!(components[1].op, MaskOp::Subtract);
+        assert_eq!(components[2].op, MaskOp::Intersect);
+        assert_eq!(components.len(), 3, "an unknown mode builds no component");
+        assert_eq!(develop.unmapped, ["Mask: blend mode 7"]);
+    }
+
+    #[test]
+    fn radial_masks_use_the_displayed_aspect() {
+        let text = r#"s = { MaskGroupBasedCorrections = { { CorrectionMasks = {
+            { What = "Mask/CircularGradient", Left = 0.2, Right = 0.6,
+              Top = 0.3, Bottom = 0.5 } } } } }"#;
+        let upright = parse_develop_with_geometry(
+            text,
+            StoredGeometry::new(Some("AB"), Some(2000.0), Some(1000.0)),
+        )
+        .unwrap();
+        let MaskShape::Radial { rx, ry, .. } = upright.masks[0].components[0].shape else {
+            panic!("{:?}", upright.masks[0].components[0].shape);
+        };
+        assert!((rx - 0.2).abs() < 1e-12, "{rx}");
+        assert!((ry - 0.05).abs() < 1e-12, "{ry}");
+        for orientation in ["BC", "DA"] {
+            let turned = parse_develop_with_geometry(
+                text,
+                StoredGeometry::new(Some(orientation), Some(2000.0), Some(1000.0)),
+            )
+            .unwrap();
+            let MaskShape::Radial { rx, ry, .. } = turned.masks[0].components[0].shape else {
+                panic!("{:?}", turned.masks[0].components[0].shape);
+            };
+            assert!((rx - 0.1).abs() < 1e-12, "{orientation}: {rx}");
+            assert!((ry - 0.1).abs() < 1e-12, "{orientation}: {ry}");
+        }
+    }
+
+    #[test]
+    fn an_unsupported_correction_still_reports_its_unsupported_locals() {
+        let develop = parse(
+            r#"s = { GradientBasedCorrections = {
+                { LocalGrain = 1.0, LocalExposure2012 = 0.5,
+                  CorrectionMasks = { { What = "Mask/UnknownShape" } } } } }"#,
+        );
+        assert!(develop.masks.is_empty());
+        assert_eq!(develop.unmapped, ["Mask: LocalGrain", "Mask: UnknownShape"]);
+    }
+
+    #[test]
+    fn a_mask_container_that_is_not_a_list_is_reported() {
+        let develop = parse(r#"s = { GradientBasedCorrections = "ZyxBroken" }"#);
+        assert!(develop.masks.is_empty());
+        assert_eq!(
+            develop.unmapped,
+            ["Mask: container GradientBasedCorrections"]
+        );
+    }
+
+    #[test]
+    fn retouch_areas_become_spots_with_source_offsets() {
+        let geometry = StoredGeometry::new(Some("AB"), Some(1000.0), Some(2000.0));
+        let develop = parse_develop_with_geometry(
+            r#"s = { RetouchAreas = {
+                { Masks = { { What = "Mask/Ellipse", X = 0.4, Y = 0.3, SizeX = 0.08 } },
+                  Feather = 0.5, Opacity = 0.8, SourceState = "sourceSetExplicitly",
+                  SourceX = 0.6, OffsetY = 0.5 },
+                { SpotType = "clone",
+                  Masks = { { What = "Mask/Paint", Dabs = { "d 0.1 0.2", "d 0.3 0.4" },
+                              Radius = 0.05 } },
+                  SourceState = "sourceAuto", SourceX = 0.4, OffsetY = 0.5 },
+                { Masks = { { What = "Mask/CircularGradient", Top = 0.2, Left = 0.3,
+                              Bottom = 0.6, Right = 0.7 } } },
+                { Masks = { { What = "Mask/Gradient" } } },
+                { Feather = 0.1 },
+            } }"#,
+            geometry,
+        )
+        .unwrap();
+        assert_eq!(develop.spots.len(), 3);
+        let heal = &develop.spots[0];
+        assert_eq!(heal.mode, SpotMode::Heal);
+        assert_eq!(heal.points, [Point { x: 0.4, y: 0.3 }]);
+        assert!((heal.size - 0.04).abs() < 1e-12, "{}", heal.size);
+        assert_eq!((heal.feather, heal.opacity), (50.0, 80.0));
+        let offset = heal.source_offset.expect("explicit source");
+        assert!((offset.x - 0.2).abs() < 1e-12, "{}", offset.x);
+        assert!((offset.y - 0.2).abs() < 1e-12, "{}", offset.y);
+        let clone = &develop.spots[1];
+        assert_eq!(clone.mode, SpotMode::Clone);
+        assert_eq!(clone.points.len(), 2);
+        assert_eq!(clone.size, 0.05, "a brush radius is not aspect-scaled");
+        assert_eq!(clone.source_offset, None, "an automatic source has none");
+        assert_eq!(clone.opacity, 100.0);
+        let circle = &develop.spots[2];
+        assert!((circle.points[0].x - 0.5).abs() < 1e-12);
+        assert!((circle.points[0].y - 0.4).abs() < 1e-12);
+        assert!((circle.size - 0.1).abs() < 1e-12, "{}", circle.size);
+        assert_eq!(develop.unmapped, ["Spot: Gradient", "Spot: no mask"]);
+    }
+
+    #[test]
+    fn retouch_info_is_only_a_fallback_with_legacy_units() {
+        let geometry = StoredGeometry::new(Some("AB"), Some(2000.0), Some(1000.0));
+        let develop = parse_develop_with_geometry(
+            r#"s = { RetouchInfo = {
+                "centerX = 0.25, centerY = 0.75, radius = 0.04, spotType = heal, sourceState = sourceSetExplicitly, sourceX = 0.5, sourceY = 0.6, opacity = 0.5",
+                "centerX = 0.6, centerY = 0.2, radius = 0.1, spotType = clone, sourceState = sourceAuto, sourceX = 0.9, sourceY = 0.9",
+                "centerX = 0.5, radius = 0.02",
+            } }"#,
+            geometry,
+        )
+        .unwrap();
+        assert_eq!(develop.spots.len(), 2);
+        let heal = &develop.spots[0];
+        assert_eq!(heal.mode, SpotMode::Heal);
+        assert!((heal.size - 0.04).abs() < 1e-12);
+        assert_eq!(heal.opacity, 50.0);
+        assert_eq!(heal.feather, 0.0);
+        let offset = heal.source_offset.expect("explicit source");
+        assert!((offset.x - 0.25).abs() < 1e-12);
+        assert!((offset.y + 0.15).abs() < 1e-12);
+        let clone = &develop.spots[1];
+        assert_eq!(clone.mode, SpotMode::Clone);
+        assert!((clone.size - 0.1).abs() < 1e-12);
+        assert_eq!(clone.source_offset, None);
+        assert_eq!(develop.unmapped, ["Spot: legacy line"]);
+
+        let both = parse_develop_with_geometry(
+            r#"s = { RetouchAreas = { { Masks = { { What = "Mask/Ellipse",
+                    X = 0.1, Y = 0.1, SizeX = 0.02 } } } },
+                RetouchInfo = { "centerX = 0.9, centerY = 0.9, radius = 0.01" } }"#,
+            geometry,
+        )
+        .unwrap();
+        assert_eq!(both.spots.len(), 1, "RetouchAreas wins over RetouchInfo");
+        assert!(both.unmapped.is_empty());
+    }
+
+    #[test]
+    fn spot_size_feather_opacity_and_sources_are_clamped() {
+        let geometry = StoredGeometry::new(Some("AB"), Some(2000.0), Some(1000.0));
+        let develop = parse_develop_with_geometry(
+            r#"s = { RetouchAreas = {
+                { Masks = { { What = "Mask/Ellipse", X = 0.2, Y = 0.2, SizeX = 0.9 } },
+                  SourceX = 0.2, OffsetY = 0.2 },
+                { Masks = { { What = "Mask/Ellipse", X = 0.8, Y = 0.8, SizeX = 0.0005 } },
+                  Feather = 1.5, Opacity = -0.5 },
+            } }"#,
+            geometry,
+        )
+        .unwrap();
+        assert_eq!(develop.spots[0].size, 0.25);
+        assert_eq!(
+            develop.spots[0].source_offset, None,
+            "same position is no offset"
+        );
+        assert_eq!(develop.spots[1].size, 0.001);
+        assert_eq!(develop.spots[1].feather, 100.0);
+        assert_eq!(develop.spots[1].opacity, 0.0);
+        assert!(develop.unmapped.is_empty());
+    }
+
+    #[test]
+    fn a_spot_container_that_is_not_a_list_is_reported() {
+        let develop = parse(r#"s = { RetouchAreas = "ZyxBroken" }"#);
+        assert!(develop.spots.is_empty());
+        assert_eq!(develop.unmapped, ["Spot: container RetouchAreas"]);
+    }
+
+    #[test]
+    fn unsupported_masks_and_local_sliders_are_named_never_dropped() {
+        let develop = parse(
+            r#"s = { MaskGroupBasedCorrections = {
+                { CorrectionMasks = { { What = "Mask/UnknownShape" } } },
+                { CorrectionName = "No components", CorrectionMasks = {} },
+                { CorrectionName = "Empty brush",
+                  CorrectionMasks = { { What = "Mask/Paint", Dabs = {} } } },
+                { CorrectionName = "Grain", LocalGrain = 3737,
+                  CorrectionMasks = { { What = "Mask/Image", MaskSubType = "1" } } },
+                { CorrectionName = "AI", CorrectionMasks = {
+                    { What = "Mask/Image", MaskSubType = "9" } } },
+                { CorrectionName = "Colour", CorrectionMasks = {
+                    { What = "Mask/RangeMask",
+                      CorrectionRangeMask = { Type = "1", SampleRange = "0.1 0.2" } } } },
+            } }"#,
+        );
+        assert_eq!(develop.masks.len(), 1);
+        assert_eq!(develop.masks[0].name, "Grain");
+        assert_eq!(
+            develop.unmapped,
+            [
+                "Mask: AI mask (9)",
+                "Mask: LocalGrain",
+                "Mask: UnknownShape",
+                "Mask: colour range",
+                "Mask: empty brush",
+                "Mask: no components",
+            ]
+        );
+    }
+
+    #[test]
+    fn amount_is_scaled_clamped_and_local_sliders_use_lightcraft_units() {
+        let develop = parse(
+            r#"s = { GradientBasedCorrections = {
+                { CorrectionAmount = 3.0, LocalExposure2012 = 0.5,
+                  LocalContrast2012 = 0.25, LocalHue = 2.0,
+                  CorrectionMasks = { { What = "Mask/Gradient" } } },
+                { CorrectionAmount = -0.5,
+                  CorrectionMasks = { { What = "Mask/Gradient" } } },
+            } }"#,
+        );
+        let high = &develop.masks[0].adjust;
+        assert_eq!(high.get("amount"), Some(&200.0));
+        assert_eq!(high.get("exposure"), Some(&2.0));
+        assert_eq!(high.get("contrast"), Some(&25.0));
+        assert_eq!(high.get("hue"), Some(&100.0), "clamped to the slider range");
+        assert_eq!(develop.masks[1].adjust.get("amount"), Some(&0.0));
+        assert_eq!(
+            develop.masks[0].id, 1,
+            "the first mask of a photo starts at 1"
+        );
+    }
+
+    #[test]
+    fn a_correction_name_survives_byte_for_byte() {
+        let name = "Profil Ärger 📷";
+        let develop = parse(&format!(
+            r#"s = {{ PaintBasedCorrections = {{ {{ CorrectionName = "{name}",
+                CorrectionMasks = {{ {{ What = "Mask/Paint",
+                    Dabs = {{ "d 0.5 0.5" }} }} }} }} }} }}"#
+        ));
+        assert_eq!(develop.masks[0].name, name);
+    }
+
+    #[test]
+    fn a_correction_level_inversion_is_the_mask_inversion() {
+        let develop = parse(
+            r#"s = { GradientBasedCorrections = { { MaskInverted = true,
+                CorrectionMasks = { { What = "Mask/Gradient" } } } } }"#,
+        );
+        assert!(develop.masks[0].invert);
+        assert!(!develop.masks[0].components[0].invert);
     }
 }
