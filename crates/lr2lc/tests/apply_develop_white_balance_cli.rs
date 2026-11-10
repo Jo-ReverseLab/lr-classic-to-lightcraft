@@ -37,6 +37,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 struct Setup {
+    #[cfg_attr(not(unix), allow(dead_code))]
     photos: tempfile::TempDir,
     work: tempfile::TempDir,
     catalog: PathBuf,
