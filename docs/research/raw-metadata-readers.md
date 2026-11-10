@@ -43,11 +43,16 @@ WB **presets** give a Kelvin curve
 rendered files and raws whose camera is in neither table — is relative
 (`lightcraft:crates/catalog/src/model.rs:342-344`).
 
-For the CR3 bodies in question the measured table contains `EOS R`, `EOS R5`,
-`EOS R5m2`, `EOS R6`, `EOS R6m2`, `EOS R10` and `EOS RP`
-(`lightcraft:crates/raw/src/spectral_table.rs:107-148`); `EOS R3`, `EOS R7`,
-`EOS R8`, `EOS R50`, `EOS R100`, `EOS R5 C` and `EOS R6 Mark III` are absent
-(grep over the same file, 2026-11-10). CR3 is in the list of formats whose look
+The measured table has seven Canon EOS R rows — `EOS R`, `EOS R5`, `EOS R5m2`,
+`EOS R6`, `EOS R6m2`, `EOS R10` and `EOS RP`
+(`lightcraft:crates/raw/src/spectral_table.rs:107-143`) — and the alias table
+resolves five more names onto them: `EOS R5 Mark II`→`EOS R5m2`, `EOS R6 Mark
+II`→`EOS R6m2`, `EOS R5 C`→`EOS R5`, `EOS R50`→`EOS R10` and `EOS R8`→`EOS R6m2`
+(`lightcraft:crates/raw/src/spectral_table.rs:337-343`), used by
+`find`/`find_camera` (`lightcraft:crates/raw/src/spectral.rs:80-107`); `EOS 6D
+Mark II`→`EOS RP` as well (`:340`). Twelve EOS R model names are therefore on
+the Kelvin scale. `EOS R3`, `EOS R7`, `EOS R100` and `EOS R6 Mark III` are not
+(grep over the same files, 2026-11-10). CR3 is in the list of formats whose look
 is a camera fit rather than a raw of its own matrices
 (`lightcraft:crates/catalog/src/model.rs:414-416`).
 
@@ -118,7 +123,7 @@ questions.
 
 - `AsShotNeutral` (50728 / 0xC628), `AsShotWhiteXY` (50729 / 0xC629),
   `ColorMatrix1/2` (50721/50722) and `ForwardMatrix1/2` are read in LightCraft's
-  DNG path (`lightcraft:crates/tiff/src/tags.rs:121-128`,
+  DNG path (`lightcraft:crates/tiff/src/tags.rs:121-129`,
   `lightcraft:crates/raw/src/dng.rs:108-126`).
 - A neutral plus a matrix gives the as-shot xy and then the CCT
   (`lightcraft:crates/raw/src/color.rs:108-154`), so for DNG the requirement is
@@ -180,12 +185,12 @@ container and reaches the image or its maker note — verified by file and line.
   needs `raw_image()` — a full pixel decode.
 - Matrices come from bundled tables (`data/cameras/canon/r5.toml:8-10`), not
   from the file. An unknown camera is rejected before any metadata is read
-  (`src/decoders/mod.rs:848`).
+  (`crate-rawler-0.7.2/src/decoders/mod.rs:1002-1008`; 0.8.0: `:1068`).
 - Footprint: 24 direct dependencies incl. `image`, `jxl-oxide`, `rayon`,
-  `clap`, `uuid` (`Cargo.toml:70-150`), 57 `unsafe` occurrences, 24 MB.
-- Assessment: solves CR3 and supplies matrices, but is LGPL-2.1, needs 1.89 or a
-  pin, exposes WB only through a full decode, and is far larger than "small and
-  readable" allows.
+  `clap`, `uuid` (`Cargo.toml:70-150`), 55 `unsafe` occurrences (0.7.2;
+  59 in 0.8.0), 24 MB.
+- Assessment: solves CR3 and supplies matrices, but is LGPL-2.1, needs 1.89 (or
+  a pin), exposes WB only after a full decode, and is far too large.
 
 ### 3.2 rawloader 0.37.2 — not a CR3 reader
 
@@ -194,7 +199,6 @@ container and reaches the image or its maker note — verified by file and line.
   (`crate-rawloader-0.37.2/src/decoders/mod.rs:60-80`) and no `cr3` occurrence
   in `src/` (case-insensitive grep). rawler is its successor (same decoder
   layout, same licence, newer and faster); rawloader is not a candidate.
-- Assessment: rejected — no CR3.
 
 ### 3.3 LibRaw through libraw-rs / libraw-rs-sys / rsraw / rsraw-sys
 
@@ -232,9 +236,12 @@ container and reaches the image or its maker note — verified by file and line.
   (`src/canon/colour.rs:165-200`); the as-shot **white point in xy** is set on
   the DNG path only (`src/dng.rs:445`, `src/rawimage.rs:332-338`), not for CR3.
 - Footprint: 160 `unsafe` occurrences, `libc` among the dependencies, alpha
-  version, no metadata-only entry point (`src/lib.rs` exports `extensions()`
-  only). Assessment: the closest to the requirement (it already computes an
-  as-shot white point), but alpha, LGPL-3.0 and only after a full decode.
+  version. A metadata-only open does exist (`RawFile`, `rawfile_from_file`,
+  `src/lib.rs:93,107`; `metadata()` at `src/rawfile.rs:359`), but it exposes no
+  as-shot neutral or multipliers; whether the CR3 maker note is part of that
+  walk is unverified (assumption: not), so CR3 WB still needs a decode.
+  Assessment: closest to the requirement (it computes an as-shot white point on
+  the DNG path), but alpha, LGPL-3.0 and a decode for CR3.
 
 ### 3.5 flashraw 0.1.1
 
@@ -253,7 +260,7 @@ container and reaches the image or its maker note — verified by file and line.
   multipliers → xy → CCT inversion. For bodies that write no DNG the database
   keeps matrices "as stored" (`flashraw-camera-db-0.1.1/README.md`), i.e. from an
   external source, not measured.
-- Footprint: 13 `unsafe` occurrences in `flashraw-core`; a young single-vendor
+- Footprint: 12 `unsafe` occurrences in `flashraw-core`; a young single-vendor
   project whose Windows behaviour is untested here. Assessment: the only
   permissively licensed pure-Rust CR3 reader with matrices, but pre-1.0 and
   without the value the requirement is about.
@@ -268,7 +275,7 @@ container and reaches the image or its maker note — verified by file and line.
   "non-standard" because the manifest uses `license-file`, `Cargo.toml:43`;
   MSRV 1.83) parses the `CMT1`/`CMT2`/`CMT3` boxes but skips the maker note by
   design — "Skipping CMT3 (MakerNotes) - proprietary format"
-  (`crate-nom-exif-3.8.0/src/cr3.rs:155`), so no `ColorData` and no WB.
+  (`crate-nom-exif-3.8.0/src/exif.rs:155`), so no `ColorData` and no WB.
 - **little_exif 0.6.23** (2026-01-13, MIT OR Apache-2.0, MSRV 1.65) covers
   JPEG, JXL, HEIF/HEIC/HIF/AVIF, PNG, TIFF and WebP (`README.md:17-20`): no
   CR3, and it is an EXIF *writer* first.
@@ -290,11 +297,11 @@ All three are fine for EXIF and useless for as-shot WB.
 
 | Crate | Version / date | Licence | Why not |
 | --- | --- | --- | --- |
-| quickraw | 0.1.6, 2023-06-19 | LGPL-2.1 | no `cr3` in its sources; LGPL |
+| quickraw | 0.1.6, 2022-09-30 | LGPL-2.1 | no `cr3` in its sources; LGPL |
 | rawbit | 0.1.18, 2026-06-03 | MIT | no `cr3` in its sources |
 | raw-files | 0.9.0, 2026-11-10 | MIT OR Apache-2.0 | MSRV 1.95, 266 downloads, no `cr3` in its sources |
 | rawkit | 0.1.0, 2024-11-03 | MIT OR Apache-2.0 | no `cr3` in its sources; 1 278 downloads |
-| zenraw | 0.2.0, 2026-04-17 | AGPL-3.0-only | licence incompatible; MSRV 1.93 |
+| zenraw | 0.2.0, 2026-04-17 | AGPL-3.0-only OR LicenseRef-Imazen-Commercial | licence incompatible; MSRV 1.93 |
 | gufo-exif | 0.5.5, 2026-10-26 | MPL-2.0 OR LGPL-2.1-or-later | MSRV 1.93; EXIF-level, no verified CR3 maker note |
 | cr3 | 0.0.0, 2018-11-23 | GPL-3.0-only | empty placeholder |
 | fpexif | 0.0.3, 2026-03-02 | MIT OR Apache-2.0 | EXIF only, no CR3 path found |
@@ -307,14 +314,14 @@ documented limitation.
 
 | Candidate | Latest / date | Licence | CR3 (evidence) | As-shot WB values | Matrices for CR3 | Pure Rust | Linux/macOS/Windows | MSRV 1.88 | Deps / size | unsafe |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| rawler | 0.8.0 / 2026-08-30 (0.7.2: 1.88) | LGPL-2.1 | yes (`cr3.rs:778`) | only via full decode (`rawimage.rs:216`) | bundled TOML (`r5.toml:8`) | yes | yes | 0.8.0 needs 1.89 | 24 deps, 24 MB | 57 |
-| rawloader | 0.37.2 / 2026-08-15 | LGPL-2.1 | **no** (no CR3 module) | – | – | yes | yes | – | 5 deps, 7 MB | 3 |
+| rawler | 0.8.0 / 2026-08-30 (0.7.2: 1.88) | LGPL-2.1 | yes (`cr3.rs:778`) | only via full decode (`rawimage.rs:216`) | bundled TOML (`r5.toml:8`) | yes | yes | 0.8.0 needs 1.89 | 24 deps, 24 MB | 59 (0.7.2: 55) |
+| rawloader | 0.37.2 / 2026-08-15 | LGPL-2.1 | **no** (no CR3 module) | – | – | yes | yes | – | 5 deps, 7 MB | 0 |
 | libraw-rs(+sys) | 0.0.4 / 2021-02-02 | MIT wrapper, LibRaw LGPL/CDDL | yes (bundled 0.20.1, `cr3_parser.cpp`) | `cam_mul` in sys bindings (`bindings.rs:10038`) | `cam_xyz` (`:10043`) | **no** (C++) | needs C++ toolchain | yes | heavy | FFI in caller |
 | rsraw(+sys) | 0.1.1 / 2026-03-21 | MIT wrapper, LibRaw LGPL/CDDL | yes (bundled 0.21.3) | sys only | sys only | **no** (C++) | needs C++ toolchain | yes | heavy | FFI in caller |
 | libopenraw | 0.4.0-alpha.13 / 2026-09-18 | LGPL-3.0-or-later | yes (`src/canon/cr3.rs`) | multipliers only, `as_shot_white_xy` DNG-only (`dng.rs:445`) | bundled `matrices.rs` | yes | yes (uses `libc`) | yes | medium | 160 |
-| flashraw | 0.1.1 / 2026-10-25 | MIT OR Apache-2.0 | yes (`cr3/mod.rs:99`) | multipliers, no CCT (`types.rs:470`) | bundled DB (R3/R5/R7/R50) | yes | unverified on Windows | yes (1.85) | 4 crates, ~1.2 MB data | 13 |
+| flashraw | 0.1.1 / 2026-10-25 | MIT OR Apache-2.0 | yes (`cr3/mod.rs:99`) | multipliers, no CCT (`types.rs:470`) | bundled DB (R3/R5/R7/R50) | yes | unverified on Windows | yes (1.85) | 4 crates, ~1.2 MB data | 12 |
 | kamadak-exif | 0.6.2 / 2026-11-05 | BSD-2-Clause | **no** (`isobmff.rs:37`) | no | no | yes | yes | yes (1.60) | small | 2 |
-| nom-exif | 3.8.0 / 2026-09-07 | MIT | container only, maker note skipped (`cr3.rs:155`) | no | no | yes | yes | yes (1.83) | medium | 1 |
+| nom-exif | 3.8.0 / 2026-09-07 | MIT | container only, maker note skipped (`exif.rs:155`) | no | no | yes | yes | yes (1.83) | medium | 1 |
 | little_exif | 0.6.23 / 2026-01-13 | MIT OR Apache-2.0 | **no** (README:17-20) | no | no | yes | yes | yes (1.65) | small | – |
 | tiff | 0.11.3 / 2026-02-10 | MIT | no (TIFF only) | DNG only, by tag (`tags.rs:21`) | DNG only | yes | yes | yes (1.85) | small | 6 |
 | own parser | – | project licence | yes, by construction | yes, from `ColorData` | needs own DB | yes | yes | yes | new code | 0 allowed |
@@ -329,7 +336,7 @@ the CCT inversion of `lightcraft:crates/raw/src/color.rs:108-154`.
 
 A TIFF IFD reader for `AsShotNeutral`, `AsShotWhiteXY`, `ColorMatrix1/2` and
 `ForwardMatrix1/2` is well specified and small (tag numbers as in
-`lightcraft:crates/tiff/src/tags.rs:121-128`). Written once, it serves DNG and
+`lightcraft:crates/tiff/src/tags.rs:121-129`). Written once, it serves DNG and
 the CR3 maker note alike.
 
 ### 5.2 CR3 / ISOBMFF half (moderate risk)
@@ -343,10 +350,10 @@ used.
 The offset table is **not documented by Canon**. Every implementation has
 reverse-engineered it, and the three above differ in structure (rawler shares a
 CR2 table, LibRaw switches on a version id, libopenraw indexes by `ColourData`
-variant). New bodies add versions, so it needs maintenance. A wrong offset for
-a new body silently yields a wrong white balance, so any result must be checked
-for plausibility (positive multipliers, temperature inside the slider range)
-and fall back to "report" — never guess.
+variant). New bodies add versions, so it needs maintenance, and a wrong offset
+silently yields a wrong white balance: check any result for plausibility
+(positive multipliers, temperature inside the slider range) and fall back to
+"report" — never guess.
 
 Cost: a few hundred lines plus a per-version fixture set that needs real CR3
 files, which the test rule excludes — and a hand-built maker note could encode
@@ -356,9 +363,8 @@ the same wrong assumption as the parser.
 
 `exiftool`, `dcraw` and `dcraw_emu`/`libraw` would answer the question today
 (`-ColorTempAsShot`, `-WB_RGGBLevelsAsShot`, `-ColorMatrix2`), but they need an
-installation the project rules do not allow, are not present on all three
-platforms by default, and their textual output is not a stable interface.
-Rejected.
+installation the rules do not allow, are missing on some platforms, and their
+textual output is not a stable interface. Rejected.
 
 ## 7. Options
 
@@ -377,9 +383,10 @@ trait in `crates/lr-reader` so the reader stays replaceable (principle 7).
 ### Option B — own parser, DNG/TIFF plus CR3/ISOBMFF
 
 The reader of section 5, with no new dependency except possibly `tiff` (MIT)
-for the TIFF half: smallest footprint, full control, no licence question. Cost:
-the reverse-engineered `ColorData` table, a CR3 fixture strategy, maintenance
-per new camera.
+for the TIFF half — and `tiff` is not on the approved list either, so using it
+is a separate approval question. Smallest footprint, full control, no licence
+question. Cost: the reverse-engineered `ColorData` table, a CR3 fixture
+strategy, maintenance per new camera.
 
 ### Option C — defer the probe
 
@@ -391,9 +398,10 @@ whether a probe is still needed.
 
 ## Open questions
 
-1. **Which Canon bodies do the catalogs contain?** Seven EOS R bodies are
-   covered by LightCraft's measured matrices, others are not; without the body
-   names the size of the problem cannot be estimated. (Gear information, not
+1. **Which Canon bodies do the catalogs contain?** Twelve EOS R model names
+   resolve to LightCraft's measured matrices (seven rows plus five aliases),
+   others do not; without the body names the size of the problem cannot be
+   estimated. (Gear information, not
    catalog content.)
 2. **Is Canon's per-preset CCT equal to the as-shot temperature Lightroom
    shows?** Unverified; it decides whether an own parser can skip the CCT
@@ -403,9 +411,8 @@ whether a probe is still needed.
    database — each has a coupling or maintenance cost.
 4. **How much may the MSRV rise?** rawler 0.8.0 needs 1.89; the project is on
    1.88.0.
-5. **Is copyleft acceptable for an MIT/Apache project?** LibRaw
-   (LGPL-2.1/CDDL-1.0) and libopenraw (LGPL-3.0) are technically strongest but
-   not permissively licensed.
+5. **Is copyleft acceptable for an MIT/Apache project?** LibRaw (LGPL-2.1/CDDL)
+   and libopenraw (LGPL-3.0) are strongest but not permissively licensed.
 6. **How are CR3 fixtures produced under the "generated fixtures only" rule?**
    The layout is reverse-engineered, so a hand-built fixture could encode the
    same wrong assumption as the parser.
@@ -415,8 +422,9 @@ whether a probe is still needed.
 **Option C now, Option B if the probe is wanted soon.** Concretely: add no
 dependency in this release. Do the dependency-free step first — read the target
 scale from the app after import (section 1.5) and carry absolute Kelvin where
-LightCraft keeps a Kelvin scale. That covers the seven measured EOS R bodies
-without RAW parsing and without a licence question.
+LightCraft keeps a Kelvin scale. That covers the twelve EOS R model names that
+resolve to LightCraft's measured matrices without RAW parsing and without a
+licence question.
 
 For the remaining bodies the file gives multipliers but no matrix, so a probe
 must bring its own colour model and will produce a *different* as-shot
@@ -426,9 +434,9 @@ it.
 
 If the probe is wanted anyway, Option B fits better than Option A: the data sits
 in one maker-note tag with a known, small offset table, the TIFF half can use
-`tiff` (MIT), and no permissively licensed crate in the comparison returns the
-as-shot temperature for a CR3. Option A would add a young dependency (flashraw)
-and still leave the CCT inversion to lr2lc.
+`tiff` (MIT, pending the same approval), and no permissively licensed crate
+returns the as-shot temperature for a CR3. Option A would add a young
+dependency (flashraw) and still leave the CCT inversion to lr2lc.
 
 Fallback in every case, and the part that must not change: an unreadable,
 unknown or implausible file is **reported**, never guessed at, and the import

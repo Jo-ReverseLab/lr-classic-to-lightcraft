@@ -15,7 +15,7 @@ account or a decision only the owner can take; section 5 collects them.
 | Workspace version | `0.1.0` | `Cargo.toml:6` |
 | Edition, MSRV, licence | `2024`, `1.88.0`, `MIT OR Apache-2.0` | `Cargo.toml:7-9` |
 | Members | six, including two that are never shipped | `Cargo.toml:3` |
-| Lock file, tracked files, tags | `Cargo.lock` tracked, 219 files, no tag | `git ls-files Cargo.lock`, `git ls-files \| wc -l`, `git tag \| wc -l` |
+| Lock file, tracked files, tags | `Cargo.lock` tracked, 218 files, no tag | `git ls-files Cargo.lock`, `git ls-files \| wc -l`, `git tag \| wc -l` |
 | Binary | `lr2lc`, prints `lr2lc <version>` | `crates/lr2lc/Cargo.toml:8-10`, `crates/lr2lc/src/main.rs:23-25` |
 
 ### 1.2 The release gate
@@ -71,12 +71,14 @@ report-only unless an advisory is `high` or `critical` (`audit.yml:3-8`);
 
 ### 1.6 Privacy and identifier scan (numbers only)
 
-Over the 219 tracked files: 39 Markdown files; 100 path fragments matching
-`/(home|Users)/<name>`, all `example`; 81 drive-letter fragments, all example
+Over the 218 tracked files: 38 Markdown files; 100 path fragments matching
+`/(home|Users)/<name>`, all `example`; 81 fragments matching
+`[A-Za-z]:\\+[A-Za-z0-9._-]+` (drive letter, colon, backslashes, name), of which
+11 are `\n`-style escapes in string literals and the other 70 are example
 placeholders; 0 e-mail addresses; 0 credential patterns (`ghp_`,
 `github_pat_`, `AKIA`, `xox…`); 1 operational note about the permission scope
 of the repository token, with no value and no secret (`PLAN.md:123`).
-Internal identifiers: 454 occurrences, 56 distinct, in 66 of 219 files
+Internal identifiers: 454 occurrences, 56 distinct, in 66 of 218 files
 (40 under `crates/`, 15 under `tasks/`, 7 under `docs/`, 4 under `tests/`).
 Current practice keeps them; they do not block the release.
 
@@ -91,14 +93,14 @@ Current practice keeps them; they do not block the release.
 ## 3. Changes before the tag
 
 5. **owner** Decide the package metadata (question 1). The root `Cargo.toml` is
-   a virtual manifest with no `[package]` section (`Cargo.toml:1-9`), so a key
-   under `[workspace.package]` reaches no package unless a member inherits it.
-   Either add `description.workspace = true` and `repository.workspace = true`
-   to the `[package]` section of `crates/lr2lc/Cargo.toml`, or to all four
-   shipped crates (`lr-reader`, `model`, `lc-writer`, `lr2lc`). Check:
-   `cargo metadata --no-deps --offline --format-version 1 |
-   grep -c '"repository": "'` — Expected: `1` for the first variant, `4` for
-   the second, `0` if the owner declines.
+   a virtual manifest with no `[package]` section (`Cargo.toml:1-9`): the values
+   go under `[workspace.package]` first, and each chosen `[package]` inherits
+   them with `description.workspace = true` and `repository.workspace = true`;
+   a member line without the workspace key fails to build. Do this for
+   `crates/lr2lc/Cargo.toml`, or for all four shipped crates (`lr-reader`,
+   `model`, `lc-writer`, `lr2lc`). Check: `cargo metadata --no-deps --offline
+   --format-version 1 | grep -c '"repository": "'` — Expected: `1` for the
+   first variant, `4` for the second, `0` if the owner declines.
 6. Insert the `0.1.0` section from section 6 below `## [Unreleased]`
    (`CHANGELOG.md:8`) and replace line 6, which would contradict it. Check:
    `grep -n '^## \[0\.1\.0\]' CHANGELOG.md` — Expected: one line;
@@ -168,7 +170,7 @@ Current practice keeps them; they do not block the release.
 
 Insert below `## [Unreleased]` (`CHANGELOG.md:8`) and replace line 6, for
 example with "The first release is 0.1.0." It only summarises the
-`Unreleased` section (`CHANGELOG.md:10-148`; the wording follows
+`Unreleased` section (`CHANGELOG.md:10-147`; the wording follows
 `CHANGELOG.md:39-40` and `CHANGELOG.md:49-51`) and adds no claim that is not
 already there.
 
@@ -196,7 +198,7 @@ First public release.
 - Writer through the control port of the running app, a mapping file for
   idempotent re-runs, three-way reconciliation on a second run, and reporting
   of removed, renamed and moved items.
-- CI for Linux, macOS and Windows, an MSRV check and a weekly advisory check.
+- CI for Linux, macOS and Windows (format, clippy, tests).
 - Research notes on the catalog schema and on LightCraft in `docs/research`.
 
 ### Changed
@@ -215,12 +217,10 @@ A bare header with no body also satisfies the gate (`release.yml:28-31`).
 
 - **No binaries.** The workflow builds and uploads nothing
   (`release.yml:11-31`); 0.1.0 ships source only, and a build job is a separate change.
-- **No crates.io publication.** No shipped crate sets `publish = false`
-  (section 1.4) and no publishing step exists. Publication would also need a
-  licence decision.
+- **No crates.io publication.** No shipped crate sets `publish = false` and no
+  publishing step exists; publication would also need a licence decision.
 - **macOS and Windows beyond CI.** The test matrix (`ci.yml:18-24`) is the only
-  proof for those platforms; a real run against the LightCraft app remains a
-  manual check.
+  proof for those platforms; a real run against the app stays a manual check.
 - **GitHub-side metadata.** Description, topics and visibility live on the
   repository, not in the tree (steps 18-19).
 
