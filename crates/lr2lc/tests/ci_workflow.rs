@@ -12,7 +12,6 @@ const RELEASE: &str = ".github/workflows/release.yml";
 const AUDIT: &str = ".github/workflows/audit.yml";
 const PERFORMANCE: &str = ".github/workflows/performance.yml";
 const LINK_CHECK: &str = "scripts/check-links.sh";
-const PLAN: &str = "PLAN.md";
 const WORKSPACE_MANIFEST: &str = "Cargo.toml";
 
 fn repo_root() -> PathBuf {
@@ -290,25 +289,5 @@ fn performance_workflow_is_scheduled_and_measures_in_release() {
     assert!(
         text.contains("--release"),
         "{PERFORMANCE}: the measurement runs must use `--release`"
-    );
-}
-
-#[test]
-fn plan_does_not_hardcode_the_repository_owner() {
-    let text = read(PLAN);
-    let marker = "gh api repos/";
-    let mut checked = 0;
-    for (index, _) in text.match_indices(marker) {
-        checked += 1;
-        let rest = &text[index + marker.len()..];
-        assert!(
-            rest.starts_with('<') || rest.starts_with("example"),
-            "{PLAN}: `{marker}` must be followed by a placeholder such as \
-             `<owner>/lr2lc`, not by a literal owner/repository pair"
-        );
-    }
-    assert!(
-        checked > 0,
-        "{PLAN}: expected the documented `{marker}` command with a placeholder"
     );
 }

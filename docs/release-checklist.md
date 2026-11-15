@@ -77,7 +77,8 @@ Over the 218 tracked files: 38 Markdown files; 100 path fragments matching
 11 are `\n`-style escapes in string literals and the other 70 are example
 placeholders; 0 e-mail addresses; 0 credential patterns (`ghp_`,
 `github_pat_`, `AKIA`, `xox…`); 1 operational note about the permission scope
-of the repository token, with no value and no secret (`PLAN.md:123`).
+of the repository token, with no value and no secret (in the former
+`PLAN.md`, removed since).
 Internal identifiers: 454 occurrences, 56 distinct, in 66 of 218 files
 (40 under `crates/`, 15 under `tasks/`, 7 under `docs/`, 4 under `tests/`).
 Current practice keeps them; they do not block the release.
@@ -235,8 +236,9 @@ A bare header with no body also satisfies the gate (`release.yml:28-31`).
    workflow does not create one (`release.yml:11-31`).
 5. Should the shipped crates get `publish = false` so an accidental
    `cargo publish` cannot fail halfway?
-6. Does the operational note about the token's permission scope
-   (`PLAN.md:123`) stay as written in the public repository?
+6. Does the operational note about the token's permission scope stay as
+   written in the public repository? (Resolved: `PLAN.md` was replaced by
+   `ROADMAP.md`.)
 
 ## Recommendation
 

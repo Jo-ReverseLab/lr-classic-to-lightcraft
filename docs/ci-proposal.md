@@ -3,7 +3,9 @@
 Status: proposal only. This document does not change anything under `.github/`.
 Every YAML snippet below is a proposal to be applied by the owner or the lead.
 
-Base: `agent/t22-assumption-triage` (`2214630`), 2026-11-04.
+Base: `agent/t22-assumption-triage` (`2214630`), 2026-11-04. `PLAN.md` was
+later replaced by `ROADMAP.md`; references to `PLAN.md` lines below describe
+that earlier state.
 
 Sources read for this proposal:
 
