@@ -282,6 +282,7 @@ LightCraft, so the planned section carries none.
 | `writer.keywords_created` | integer | apply | |
 | `writer.photos_imported` | integer | apply | |
 | `writer.photos_existing` | integer | apply | found as duplicates on import |
+| `writer.photos_same_content` | integer | apply | imported photos whose file has the same bytes as another photo of the catalog; each became its own record (a copy linked to its own file). Part of `photos_imported` |
 | `writer.photos_updated` | integer | apply | known photos, at least one update sent |
 | `writer.photos_unchanged` | integer | apply | known photos, no command |
 | `writer.updates` | integer | apply | field updates applied |

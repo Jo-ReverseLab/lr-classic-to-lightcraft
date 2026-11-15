@@ -648,6 +648,12 @@ the `writer` section:
 - `keywords_created`;
 - `photos_imported`, and `photos_existing` (found in the library as
   duplicates on import);
+- `photos_same_content` (part of `photos_imported`): photos whose file has
+  the same bytes as another photo of the catalog, for example the same file
+  copied into two folders. LightCraft's import would merge such files into
+  one record, so lr2lc gives each its own record: a copy of the first one,
+  linked to its own file and reset to import defaults. LightCraft shows it
+  as a copy named after the file;
 - `photos_updated` (known from the mapping file, at least one update sent)
   and `photos_unchanged` (known, no command needed);
 - `updates` (field updates applied) and `not_saved` (a step LightCraft

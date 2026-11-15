@@ -102,6 +102,11 @@ pub struct ApplySummary {
     pub photos_imported: usize,
     /// Photos the library already had (reported as duplicates on import).
     pub photos_existing: usize,
+    /// Photos whose file has the same bytes as another photo of the
+    /// catalog. LightCraft's import would merge them into one record, so
+    /// each became a copy linked to its own file. Also counted in
+    /// `photos_imported`.
+    pub photos_same_content: usize,
     /// Photos known from the mapping file for which at least one update was
     /// answered (applied or rejected).
     pub photos_updated: usize,
@@ -1346,9 +1351,21 @@ impl Run<'_> {
                     self.summary.photos_imported += 1;
                     self.record_import(global_id, photo.lightroom_id, id, path)?;
                 }
-                ImportResult::Existing(id) => {
-                    self.summary.photos_existing += 1;
-                    self.record_import(global_id, photo.lightroom_id, id, path)?;
+                ImportResult::Existing { id, reason } => {
+                    // A duplicate by content of a photo another Lightroom photo
+                    // already maps to: two different photos, one record. Give
+                    // this photo its own record instead of sharing.
+                    let claimed = reason.as_deref() == Some("content")
+                        && self
+                            .state
+                            .photos()
+                            .any(|(gid, e)| gid != global_id && same_id(&e.lightcraft_id, &id));
+                    if claimed {
+                        self.same_content_copy(global_id, photo, &id, &sent_path, path)?;
+                    } else {
+                        self.summary.photos_existing += 1;
+                        self.record_import(global_id, photo.lightroom_id, id, path)?;
+                    }
                 }
                 ImportResult::Failed => {
                     skip(
@@ -1454,12 +1471,13 @@ impl Run<'_> {
                     self.state.record_copy(
                         global_id,
                         photo.lightroom_id,
-                        id,
+                        id.clone(),
                         master_global_id,
                         PhotoFields::imported_default(),
                     );
                     self.state.remember_path(global_id, &photo.path);
                     self.state.save(self.state_file)?;
+                    self.reset_copy(photo.lightroom_id, &id)?;
                 }
                 None => {
                     skip(
@@ -1489,6 +1507,180 @@ impl Run<'_> {
                 self.fail_current();
             }
             Err(e) => return Err(e),
+        }
+        Ok(())
+    }
+
+    /// Gives a photo whose file has the same bytes as another photo's its own
+    /// record: a copy of that photo's record (`photo.virtualCopy`, named
+    /// after the file), pointed at this photo's file (`photo.relink`) and
+    /// reset to import defaults. If the copy cannot be linked to its file it
+    /// is moved to Recently Deleted again and the photo is skipped, so no
+    /// record ever shows the wrong file.
+    fn same_content_copy(
+        &mut self,
+        global_id: &str,
+        photo: &Photo,
+        source_id: &Value,
+        sent_path: &Value,
+        path: &Path,
+    ) -> Result<(), WriteError> {
+        let lightroom_id = photo.lightroom_id;
+        let skip = |summary: &mut ApplySummary, code: SkipCode, why: &str| {
+            summary
+                .photos_skipped
+                .push(Skipped::new(code, format!("photo {lightroom_id}: {why}")));
+        };
+        let mut params = json!({"ids": [source_id]});
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            params["name"] = json!(name);
+        }
+        let copy = match self.client.execute("photo.virtualCopy", params) {
+            Ok(Outcome::Applied(result)) => match virtual_copy_id(&result) {
+                Some(id) => id,
+                None => {
+                    skip(
+                        &mut self.summary,
+                        SkipCode::NoIdReturned,
+                        "`photo.virtualCopy` returned no id for the record of a file \
+                         with the same content as another photo",
+                    );
+                    self.fail_current();
+                    return Ok(());
+                }
+            },
+            Ok(Outcome::AppliedNotSaved(_)) => {
+                self.summary.not_saved += 1;
+                skip(
+                    &mut self.summary,
+                    SkipCode::AppliedNotSaved,
+                    "`photo.virtualCopy` was applied but not saved; \
+                     run again to give the photo its own record",
+                );
+                self.fail_current();
+                return Ok(());
+            }
+            Err(WriteError::Command { command, .. }) => {
+                skip(
+                    &mut self.summary,
+                    SkipCode::SameContent,
+                    &format!(
+                        "the file has the same content as another photo and \
+                         LightCraft rejected `{command}` for its own record"
+                    ),
+                );
+                self.fail_current();
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
+        let linked = match self
+            .client
+            .execute("photo.relink", json!({"id": copy, "path": sent_path}))
+        {
+            Ok(Outcome::Applied(_)) => true,
+            Ok(Outcome::AppliedNotSaved(_)) => {
+                self.summary.not_saved += 1;
+                false
+            }
+            Err(WriteError::Command { .. }) => false,
+            Err(e) => return Err(e),
+        };
+        if !linked {
+            // Never leave a record that shows the other photo's file.
+            match self
+                .client
+                .execute("library.select", select_params(&copy))
+                .and_then(|_| self.client.execute("photo.delete", json!({"ids": [copy]})))
+            {
+                Ok(_) | Err(WriteError::Command { .. }) => {}
+                Err(e) => return Err(e),
+            }
+            skip(
+                &mut self.summary,
+                SkipCode::SameContent,
+                "the file has the same content as another photo and its own record \
+                 could not be linked to it (`photo.relink`); nothing was kept",
+            );
+            self.fail_current();
+            return Ok(());
+        }
+        self.summary.photos_imported += 1;
+        self.summary.photos_same_content += 1;
+        self.record_import(global_id, lightroom_id, copy.clone(), path)?;
+        self.reset_copy(lightroom_id, &copy)
+    }
+
+    /// Brings a freshly made copy to the state of a fresh import, which is
+    /// what the plan assumes for a new photo: `photo.virtualCopy` clones the
+    /// whole record (fields, keywords, development settings, albums and the
+    /// stack). The copy leaves the albums and the stack it inherited, its
+    /// development settings are reset and its fields cleared; the planned
+    /// updates then write exactly the Lightroom values. A rejected command
+    /// leaves the photo incomplete (reported), and no update is sent for it.
+    fn reset_copy(&mut self, lightroom_id: i64, copy: &Value) -> Result<(), WriteError> {
+        let inspect = match self.client.execute("photo.inspect", json!({"id": copy})) {
+            Ok(Outcome::Applied(value)) => value,
+            // A read is never "not saved"; take it as a refusal.
+            Ok(Outcome::AppliedNotSaved(_)) => {
+                self.reject(lightroom_id, "photo.inspect");
+                return Ok(());
+            }
+            Err(WriteError::Command { command, .. }) => {
+                self.reject(lightroom_id, &command);
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
+        let mut commands: Vec<(&str, Value)> = vec![("library.select", select_params(copy))];
+        for album in inspect
+            .get("albums")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            commands.push(("album.removePhotos", json!({"id": album, "ids": [copy]})));
+        }
+        if inspect.get("stack").is_some_and(|s| !s.is_null()) {
+            commands.push(("stack.remove", json!({"ids": [copy]})));
+        }
+        commands.extend([
+            ("develop.reset", json!({"ids": [copy]})),
+            ("photo.rate", json!({"rating": 0, "ids": [copy]})),
+            ("photo.flag", json!({"flag": "none", "ids": [copy]})),
+            ("photo.label", json!({"label": "none", "ids": [copy]})),
+            (
+                "photo.setMeta",
+                json!({
+                    "title": "", "caption": "", "copyright": "", "creator": "",
+                    "keywords": [], "ids": [copy],
+                }),
+            ),
+        ]);
+        for (command, params) in commands {
+            match self.client.execute(command, params) {
+                Ok(Outcome::Applied(_)) => {}
+                Ok(Outcome::AppliedNotSaved(_)) => {
+                    self.summary.not_saved += 1;
+                    self.summary.photos_incomplete.push(Skipped::new(
+                        SkipCode::AppliedNotSaved,
+                        format!(
+                            "photo {lightroom_id}: `{command}` was applied but not saved \
+                             while resetting the new copy; the photo is incomplete"
+                        ),
+                    ));
+                    self.fail_current();
+                    return Ok(());
+                }
+                Err(WriteError::Command { command, .. }) => {
+                    self.reject(lightroom_id, &command);
+                    return Ok(());
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        if let Some(c) = &mut self.current {
+            c.selected = true;
         }
         Ok(())
     }
@@ -1876,7 +2068,12 @@ fn virtual_copy_id(result: &Value) -> Option<Value> {
 #[derive(Debug, PartialEq)]
 enum ImportResult {
     Imported(Value),
-    Existing(Value),
+    /// A duplicate of a photo the library has, with LightCraft's reason
+    /// (`path` or `content`) when it gave one.
+    Existing {
+        id: Value,
+        reason: Option<String>,
+    },
     Failed,
     NoId,
 }
@@ -1897,11 +2094,13 @@ fn import_id(result: &Value, sent_path: &Value) -> ImportResult {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .find(|d| d.get("path") == Some(sent_path))
-        .and_then(|d| d.get("existing"))
-        .and_then(valid_id);
-    if let Some(id) = duplicate {
-        return ImportResult::Existing(id);
+        .find(|d| d.get("path") == Some(sent_path));
+    if let Some(id) = duplicate.and_then(|d| d.get("existing")).and_then(valid_id) {
+        let reason = duplicate
+            .and_then(|d| d.get("reason"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        return ImportResult::Existing { id, reason };
     }
     match result.get("imported").and_then(Value::as_array) {
         Some(items) if items.len() == 1 => {
@@ -2131,7 +2330,13 @@ mod tests {
             {"path": "/x/b.jpg", "existing": 1},
             {"path": "/x/a.jpg", "existing": 2},
         ]});
-        assert_eq!(import_id(&r, &p), ImportResult::Existing(json!(2)));
+        assert_eq!(
+            import_id(&r, &p),
+            ImportResult::Existing {
+                id: json!(2),
+                reason: None
+            }
+        );
     }
 
     #[test]

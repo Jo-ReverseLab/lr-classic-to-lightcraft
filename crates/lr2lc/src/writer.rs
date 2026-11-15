@@ -183,6 +183,9 @@ pub struct AppliedJson {
     keywords_created: usize,
     photos_imported: usize,
     photos_existing: usize,
+    /// Imported photos whose file has the same bytes as another photo; each
+    /// became its own record (a copy linked to its own file).
+    photos_same_content: usize,
     photos_updated: usize,
     photos_unchanged: usize,
     updates: usize,
@@ -403,6 +406,7 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         keywords_created: s.keywords_created,
         photos_imported: s.photos_imported,
         photos_existing: s.photos_existing,
+        photos_same_content: s.photos_same_content,
         photos_updated: s.photos_updated,
         photos_unchanged: s.photos_unchanged,
         updates: s.updates,
@@ -541,10 +545,12 @@ pub fn planned_summary(plan: &Plan) -> String {
 /// The readable summary of an applied run.
 pub fn applied_summary(s: &ApplySummary) -> String {
     let mut out = format!(
-        "written: keywords created {}, photos imported {}, photos already in the library {}, \
-         photos updated {}, photos unchanged {}, updates {}, not yet saved by LightCraft {}\n",
+        "written: keywords created {}, photos imported {} (same file content as another photo {}), \
+         photos already in the library {}, photos updated {}, photos unchanged {}, updates {}, \
+         not yet saved by LightCraft {}\n",
         s.keywords_created,
         s.photos_imported,
+        s.photos_same_content,
         s.photos_existing,
         s.photos_updated,
         s.photos_unchanged,

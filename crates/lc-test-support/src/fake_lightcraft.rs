@@ -243,6 +243,11 @@ pub struct Config {
     /// the two queries overlap; the reader must merge the ids, not duplicate
     /// them.
     pub ignore_deleted_filter: bool,
+    /// The content of a file by path, for duplicate detection by content:
+    /// importing a path whose content equals that of a photo already in the
+    /// library answers it as a duplicate with reason `content`, like the real
+    /// app (which hashes the bytes). Paths not listed have unique content.
+    pub file_contents: BTreeMap<String, String>,
 }
 
 impl Config {
@@ -272,6 +277,7 @@ impl Config {
             seed_members: Vec::new(),
             summary_broken: false,
             ignore_deleted_filter: false,
+            file_contents: BTreeMap::new(),
         }
     }
 }
@@ -511,6 +517,20 @@ impl FakeLightCraft {
     pub fn ratings(&self) -> BTreeMap<i64, i64> {
         self.shared.library.lock().unwrap().ratings.clone()
     }
+
+    /// The current field values of one photo, as the read side reports them.
+    pub fn photo_fields(&self, id: i64) -> Option<SeedPhoto> {
+        self.shared.library.lock().unwrap().seeds.get(&id).cloned()
+    }
+
+    /// The file path a photo is linked to.
+    pub fn path_of(&self, id: i64) -> Option<String> {
+        let lib = self.shared.library.lock().unwrap();
+        lib.photos
+            .iter()
+            .find(|(_, v)| **v == id)
+            .map(|(p, _)| p.clone())
+    }
 }
 
 impl Drop for FakeLightCraft {
@@ -669,9 +689,15 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                 .filter(|a| a.photos.contains(&id))
                 .map(|a| a.id)
                 .collect();
+            let stack = lib
+                .stacks
+                .values()
+                .find(|st| st.photos.contains(&id))
+                .map(|st| json!({"id": st.id, "photos": st.photos, "collapsed": st.collapsed}));
             Ok(json!({
                 "id": id,
                 "albums": albums,
+                "stack": stack,
                 "meta": {
                     "caption": seed.caption,
                     "copyright": seed.copyright,
@@ -717,9 +743,24 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             if let Some(existing) = lib.photos.get(path) {
                 return Ok(json!({
                     "imported": [],
-                    "duplicates": [{"path": path, "existing": existing, "reason": "same file"}],
+                    "duplicates": [{"path": path, "existing": existing, "reason": "path"}],
                     "failed": 0,
                 }));
+            }
+            if let Some(content) = config.file_contents.get(path) {
+                let twin = lib
+                    .photos
+                    .iter()
+                    .filter(|(other, _)| config.file_contents.get(*other) == Some(content))
+                    .map(|(_, id)| *id)
+                    .min();
+                if let Some(existing) = twin {
+                    return Ok(json!({
+                        "imported": [],
+                        "duplicates": [{"path": path, "existing": existing, "reason": "content"}],
+                        "failed": 0,
+                    }));
+                }
             }
             let id = lib.next_id;
             lib.next_id += 1;
@@ -786,6 +827,17 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                         if let Some(text) = params[key].as_str() {
                             *field = (!text.is_empty()).then(|| text.to_string());
                         }
+                    }
+                    if let Some(all) = params["keywords"].as_array() {
+                        seed.keywords = all
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_string)
+                            .collect();
+                    }
+                    if let Some(removed) = params["removeKeywords"].as_array() {
+                        seed.keywords
+                            .retain(|have| !removed.iter().any(|r| r.as_str() == Some(have)));
                     }
                     if let Some(added) = params["addKeywords"].as_array() {
                         for keyword in added.iter().filter_map(Value::as_str) {
@@ -866,6 +918,39 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                     .cloned()
                     .unwrap_or_else(|| SeedPhoto::plain(id));
                 lib.seeds.insert(id, SeedPhoto { id, ..seed });
+                // Like the real app: the copy joins the master's regular
+                // albums and is stacked right after the master.
+                for album in lib.albums.values_mut() {
+                    if album.rules.is_none()
+                        && !album.folder
+                        && let Some(at) = album.photos.iter().position(|p| *p == master_id)
+                    {
+                        album.photos.insert(at + 1, id);
+                    }
+                }
+                match lib
+                    .stacks
+                    .values_mut()
+                    .find(|st| st.photos.contains(&master_id))
+                {
+                    Some(st) => {
+                        let at = st.photos.iter().position(|p| *p == master_id).unwrap_or(0);
+                        st.photos.insert(at + 1, id);
+                        st.collapsed = false;
+                    }
+                    None => {
+                        let sid = lib.next_stack_id;
+                        lib.next_stack_id += 1;
+                        lib.stacks.insert(
+                            sid,
+                            StackView {
+                                id: sid,
+                                photos: vec![master_id, id],
+                                collapsed: false,
+                            },
+                        );
+                    }
+                }
                 if config.selection_gate {
                     lib.selection = vec![id];
                 }
@@ -875,6 +960,74 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                 return Err("saved in memory but not written to disk: disk full".into());
             }
             Ok(json!({"ids": new_ids}))
+        }
+        "photo.relink" => {
+            // `{id, path}`: points one photo at another file.
+            let id = params["id"].as_i64().ok_or("id is missing")?;
+            let path = params["path"].as_str().ok_or("missing `path`")?;
+            let old = lib
+                .photos
+                .iter()
+                .find(|(_, v)| **v == id)
+                .map(|(p, _)| p.clone())
+                .ok_or("unknown photo id")?;
+            if lib.photos.get(path).is_some_and(|other| *other != id) {
+                return Err("another photo already uses that file".into());
+            }
+            lib.photos.remove(&old);
+            lib.photos.insert(path.to_string(), id);
+            Ok(json!({"id": id, "path": path}))
+        }
+        "stack.remove" => {
+            let ids: Vec<i64> = params["ids"]
+                .as_array()
+                .ok_or("ids is missing")?
+                .iter()
+                .filter_map(Value::as_i64)
+                .collect();
+            let mut changed = 0;
+            for st in lib.stacks.values_mut() {
+                let before = st.photos.len();
+                st.photos.retain(|p| !ids.contains(p));
+                changed += before - st.photos.len();
+            }
+            if changed == 0 {
+                return Err("the photos are not in a stack".into());
+            }
+            lib.stacks.retain(|_, st| st.photos.len() >= 2);
+            Ok(json!({"changed": changed}))
+        }
+        "photo.delete" => {
+            // Moves photos to Recently Deleted; the fake simply forgets them.
+            let ids: Vec<i64> = params["ids"]
+                .as_array()
+                .ok_or("ids is missing")?
+                .iter()
+                .filter_map(Value::as_i64)
+                .collect();
+            lib.photos.retain(|_, id| !ids.contains(id));
+            for id in &ids {
+                lib.seeds.remove(id);
+            }
+            for album in lib.albums.values_mut() {
+                album.photos.retain(|p| !ids.contains(p));
+            }
+            for st in lib.stacks.values_mut() {
+                st.photos.retain(|p| !ids.contains(p));
+            }
+            lib.stacks.retain(|_, st| st.photos.len() >= 2);
+            Ok(json!({}))
+        }
+        "develop.reset" => {
+            let ids = params["ids"].as_array().ok_or("ids is missing")?;
+            if ids
+                .iter()
+                .filter_map(Value::as_i64)
+                .any(|i| !lib.photos.values().any(|p| *p == i))
+            {
+                return Err("unknown photo id".into());
+            }
+            Ok(json!({}))
         }
         other => Err(format!("unknown command {other}")),
     }

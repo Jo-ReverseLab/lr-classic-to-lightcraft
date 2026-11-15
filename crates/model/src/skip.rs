@@ -85,6 +85,10 @@ pub enum SkipCode {
     AppliedNotSaved,
     ImportFailed,
     Rejected,
+    /// A photo whose file has the same bytes as another photo of the run:
+    /// the separate LightCraft record (a copy linked to its own file) could
+    /// not be made.
+    SameContent,
     // Dry run: path mapping.
     /// A path mapping would climb out of the new prefix via `..`; the path is
     /// left unchanged and the element is not converted.
@@ -99,7 +103,7 @@ pub enum SkipCode {
 
 impl SkipCode {
     /// Every code, in declaration order.
-    pub const ALL: [SkipCode; 58] = [
+    pub const ALL: [SkipCode; 59] = [
         SkipCode::NoRootFolder,
         SkipCode::RootFolderNotFound,
         SkipCode::RootFolderNoPath,
@@ -155,6 +159,7 @@ impl SkipCode {
         SkipCode::AppliedNotSaved,
         SkipCode::ImportFailed,
         SkipCode::Rejected,
+        SkipCode::SameContent,
         SkipCode::PathMappingEscaped,
         SkipCode::PathMappingCollision,
         SkipCode::Unspecified,
@@ -218,6 +223,7 @@ impl SkipCode {
             SkipCode::AppliedNotSaved => "applied_not_saved",
             SkipCode::ImportFailed => "import_failed",
             SkipCode::Rejected => "rejected",
+            SkipCode::SameContent => "same_content",
             SkipCode::PathMappingEscaped => "path_mapping_escaped",
             SkipCode::PathMappingCollision => "path_mapping_collision",
             SkipCode::Unspecified => "unspecified",

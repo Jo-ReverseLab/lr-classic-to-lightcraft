@@ -7,6 +7,16 @@ The first release is 0.1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- Photos whose files have identical bytes at different paths (the same file
+  copied into two folders) no longer collapse into one LightCraft photo.
+  Each gets its own record, linked to its own file, and is counted in the new
+  `writer.photos_same_content` (#17).
+- A virtual copy no longer keeps keywords, ratings, labels, texts,
+  development settings, albums or the stack of its master in LightCraft; it
+  is reset to import defaults before its own values are written (#3).
+
 ## [0.1.0] - 2026-11-15
 
 First public release.

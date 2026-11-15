@@ -148,21 +148,26 @@ fn copy_carries_own_stars_label_and_keywords() {
     assert_eq!(fake.ratings().get(&copy_id.as_i64().unwrap()), Some(&4));
     assert!(!fake.ratings().contains_key(&master_id.as_i64().unwrap()));
     // The copy got its label; the master did not.
-    let labelled: Vec<i64> = fake
+    // (The copy is also reset to import defaults right after it is created,
+    // so it can get more than one command; none goes to the master.)
+    let labelled: std::collections::BTreeSet<i64> = fake
         .commands()
         .into_iter()
         .filter(|(c, _)| c == "photo.label")
         .map(|(_, p)| p["ids"][0].as_i64().unwrap())
         .collect();
-    assert_eq!(labelled, vec![copy_id.as_i64().unwrap()]);
+    assert_eq!(labelled, [copy_id.as_i64().unwrap()].into());
+    let copy_fields = fake.photo_fields(copy_id.as_i64().unwrap()).unwrap();
+    assert_eq!(copy_fields.label.as_deref(), Some("blue"));
     // The copy got its keyword; the master did not.
-    let set_meta: Vec<i64> = fake
+    let set_meta: std::collections::BTreeSet<i64> = fake
         .commands()
         .into_iter()
         .filter(|(c, _)| c == "photo.setMeta")
         .map(|(_, p)| p["ids"][0].as_i64().unwrap())
         .collect();
-    assert_eq!(set_meta, vec![copy_id.as_i64().unwrap()]);
+    assert_eq!(set_meta, [copy_id.as_i64().unwrap()].into());
+    assert_eq!(copy_fields.keywords, vec!["Travel".to_string()]);
 }
 
 #[test]
@@ -236,4 +241,116 @@ fn copy_whose_master_has_no_lightcraft_id_is_skipped() {
     assert!(virtual_copy_calls(&fake).is_empty());
     let state = State::load(&env.state_file).unwrap();
     assert!(state.photo("gc").is_none());
+}
+
+/// A master with rating, label, title and keyword, and a copy with none of
+/// them but its own keyword. LightCraft's `photo.virtualCopy` clones the
+/// master's record, so without a reset the copy would keep the master's
+/// values (live finding: a copy showed a keyword only its master has).
+fn rich_master_and_plain_copy() -> WriteInput {
+    let master = Photo::new(path_of("gm"), 1, Rating::new(5).unwrap())
+        .with_global_id("gm")
+        .with_label(ColorLabel::Red)
+        .with_title("master title");
+    let copy = Photo::new(path_of("gm"), 2, Rating::new(0).unwrap())
+        .with_global_id("gc")
+        .with_master(1);
+    let mut photo_keywords = BTreeMap::new();
+    photo_keywords.insert(1, vec![kw(&["Master only"])]);
+    photo_keywords.insert(2, vec![kw(&["Copy only"])]);
+    WriteInput {
+        photos: vec![master, copy],
+        keywords: vec![kw(&["Master only"]), kw(&["Copy only"])],
+        photo_keywords,
+        ..WriteInput::default()
+    }
+}
+
+#[test]
+fn copy_does_not_keep_the_masters_fields() {
+    let fake = FakeLightCraft::start(Config::new(&PathBuf::from("Test.lightcraft")));
+    let env = env();
+    let summary = run(&fake, &env, &rich_master_and_plain_copy()).unwrap();
+    assert!(
+        summary.photos_skipped.is_empty(),
+        "{:?}",
+        summary.photos_skipped
+    );
+    assert!(
+        summary.photos_incomplete.is_empty(),
+        "{:?}",
+        summary.photos_incomplete
+    );
+    let state = State::load(&env.state_file).unwrap();
+    let master_id = state.photo("gm").unwrap().lightcraft_id.as_i64().unwrap();
+    let copy_id = state.photo("gc").unwrap().lightcraft_id.as_i64().unwrap();
+    let master = fake.photo_fields(master_id).unwrap();
+    let copy = fake.photo_fields(copy_id).unwrap();
+    assert_eq!(master.rating, 5);
+    assert_eq!(master.keywords, vec!["Master only".to_string()]);
+    assert_eq!(copy.rating, 0, "copy kept the master's stars");
+    assert_eq!(copy.label, None, "copy kept the master's label");
+    assert_eq!(copy.title, "", "copy kept the master's title");
+    assert_eq!(
+        copy.keywords,
+        vec!["Copy only".to_string()],
+        "copy kept the master's keyword"
+    );
+    // The copy's development settings start from the import defaults.
+    assert!(
+        fake.commands()
+            .iter()
+            .any(|(c, p)| c == "develop.reset" && p["ids"][0].as_i64() == Some(copy_id)),
+        "no develop.reset for the copy"
+    );
+}
+
+#[test]
+fn copy_added_later_does_not_join_the_masters_albums_or_stack() {
+    use model::{Collection, CollectionKind};
+    let fake = FakeLightCraft::start(Config::new(&PathBuf::from("Test.lightcraft")));
+    let env = env();
+    // First run: the master alone, in an album.
+    let master = Photo::new(path_of("gm"), 1, Rating::new(0).unwrap()).with_global_id("gm");
+    let album = Collection {
+        lightroom_id: 50,
+        name: "Album".into(),
+        kind: CollectionKind::Album,
+        parent: None,
+        members: vec![1],
+    };
+    let first = WriteInput {
+        photos: vec![master.clone()],
+        collections: vec![album.clone()],
+        ..WriteInput::default()
+    };
+    run(&fake, &env, &first).unwrap();
+    // Second run: a new copy that is in no album and no stack in Lightroom.
+    let copy = Photo::new(path_of("gm"), 2, Rating::new(0).unwrap())
+        .with_global_id("gc")
+        .with_master(1);
+    let second = WriteInput {
+        photos: vec![master, copy],
+        collections: vec![album],
+        ..WriteInput::default()
+    };
+    fake.clear_selection();
+    let summary = run(&fake, &env, &second).unwrap();
+    assert!(
+        summary.photos_incomplete.is_empty(),
+        "{:?}",
+        summary.photos_incomplete
+    );
+    let state = State::load(&env.state_file).unwrap();
+    let copy_id = state.photo("gc").unwrap().lightcraft_id.as_i64().unwrap();
+    for album in fake.albums() {
+        assert!(
+            !album.photos.contains(&copy_id),
+            "copy left in album {}",
+            album.name
+        );
+    }
+    for stack in fake.stacks() {
+        assert!(!stack.photos.contains(&copy_id), "copy left in a stack");
+    }
 }
