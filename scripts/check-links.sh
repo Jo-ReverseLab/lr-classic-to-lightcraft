@@ -18,8 +18,8 @@ set -u
 
 dead=$(git ls-files '*.md' | while IFS= read -r file; do
     case $file in
-        */*) dir=${file%/*} ;;
-        *) dir=. ;;
+        (*/*) dir=${file%/*} ;;
+        (*) dir=. ;;
     esac
 
     # Drop fenced code blocks: `](...)` inside them is an example.
@@ -32,8 +32,8 @@ dead=$(git ls-files '*.md' | while IFS= read -r file; do
             # Drop an optional Markdown title (a quoted string after the
             # target) and the whitespace between the two.
             case $target in
-                *' "'*) target=${target%%\"*} ;;
-                *" '"*) target=${target%%\'*} ;;
+                (*' "'*) target=${target%%\"*} ;;
+                (*" '"*) target=${target%%\'*} ;;
             esac
             while [ "$target" != "${target%[[:space:]]}" ]; do
                 target=${target%?}
@@ -41,15 +41,15 @@ dead=$(git ls-files '*.md' | while IFS= read -r file; do
 
             # Angle-bracket form, used for targets that contain spaces.
             case $target in
-                '<'*'>') target=${target#'<'}
+                ('<'*'>') target=${target#'<'}
                          target=${target%'>'} ;;
             esac
 
-            case $target in *'#'*) target=${target%%'#'*} ;; esac
-            case $target in *'?'*) target=${target%%'?'*} ;; esac
+            case $target in (*'#'*) target=${target%%'#'*} ;; esac
+            case $target in (*'?'*) target=${target%%'?'*} ;; esac
 
             case $target in
-                ''|'#'*|*:*|/*) continue ;;
+                (''|'#'*|*:*|/*) continue ;;
             esac
 
             if [ ! -e "$dir/$target" ]; then
