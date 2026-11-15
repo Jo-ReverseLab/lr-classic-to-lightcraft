@@ -37,6 +37,7 @@
     "spots": 0,
     "unmapped": [],
     "unmapped_count": 0,
+    "unmapped_photos": {},
     "white_balance_not_carried": 0,
     "written": 0
   },

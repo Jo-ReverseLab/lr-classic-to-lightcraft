@@ -13,6 +13,9 @@ The first release is 0.1.0.
   starts or ends with white space. LightCraft trims keyword names, so such a
   keyword arrives without the spaces; this is now reported instead of
   happening silently (#4).
+- `develop.unmapped_photos` in the report: every development field that is
+  not carried over, with the number of photos it affects. The existing
+  `develop.unmapped` list stays capped at 20 names (#7).
 
 ### Changed
 

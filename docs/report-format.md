@@ -151,6 +151,7 @@ rendering value.
 | `develop.written` | integer | always | photos whose develop commands all succeeded (0 in a dry run) |
 | `develop.unmapped` | array of strings | always | distinct field names that could not be carried over, sorted, at most 20 |
 | `develop.unmapped_count` | integer | always | full number of distinct unmapped names, also above the cap |
+| `develop.unmapped_photos` | object | always | every unmapped field name (sorted, not capped) with the number of converted photos that carry it; names and counts only |
 | `develop.not_applied` | integer | always | known photos whose settings changed in Lightroom and were left alone |
 | `develop.overwritten` | integer | always | photos rewritten because `--overwrite-develop` was given |
 | `develop.camera_profiles` | object | always, may be `{}` | profile name → number of converted photos, sorted, at most 20 entries |

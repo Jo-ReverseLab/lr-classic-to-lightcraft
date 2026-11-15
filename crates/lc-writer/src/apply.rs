@@ -231,9 +231,10 @@ pub struct ApplySummary {
     pub develop_not_applied: usize,
     /// Photos written because `--overwrite-develop` was given.
     pub develop_overwritten: usize,
-    /// Distinct names of catalog fields that could not be carried over,
-    /// sorted. Only names, never values.
-    pub develop_unmapped: Vec<String>,
+    /// Names of catalog fields that could not be carried over, sorted, with
+    /// the number of converted photos that carry each. Only names and
+    /// counts, never values.
+    pub develop_unmapped: BTreeMap<String, usize>,
     /// Converted photos per camera profile name, ordered by name. Names and
     /// counts only, never rendering values.
     pub develop_camera_profiles: BTreeMap<String, usize>,
@@ -353,7 +354,7 @@ pub fn apply_partial(
             develop_planned: plan.develop_planned(),
             develop_not_applied: plan.develop_not_applied(),
             develop_overwritten: plan.develop_overwritten(),
-            develop_unmapped: plan.develop_unmapped().to_vec(),
+            develop_unmapped: plan.develop_unmapped().clone(),
             develop_camera_profiles: plan.develop_camera_profiles().clone(),
             develop_photos_with_profile: plan.develop_photos_with_profile(),
             develop_masks: plan.develop_masks(),

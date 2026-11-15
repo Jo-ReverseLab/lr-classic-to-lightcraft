@@ -521,6 +521,7 @@
     "written": 0,
     "unmapped": [],
     "unmapped_count": 0,
+    "unmapped_photos": {},
     "not_applied": 0,
     "overwritten": 0,
     "camera_profiles": {},

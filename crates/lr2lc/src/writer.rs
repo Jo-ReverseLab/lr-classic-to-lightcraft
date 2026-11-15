@@ -39,6 +39,9 @@ pub struct DevelopJson {
     pub unmapped: Vec<String>,
     /// Number of distinct unmapped field names, also above the listing cap.
     pub unmapped_count: usize,
+    /// Every unmapped field name with the number of converted photos that
+    /// carry it, sorted by name, not capped. Names and counts only.
+    pub unmapped_photos: BTreeMap<String, usize>,
     /// Known photos whose settings changed in Lightroom and were left alone
     /// because `--overwrite-develop` was not given.
     pub not_applied: usize,
@@ -106,7 +109,7 @@ fn develop_json(
     photos: usize,
     planned: usize,
     written: usize,
-    unmapped: &[String],
+    unmapped: &BTreeMap<String, usize>,
     not_applied: usize,
     overwritten: usize,
     camera_profiles: &BTreeMap<String, usize>,
@@ -119,8 +122,9 @@ fn develop_json(
         photos,
         planned,
         written,
-        unmapped: unmapped.iter().take(UNMAPPED_LIMIT).cloned().collect(),
+        unmapped: unmapped.keys().take(UNMAPPED_LIMIT).cloned().collect(),
         unmapped_count: unmapped.len(),
+        unmapped_photos: unmapped.clone(),
         not_applied,
         overwritten,
         camera_profiles: camera_profiles

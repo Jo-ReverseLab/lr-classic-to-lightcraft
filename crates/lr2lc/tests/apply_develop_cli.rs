@@ -373,6 +373,11 @@ fn unmapped_fields_are_listed_by_name_only_and_capped_at_twenty() {
     assert_eq!(n(&d["unmapped_count"]), 25);
     let listed = d["unmapped"].as_array().unwrap();
     assert_eq!(listed.len(), 20, "the detail is capped: {listed:?}");
+    // The photo counts are not capped: every name, each on its one photo.
+    let per_name = d["unmapped_photos"].as_object().unwrap();
+    assert_eq!(per_name.len(), 25, "{per_name:?}");
+    assert!(per_name.values().all(|v| v == 1), "{per_name:?}");
+    assert!(per_name.contains_key("ZzMystery24"));
     let names: Vec<&str> = listed.iter().filter_map(Value::as_str).collect();
     let mut sorted = names.clone();
     sorted.sort_unstable();

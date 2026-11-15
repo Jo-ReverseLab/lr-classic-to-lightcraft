@@ -354,6 +354,7 @@ const DEVELOP_KEYS: &[&str] = &[
     "written",
     "unmapped",
     "unmapped_count",
+    "unmapped_photos",
     "not_applied",
     "overwritten",
     "camera_profiles",

@@ -311,9 +311,10 @@ pub struct Plan {
     develop_not_applied: usize,
     /// Photos written because `overwrite_develop` was given.
     develop_overwritten: usize,
-    /// Distinct names of catalog fields that could not be carried over,
-    /// sorted, without duplicates. Only names, never values.
-    develop_unmapped: Vec<String>,
+    /// Names of catalog fields that could not be carried over, each with
+    /// the number of converted photos that carry it. Only names and counts,
+    /// never values.
+    develop_unmapped: BTreeMap<String, usize>,
     /// Converted photos per camera profile name, ordered by name. Names and
     /// counts only, never rendering values.
     develop_camera_profiles: BTreeMap<String, usize>,
@@ -515,9 +516,10 @@ impl Plan {
         self.develop_overwritten
     }
 
-    /// Distinct names of catalog fields that could not be carried over,
-    /// sorted. Only names, never values.
-    pub fn develop_unmapped(&self) -> &[String] {
+    /// Names of catalog fields that could not be carried over, sorted, with
+    /// the number of converted photos that carry each. Only names and
+    /// counts, never values.
+    pub fn develop_unmapped(&self) -> &BTreeMap<String, usize> {
         &self.develop_unmapped
     }
 
@@ -1029,8 +1031,10 @@ fn plan_photos(
             if !develop.spots.is_empty() {
                 out.develop_spots += 1;
             }
-            out.develop_unmapped
-                .extend(develop.unmapped.iter().cloned());
+            let names: BTreeSet<&String> = develop.unmapped.iter().collect();
+            for name in names {
+                *out.develop_unmapped.entry(name.clone()).or_default() += 1;
+            }
             if develop.white_balance.hint != WhiteBalanceHint::None {
                 out.develop_white_balance_not_carried += 1;
             }
@@ -1130,8 +1134,6 @@ fn plan_photos(
             plan_develop(gid, state.photo(gid), develop, input.overwrite_develop, out);
         }
     }
-    out.develop_unmapped.sort();
-    out.develop_unmapped.dedup();
     // Deterministic report order: by photo, then by the fixed field order.
     out.conflicts
         .sort_by_key(|c| (c.photo, field_order(&c.field)));
