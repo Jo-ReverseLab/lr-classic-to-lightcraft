@@ -87,6 +87,7 @@ fn small_catalog_has_zero_counts() {
         "no_parents_on_export",
         "no_synonyms_on_export",
         "unknown_type",
+        "trimmed",
     ] {
         assert_eq!(k[field], 0, "{field}");
     }
@@ -96,7 +97,7 @@ fn small_catalog_has_zero_counts() {
     assert!(
         text.lines().any(|l| l.trim()
             == "keyword attributes: persons 0, not exported 0, no parents on export 0, \
-                no synonyms on export 0, unknown type 0, unused 1"),
+                no synonyms on export 0, unknown type 0, unused 1, trimmed by LightCraft 0"),
         "stdout: {text}"
     );
 }
@@ -107,7 +108,7 @@ fn stdout_has_the_attribute_line() {
     let (text, _, _) = run_report(&cat, &[]);
     let want = format!(
         "keyword attributes: persons {}, not exported {}, no parents on export {}, \
-         no synonyms on export {}, unknown type {}, unused {}",
+         no synonyms on export {}, unknown type {}, unused {}, trimmed by LightCraft 0",
         keyword_attr::PERSONS,
         keyword_attr::NOT_EXPORTED,
         keyword_attr::NO_PARENTS,

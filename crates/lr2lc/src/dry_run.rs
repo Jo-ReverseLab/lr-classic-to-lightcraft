@@ -171,6 +171,9 @@ pub struct KeywordAttributes {
     pub unknown_type: usize,
     /// Keywords without any converted assignment.
     pub unused: usize,
+    /// Keywords whose own name starts or ends with white space. LightCraft
+    /// trims keyword names, so they arrive without it.
+    pub trimmed: usize,
 }
 
 impl KeywordAttributes {
@@ -185,6 +188,7 @@ impl KeywordAttributes {
             no_synonyms_on_export: n(&|k| !k.export_synonyms),
             unknown_type: data.unknown_type,
             unused: n(&|k| !used.contains(k)),
+            trimmed: n(&|k| k.name().trim() != k.name()),
         }
     }
 }
@@ -530,8 +534,24 @@ mod tests {
                 no_synonyms_on_export: 1,
                 unknown_type: 1,
                 unused: 2,
+                trimmed: 0,
             }
         );
+    }
+
+    #[test]
+    fn counts_keyword_names_with_outer_white_space() {
+        let spaced = Keyword::new(vec!["  spaced  ".to_string()]).unwrap();
+        let inner = Keyword::new(vec!["two words".to_string()]).unwrap();
+        let child = Keyword::new(vec!["  parent ".to_string(), "child".to_string()]).unwrap();
+        let data = KeywordData {
+            keywords: vec![spaced, inner, child],
+            assignments: BTreeMap::new(),
+            synonym_report: Report::new(),
+            unknown_type: 0,
+        };
+        // Only a keyword's own name counts; a spaced parent is its own entry.
+        assert_eq!(KeywordAttributes::count(&data).trimmed, 1);
     }
 
     #[test]

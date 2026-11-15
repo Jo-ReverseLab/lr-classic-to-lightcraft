@@ -11,7 +11,7 @@ keyword assignments: read 37, would convert 21, skipped 16
 keyword synonyms: read 6, would convert 2, skipped 4
 videos: skipped 3
 stack details: collapsed 1 (written expanded), no top photo 1
-keyword attributes: persons 1, not exported 1, no parents on export 0, no synonyms on export 0, unknown type 0, unused 2
+keyword attributes: persons 1, not exported 1, no parents on export 0, no synonyms on export 0, unknown type 0, unused 2, trimmed by LightCraft 0
 skipped photos:
        3 x video files are not supported by LightCraft
        2 x original file is missing

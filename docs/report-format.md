@@ -208,8 +208,9 @@ Carries the area fields plus:
 | `keywords.no_synonyms_on_export` | integer | exported without their synonyms |
 | `keywords.unknown_type` | integer | type neither plain keyword nor person |
 | `keywords.unused` | integer | converted keywords without a converted assignment |
+| `keywords.trimmed` | integer | converted keywords whose own name starts or ends with white space; LightCraft trims keyword names, so they arrive without it (assignments still match) |
 
-These six are overlapping subsets of `keywords.converted` (a keyword can be in
+These seven are overlapping subsets of `keywords.converted` (a keyword can be in
 several).
 
 ## writer

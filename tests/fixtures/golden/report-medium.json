@@ -68,6 +68,7 @@
     "persons": 0,
     "read": 100,
     "skipped": [],
+    "trimmed": 0,
     "unknown_type": 0,
     "unused": 0
   },

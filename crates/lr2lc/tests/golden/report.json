@@ -376,7 +376,8 @@
     "no_parents_on_export": 0,
     "no_synonyms_on_export": 0,
     "unknown_type": 0,
-    "unused": 2
+    "unused": 2,
+    "trimmed": 0
   },
   "keyword_assignments": {
     "read": 37,

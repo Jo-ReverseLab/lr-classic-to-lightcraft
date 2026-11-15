@@ -181,6 +181,7 @@ pub struct KeywordsJson<'a> {
     pub no_synonyms_on_export: usize,
     pub unknown_type: usize,
     pub unused: usize,
+    pub trimmed: usize,
 }
 
 /// One skipped element: the free text and its machine-readable code.
@@ -256,6 +257,7 @@ pub fn report_json_with(
             no_synonyms_on_export: outcome.keyword_attributes.no_synonyms_on_export,
             unknown_type: outcome.keyword_attributes.unknown_type,
             unused: outcome.keyword_attributes.unused,
+            trimmed: outcome.keyword_attributes.trimmed,
         },
         keyword_assignments: AreaJson::new(&outcome.keyword_assignments),
         keyword_synonyms: AreaJson::new(&outcome.keyword_synonyms),
@@ -396,13 +398,15 @@ fn stack_counts_line(c: &StackCounts) -> String {
 fn attributes_line(a: &KeywordAttributes) -> String {
     format!(
         "keyword attributes: persons {}, not exported {}, no parents on export {}, \
-         no synonyms on export {}, unknown type {}, unused {}",
+         no synonyms on export {}, unknown type {}, unused {}, \
+         trimmed by LightCraft {}",
         a.persons,
         a.not_exported,
         a.no_parents_on_export,
         a.no_synonyms_on_export,
         a.unknown_type,
-        a.unused
+        a.unused,
+        a.trimmed
     )
 }
 
@@ -560,6 +564,7 @@ mod tests {
                 no_synonyms_on_export: 4,
                 unknown_type: 5,
                 unused: 6,
+                trimmed: 7,
             },
             keyword_assignments,
             keyword_synonyms,
@@ -723,7 +728,8 @@ mod tests {
         assert!(
             text.lines().any(|l| l
                 == "keyword attributes: persons 1, not exported 2, no parents on export 3, \
-                    no synonyms on export 4, unknown type 5, unused 6"),
+                    no synonyms on export 4, unknown type 5, unused 6, \
+                    trimmed by LightCraft 7"),
             "{text}"
         );
         let v: serde_json::Value = serde_json::from_str(&report_json(&o)).unwrap();
@@ -735,6 +741,7 @@ mod tests {
         assert_eq!(k["no_synonyms_on_export"], 4);
         assert_eq!(k["unknown_type"], 5);
         assert_eq!(k["unused"], 6);
+        assert_eq!(k["trimmed"], 7);
     }
 
     #[test]

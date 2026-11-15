@@ -7,6 +7,13 @@ The first release is 0.1.0.
 
 ## [Unreleased]
 
+### Added
+
+- `keywords.trimmed` in the report and the summary: keywords whose name
+  starts or ends with white space. LightCraft trims keyword names, so such a
+  keyword arrives without the spaces; this is now reported instead of
+  happening silently (#4).
+
 ### Fixed
 
 - Photos whose files have identical bytes at different paths (the same file

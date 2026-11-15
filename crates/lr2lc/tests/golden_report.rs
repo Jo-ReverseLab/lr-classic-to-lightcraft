@@ -253,6 +253,7 @@ const KEYWORD_KEYS: &[&str] = &[
     "no_synonyms_on_export",
     "unknown_type",
     "unused",
+    "trimmed",
 ];
 
 const PHOTO_AREA_KEYS: &[&str] = &[

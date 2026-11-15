@@ -323,7 +323,8 @@ Writes a machine-readable report to `FILE` after the run:
     "no_parents_on_export": 0,
     "no_synonyms_on_export": 0,
     "unknown_type": 0,
-    "unused": 1
+    "unused": 1,
+    "trimmed": 0
   },
   "keyword_assignments": {
     "read": 2,
