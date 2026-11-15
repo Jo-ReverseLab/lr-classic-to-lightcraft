@@ -120,6 +120,7 @@ Carries the area fields (`read`, `converted`, `skipped`, `by_code`) plus:
 | `photos.labels.custom` | integer | label not in the chosen set; converted without a label |
 | `photos.labels.label_set` | string | `auto`, `en`, `de` or `file` |
 | `photos.labels.matched_sets` | array | under `auto`, the standard sets that matched at least one name, in the order `en`, `de`; empty for a fixed set |
+| `photos.labels.detected_set` | string or null | under `auto`, the set used: `en` or `de`, whichever names label more converted photos (`en` on a tie); only its names map to colours, like Lightroom with that set active. `null` when no standard name matched and for a fixed set |
 | `photos.labels.custom_reasons` | array | one entry per custom photo, ascending by Lightroom id |
 
 Each `custom_reasons` entry is `{"reason": string}`. The reason is the fixed

@@ -107,6 +107,8 @@ pub struct LabelsJson {
     /// Under `auto`, the standard sets whose names matched at least one
     /// converted photo, in the order `en`, `de`; empty for a fixed set.
     pub matched_sets: Vec<&'static str>,
+    /// Under `auto`, the standard set used (`en`, `de`), else `null`.
+    pub detected_set: Option<&'static str>,
     /// One entry per custom photo, ascending by id.
     pub custom_reasons: Vec<ReasonJson>,
 }
@@ -129,6 +131,7 @@ impl From<&LabelCounts> for LabelsJson {
             custom: l.custom,
             label_set: l.set,
             matched_sets: l.matched_sets.clone(),
+            detected_set: l.detected_set,
             custom_reasons: l
                 .custom_ids
                 .iter()
@@ -423,8 +426,12 @@ fn ratings_line(ratings: &[usize; 6]) -> String {
 /// Formats the label counts as
 /// `labels: red R, yellow Y, green G, blue B, purple P, none N, custom C, set S`.
 fn labels_line(l: &LabelCounts) -> String {
+    let detected = l
+        .detected_set
+        .map(|set| format!(" (detected {set})"))
+        .unwrap_or_default();
     format!(
-        "labels: red {}, yellow {}, green {}, blue {}, purple {}, none {}, custom {}, set {}",
+        "labels: red {}, yellow {}, green {}, blue {}, purple {}, none {}, custom {}, set {}{detected}",
         l.red, l.yellow, l.green, l.blue, l.purple, l.none, l.custom, l.set
     )
 }

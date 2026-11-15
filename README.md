@@ -247,12 +247,17 @@ of a JSON file such as `{"My red": "red", "Todo": "yellow"}` whose values
 are `red`, `yellow`, `green`, `blue` or `purple`. Names are compared exactly,
 including letter case, spaces and Unicode form.
 
-With `auto`, the English and German standard names count together: a label
-that equals one of them exactly maps to its colour, whatever the other
-labels are. Every other non-empty label is a custom label of its own photo
-(converted without a label, reported by id only). Nothing else is guessed:
-there is no recommendation. A missing or invalid file is a command-line
-error (exit code 2).
+With `auto`, lr2lc shows what Lightroom shows. Lightroom gives a label its
+colour only when the stored text equals a name of the label set that is
+active in Lightroom; every other text appears without colour (for example
+`Red` in a German Lightroom). The active set is not stored in the catalog,
+so `auto` detects it: the English or German standard set, whichever names
+label more converted photos, English on a tie. Only that set's names map to
+colours; every other non-empty label, a name of the other set included, is
+a custom label of its own photo (converted without a label, reported by id
+only). The summary names the detected set (`set auto (detected de)`). If
+the detection is wrong for your catalog, pass `--label-set en` or `de`. A
+missing or invalid file is a command-line error (exit code 2).
 
 French and Spanish standard names are not in `auto` yet: they are pending a
 citable Adobe source for each name. See `docs/research/label-names.md` for
@@ -279,7 +284,7 @@ Writes a machine-readable report to `FILE` after the run:
     "flags": { "pick": 1, "reject": 0, "none": 1, "unknown": 0 },
     "labels": {
       "red": 1, "yellow": 0, "green": 0, "blue": 0, "purple": 0,
-      "none": 0, "custom": 1, "label_set": "en", "matched_sets": [],
+      "none": 0, "custom": 1, "label_set": "en", "matched_sets": [], "detected_set": null,
       "custom_reasons": [{ "reason": "photo 5: custom label not in label set" }]
     }
   },
@@ -358,7 +363,8 @@ counts the converted photos per flag; `none` does not include `unknown`, so
 the four counts add up to `photos.converted`. `photos.labels` counts the
 converted photos per colour label, names the label set (`auto`, `en`, `de`
 or `file`), and under `auto` lists the standard sets that matched at least
-one name in `matched_sets` (order `en`, `de`; empty for a fixed set); it
+one name in `matched_sets` (order `en`, `de`; empty for a fixed set) and
+the set it used in `detected_set` (`en`, `de` or `null`); it
 lists each photo with a custom label; its seven counts add
 up to `photos.converted`. The six attribute
 counts in `keywords` cover converted keywords only, like the summary line.

@@ -88,6 +88,7 @@
       "blue": 0,
       "custom": 0,
       "custom_reasons": [],
+      "detected_set": null,
       "green": 0,
       "label_set": "auto",
       "matched_sets": [],

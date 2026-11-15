@@ -10,11 +10,11 @@
 //! Names are looked up byte for byte (case, spaces, Unicode form).
 //!
 //! Resolution:
-//! - `auto`: the standard names of English and German count together
-//!   (Red/Rot, Yellow/Gelb, Green/Grün, Blue/Blau, Purple/Lila). A label
-//!   that equals one of them exactly maps to its colour, whatever the other
-//!   labels are. Every other non-empty label is a custom label of its own
-//!   photo. Nothing else is guessed. Labels of skipped photos are not
+//! - `auto`: like Lightroom, which colours only names of its active label
+//!   set. The set is detected: English or German, whichever standard names
+//!   label more converted photos (English on a tie). Only that set's names
+//!   map; every other non-empty label, a name of the other set included, is
+//!   a custom label of its own photo. Labels of skipped photos are not
 //!   considered.
 //! - `en` / `de` / file: strict, unchanged: only names of that set map;
 //!   names not in it are custom labels. The `label_set` is "en", "de" or
@@ -27,14 +27,16 @@
 //! string `label_set` ("auto" under auto, otherwise "en", "de" or "file"),
 //! array `matched_sets` (under auto: the sets whose standard names were
 //! matched at least once, in the order "en", "de"; empty otherwise; only set
-//! designations, never catalog values), and `custom_reasons`, an array of
+//! designations, never catalog values), `detected_set` (under auto the set
+//! used, "en" or "de", else null), and `custom_reasons`, an array of
 //! objects `{"reason": "photo <id>: custom label not in label set"}`,
 //! ascending by id, one per custom photo, no names. `none` counts empty and
 //! NULL labels. `photos.skipped` is not changed by custom labels.
 //!
 //! stdout: always exactly one line
 //! `labels: red R, yellow Y, green G, blue B, purple P, none N, custom C, set S`
-//! (S = auto, en, de or file). There is no recommendation line any more
+//! (S = auto, en, de or file), under auto followed by ` (detected D)` when a
+//! set was detected. There is no recommendation line any more
 //! (the line mentioning `--label-set` is absent in every case).
 //!
 //! Label text never appears in stdout, stderr or report.json.
@@ -122,14 +124,18 @@ fn check_with(v: &Value, text: &str, counts: Counts, set: &str, matched: &[&str]
     assert_eq!(l["label_set"], set);
     assert_eq!(
         l.as_object().unwrap().len(),
-        10,
-        "fields: 7 counters, label_set, matched_sets, custom_reasons: {l}"
+        11,
+        "fields: 7 counters, label_set, matched_sets, detected_set, custom_reasons: {l}"
     );
     assert_eq!(l["matched_sets"], json!(matched), "matched_sets: {l}");
     assert_eq!(counts.iter().sum::<i64>(), label_edge::CONVERTED);
     assert_eq!(v["photos"]["converted"], label_edge::CONVERTED);
+    let detected = l["detected_set"]
+        .as_str()
+        .map(|d| format!(" (detected {d})"))
+        .unwrap_or_default();
     let want = format!(
-        "labels: red {}, yellow {}, green {}, blue {}, purple {}, none {}, custom {}, set {set}",
+        "labels: red {}, yellow {}, green {}, blue {}, purple {}, none {}, custom {}, set {set}{detected}",
         counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], counts[6]
     );
     assert_eq!(
@@ -201,22 +207,26 @@ fn auto_maps_german_names_only_with_nfc_gruen() {
 }
 
 #[test]
-fn auto_maps_german_and_english_names_together() {
-    // 4 Red, 5 Rot, 6 Green, 7 Blau, 8 Purple, 9 Gelb.
+fn auto_maps_only_the_detected_set_on_a_tie_english() {
+    // 4 Red, 5 Rot, 6 Green, 7 Blau, 8 Purple, 9 Gelb: three names each, so
+    // English wins the tie and the German names stay without colour.
     let (_d, cat) = fixture(Fixture::Mixed);
     let (text, v, _) = ok(&cat, &[]);
-    check_with(&v, &text, EN, "auto", &["en", "de"]);
-    assert!(custom_ids(&v).is_empty());
+    check_with(&v, &text, [1, 0, 1, 0, 1, 11, 3], "auto", &["en", "de"]);
+    assert_eq!(v["photos"]["labels"]["detected_set"], "en");
+    assert_eq!(custom_ids(&v), [5, 7, 9]);
     assert!(!has_recommendation(&text), "{text}");
 }
 
 #[test]
 fn auto_reports_custom_names_next_to_standard_ones() {
-    // 4 Rot, 5 Red, 6 custom, 7 Gelb, 8 Purple, 9 Lila.
+    // 4 Rot, 5 Red, 6 custom, 7 Gelb, 8 Purple, 9 Lila: German names on
+    // three photos, English on two, so German is the detected set.
     let (_d, cat) = fixture(Fixture::MixedCustom);
     let (text, v, _) = ok(&cat, &[]);
-    check_with(&v, &text, [2, 1, 0, 0, 2, 11, 1], "auto", &["en", "de"]);
-    assert_eq!(custom_ids(&v), [6]);
+    check_with(&v, &text, [1, 1, 0, 0, 1, 11, 3], "auto", &["en", "de"]);
+    assert_eq!(v["photos"]["labels"]["detected_set"], "de");
+    assert_eq!(custom_ids(&v), [5, 6, 8]);
     assert!(!has_recommendation(&text), "{text}");
 }
 

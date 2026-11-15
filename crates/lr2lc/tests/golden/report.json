@@ -62,6 +62,7 @@
       "matched_sets": [
         "en"
       ],
+      "detected_set": "en",
       "custom_reasons": []
     },
     "captions": 1,

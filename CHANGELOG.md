@@ -14,6 +14,15 @@ The first release is 0.1.0.
   keyword arrives without the spaces; this is now reported instead of
   happening silently (#4).
 
+### Changed
+
+- `--label-set auto` now does what Lightroom shows: it detects the active
+  label set (English or German, whichever names label more photos) and maps
+  only that set's names to colours. A name of the other set, such as `Red`
+  in a German catalog, stays without colour and is reported as custom, as in
+  Lightroom. New report field `photos.labels.detected_set`; the summary line
+  names the detected set (#5).
+
 ### Fixed
 
 - Photos whose files have identical bytes at different paths (the same file

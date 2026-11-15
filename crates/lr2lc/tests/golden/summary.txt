@@ -110,7 +110,7 @@ skip codes keyword synonyms:
        1 x keyword_unknown
 ratings: 0: 4, 1: 3, 2: 2, 3: 3, 4: 2, 5: 1
 flags: pick 1, reject 1, none 10, unknown 3
-labels: red 1, yellow 0, green 1, blue 1, purple 1, none 11, custom 0, set auto
+labels: red 1, yellow 0, green 1, blue 1, purple 1, none 11, custom 0, set auto (detected en)
 captions: 1
 copyrights: 1
 creators: 3

@@ -283,6 +283,7 @@ const LABEL_KEYS: &[&str] = &[
     "custom",
     "label_set",
     "matched_sets",
+    "detected_set",
     "custom_reasons",
 ];
 

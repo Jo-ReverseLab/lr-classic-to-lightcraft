@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 /// The `--label-set` value as given on the command line.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum LabelChoice {
-    /// Detect the English or German set; guess nothing otherwise.
+    /// Detect the English or German set from the catalog's labels.
     #[default]
     Auto,
     En,
@@ -123,6 +123,10 @@ pub struct LabelCounts {
     /// Under `auto`, the standard sets whose names matched at least one
     /// converted photo, in the order `en`, `de`. Empty for a fixed set.
     pub matched_sets: Vec<&'static str>,
+    /// Under `auto`, the standard set used (`en` or `de`): the one whose
+    /// names label the most converted photos, `en` on a tie. `None` when no
+    /// standard name matched, and for a fixed set.
+    pub detected_set: Option<&'static str>,
 }
 
 /// Sets the label of each photo from `raw` (`(id, text)` pairs of
@@ -131,12 +135,14 @@ pub struct LabelCounts {
 /// Only labels of the given photos count, so labels of skipped photos
 /// never influence the automatic detection.
 ///
-/// With `auto`, each label is matched against the English and German
-/// standard names together: a name that equals one of them exactly maps to
-/// its colour, whatever the other labels are. The standard names do not
-/// overlap, so a name matches at most one set, and `matched_sets` records
-/// which set(s) were used. Any other non-empty label is a custom label of
-/// its own photo. Nothing else is guessed.
+/// With `auto`, lr2lc does what Lightroom shows: Lightroom colours a label
+/// only when its text equals a name of the label set active in Lightroom,
+/// and shows every other text without colour. The active set is not stored
+/// in the catalog, so it is detected: the standard set (English or German)
+/// whose names label the most converted photos, English on a tie. Only its
+/// names map to colours; a name of the other set is a custom label like any
+/// other text. `matched_sets` lists every standard set that matched at least
+/// one name, `detected_set` the one used. Nothing else is guessed.
 pub fn apply(photos: &mut [Photo], raw: &[(i64, String)], mode: &LabelMode) -> LabelCounts {
     let ids: HashSet<i64> = photos.iter().map(|p| p.lightroom_id).collect();
     let text: HashMap<i64, &str> = raw
@@ -156,6 +162,24 @@ pub fn apply(photos: &mut [Photo], raw: &[(i64, String)], mode: &LabelMode) -> L
     };
     let mut matched_en = false;
     let mut matched_de = false;
+    let detected = if matches!(mode, LabelMode::Auto) {
+        let (mut on_en, mut on_de) = (0usize, 0usize);
+        for photo in photos.iter() {
+            if let Some(t) = text.get(&photo.lightroom_id) {
+                on_en += usize::from(en.resolve(t).is_some());
+                on_de += usize::from(de.resolve(t).is_some());
+            }
+        }
+        matched_en = on_en > 0;
+        matched_de = on_de > 0;
+        match (on_en, on_de) {
+            (0, 0) => None,
+            (en_count, de_count) if de_count > en_count => Some(("de", &de)),
+            _ => Some(("en", &en)),
+        }
+    } else {
+        None
+    };
     for photo in photos.iter_mut() {
         photo.label = None;
         let Some(t) = text.get(&photo.lightroom_id) else {
@@ -163,10 +187,7 @@ pub fn apply(photos: &mut [Photo], raw: &[(i64, String)], mode: &LabelMode) -> L
             continue;
         };
         let resolved = match mode {
-            LabelMode::Auto => en
-                .resolve(t)
-                .inspect(|_| matched_en = true)
-                .or_else(|| de.resolve(t).inspect(|_| matched_de = true)),
+            LabelMode::Auto => detected.and_then(|(_, set)| set.resolve(t)),
             LabelMode::Fixed(..) => fixed_set.as_ref().and_then(|s| s.resolve(t)),
         };
         match resolved {
@@ -190,6 +211,7 @@ pub fn apply(photos: &mut [Photo], raw: &[(i64, String)], mode: &LabelMode) -> L
             matched.push("de");
         }
         counts.matched_sets = matched;
+        counts.detected_set = detected.map(|(name, _)| name);
     }
     counts
 }
@@ -245,12 +267,29 @@ mod tests {
     }
 
     #[test]
-    fn auto_maps_mixed_english_and_german_together() {
+    fn auto_uses_only_the_set_most_photos_use() {
+        // German Lightroom: "Red" is shown without colour, like any custom text.
+        let mut p = photos(&[1, 2, 3]);
+        let c = apply(
+            &mut p,
+            &raw(&[(1, "Red"), (2, "Rot"), (3, "Blau")]),
+            &LabelMode::Auto,
+        );
+        assert_eq!((c.red, c.blue, c.custom, c.set), (1, 1, 1, "auto"));
+        assert_eq!(c.matched_sets, ["en", "de"]);
+        assert_eq!(c.detected_set, Some("de"));
+        assert_eq!(p[0].label, None);
+        assert_eq!(c.custom_ids, [1]);
+    }
+
+    #[test]
+    fn auto_prefers_english_on_a_tie() {
         let mut p = photos(&[1, 2]);
         let c = apply(&mut p, &raw(&[(2, "Rot"), (1, "Red")]), &LabelMode::Auto);
-        assert_eq!((c.red, c.custom, c.set), (2, 0, "auto"));
-        assert_eq!(c.matched_sets, ["en", "de"]);
-        assert!(p.iter().all(|p| p.label == Some(ColorLabel::Red)));
+        assert_eq!((c.red, c.custom), (1, 1));
+        assert_eq!(c.detected_set, Some("en"));
+        assert_eq!(p[0].label, Some(ColorLabel::Red));
+        assert_eq!(p[1].label, None);
     }
 
     #[test]
