@@ -6,8 +6,6 @@
 //! that the run either succeeds (with damaged rows skipped and a reason code,
 //! and `read = converted + skipped`) or fails with a clear [`ReadError`],
 //! never a panic.
-//!
-//! See `tasks/reports/t16-hostile-catalogs.md` for the per-case table.
 
 use lr_reader::{Catalog, ReadError};
 use lrcat_fixtures::hostile::{HostileCase, write_hostile_catalog};

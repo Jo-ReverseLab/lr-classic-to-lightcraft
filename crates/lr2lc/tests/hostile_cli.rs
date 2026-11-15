@@ -3,7 +3,7 @@
 //! report), a read error (1), or a usage error (2) — never a crash signal.
 //!
 //! Companion to `crates/lr-reader/tests/hostile.rs`, which checks the reader
-//! pipeline directly. See `tasks/reports/t16-hostile-catalogs.md`.
+//! pipeline directly.
 
 use lrcat_fixtures::hostile::{HostileCase, write_hostile_catalog};
 use std::process::Command;

@@ -3,8 +3,7 @@
 //! Every case is pure: no file system is touched. The cases pin the documented
 //! rule in `crates/model/src/mapping.rs` and the two defects fixed alongside it
 //! (`..` must not climb out of the new prefix; two photos must not silently
-//! merge onto the same path). See `tasks/reports/t17-path-mapping.md` and the
-//! README section "Path mapping".
+//! merge onto the same path). See the README section "Path mapping".
 
 use model::{MappedPath, PathMapping, PathMappings};
 use std::path::Path;
