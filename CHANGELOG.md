@@ -33,6 +33,9 @@ The first release is 0.1.0.
 
 ### Changed
 
+- The conversion now lives in a library crate, `lr2lc-core` (`Job`,
+  `prepare`, `finish`, typed `RunError`), shared by the command line and a
+  coming GUI. Output, report and exit codes are unchanged.
 - A named white-balance mode (As Shot, Auto, Daylight, …) no longer counts
   as `white_balance_not_carried`: the mode carries it, as in LightCraft's own
   Lightroom import. `Temperature`, `Tint` and the `Incremental*` names no

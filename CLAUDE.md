@@ -33,7 +33,8 @@ Cargo workspace, edition 2024, MSRV 1.88.0, licence MIT OR Apache-2.0.
 | `crates/lr-reader` | Reads a catalog into the model: `catalog.rs` (open, version and schema checks), `folders`, `photos`, `originals` (file existence), `keywords`, `collections`, `smart` (rule parser), `stacks`, `xmp` (titles), `develop` (Lua settings parser and mapping) |
 | `crates/model` | Neutral data model, skip codes (`skip.rs`), develop model, label sets, mapping file format |
 | `crates/lc-writer` | Writes to LightCraft: `control.rs` (port client), `plan.rs` (commands per photo), `apply.rs` (execution, re-sync), `live.rs` (reads the library state), `state.rs` (mapping file `<library>.lr2lc.json`), `albums`, `smart` |
-| `crates/lr2lc` | The binary: `args.rs`, `dry_run.rs`, `writer.rs`, `output.rs` (summary), `report_file.rs` (`report.json`), `labels.rs` |
+| `crates/lr2lc-core` | Conversion core shared by CLI and GUI, prints nothing: `job.rs` (`Job`, `prepare`, `finish`, `RunError`), `dry_run.rs`, `writer.rs`, `output.rs` (summary, `report.json`), `report_file.rs`, `labels.rs` |
+| `crates/lr2lc` | The binary: `args.rs`, `main.rs` (prints, writes `--report`/`--script`, exit codes) |
 | `crates/lc-test-support` | Fake LightCraft control port for tests (not shipped) |
 | `tests/fixtures/generator` | Generates test catalogs (`lrcat-fixtures`, not shipped); see `tests/fixtures/README.md` |
 

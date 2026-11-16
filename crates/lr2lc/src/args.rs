@@ -1,6 +1,6 @@
 //! Command-line argument parsing.
 
-use crate::labels::LabelChoice;
+use lr2lc_core::labels::LabelChoice;
 use model::{PathMapping, PathMappings};
 use std::ffi::OsString;
 use std::path::PathBuf;

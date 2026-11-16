@@ -1,17 +1,12 @@
 //! Command-line tool that converts Lightroom Classic catalogs into LightCraft libraries.
 
 mod args;
-mod dry_run;
-mod labels;
-mod output;
-mod report_file;
-mod writer;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use args::{Command, RunOptions, USAGE, parse_args};
-use labels::LabelMode;
-use report_file::{Kind, ReportTarget};
-use std::collections::BTreeSet;
+use lr2lc_core::labels::LabelMode;
+use lr2lc_core::report_file::{self, Kind, ReportTarget};
+use lr2lc_core::{Job, finish, prepare};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -98,70 +93,34 @@ fn run_and_report(options: &RunOptions, labels: &LabelMode, targets: &Targets) -
 /// Runs a conversion: reads the catalog, plans the writer commands and, with
 /// `--apply`, writes them through the LightCraft control port.
 fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()> {
-    let mut outcome = dry_run::run(&options.catalog, &options.mappings, labels)?;
-    let mut input = writer::input(std::mem::take(&mut outcome.converted));
-    input.overwrite_develop = options.overwrite_develop;
-    let state = writer::load_state(options.library.as_deref())?;
-    // Without a connection the library's own keywords are unknown; the
-    // plan assumes none beyond the mapping file.
-    let plan = lc_writer::plan::plan(&input, &state, &BTreeSet::new());
+    let job = Job {
+        catalog: options.catalog.clone(),
+        mappings: options.mappings.clone(),
+        labels: labels.clone(),
+        library: options.library.clone(),
+        apply: options.apply,
+        port: options.port,
+        allow_xmp: options.allow_xmp,
+        overwrite_develop: options.overwrite_develop,
+    };
+    let prepared = prepare(&job)?;
     if let (Some(target), Some(given)) = (&targets.script, &options.script) {
-        report_file::write_as(Kind::Script, target, &plan.to_script(&state))
+        report_file::write_as(Kind::Script, target, &prepared.script())
             .with_context(|| format!("cannot write script to {}", given.display()))?;
     }
+    if job.writes_to().is_some() {
+        prepared.check_writable()?;
+    }
+    // Printed before writing, which can take a while.
+    print!("{}", prepared.catalog_summary(&job));
+    let finished = finish(&job, prepared)?;
+    print!("{}", finished.writer_summary);
 
-    let (text, json, develop, stop) = match (&options.library, options.apply) {
-        (Some(library), true) => {
-            if !outcome.catalog_unchanged {
-                bail!(
-                    "the catalog changed while it was read (checksum differs); is Lightroom \
-                     running? Nothing was written to LightCraft"
-                );
-            }
-            print!("{}", output::summary_with(&outcome, false));
-            let target = writer::Target {
-                library,
-                port: options.port,
-                allow_xmp: options.allow_xmp,
-            };
-            // A run that stops still reports what it did (Principle 4).
-            let (summary, stop) = match writer::write(&target, &input, state) {
-                Ok(summary) => (summary, None),
-                Err(aborted) => (*aborted.summary, Some(aborted.error)),
-            };
-            (
-                writer::applied_summary(&summary),
-                writer::applied_json(&summary, stop.as_ref()),
-                writer::applied_develop(&summary),
-                stop,
-            )
-        }
-        _ => {
-            print!("{}", output::summary_with(&outcome, true));
-            (
-                writer::planned_summary(&plan),
-                writer::planned_json(&plan),
-                writer::planned_develop(&plan),
-                None,
-            )
-        }
-    };
-    print!("{text}");
-
-    // Check again after writing: the catalog must still be unchanged.
-    outcome.catalog_unchanged = outcome.catalog_unchanged
-        && lr_reader::checksum(&options.catalog).ok() == Some(outcome.catalog_checksum);
     if let (Some(target), Some(given)) = (&targets.report, &options.report) {
-        let report = output::report_json_with(&outcome, !options.apply, Some(&json), &develop);
-        report_file::write(target, &report)
+        report_file::write(target, &finished.report_json())
             .with_context(|| format!("cannot write report to {}", given.display()))?;
     }
-    if let Some(e) = stop {
-        return Err(writer::stop_error(&e));
-    }
-    if !outcome.catalog_unchanged {
-        bail!("the catalog changed during the run (checksum differs); is Lightroom running?");
-    }
+    finished.result()?;
     Ok(())
 }
 
@@ -169,7 +128,7 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
 mod tests {
     use super::*;
     use crate::args::RunOptions;
-    use crate::labels::LabelChoice;
+    use lr2lc_core::labels::LabelChoice;
     use model::PathMappings;
     use std::path::PathBuf;
 

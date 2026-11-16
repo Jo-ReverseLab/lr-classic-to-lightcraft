@@ -247,6 +247,19 @@ dependencies = [
  "anyhow",
  "lc-test-support",
  "lc-writer",
+ "lr2lc-core",
+ "lrcat-fixtures",
+ "model",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "lr2lc-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "lc-writer",
  "lr-reader",
  "lrcat-fixtures",
  "model",

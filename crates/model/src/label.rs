@@ -81,7 +81,7 @@ impl LabelSet {
     /// pending a citable Adobe source (see `docs/research/label-names.md`).
     /// When a cited set is added here it is automatically covered by the
     /// `no_standard_name_maps_to_two_colors` collision test, and must be
-    /// added to the `auto` chain in `crates/lr2lc/src/labels.rs` at the same
+    /// added to the `auto` chain in `crates/lr2lc-core/src/labels.rs` at the same
     /// time so the two stay in step.
     pub fn standard_sets() -> Vec<LabelSet> {
         vec![Self::en(), Self::de()]

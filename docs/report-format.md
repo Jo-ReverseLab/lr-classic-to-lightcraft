@@ -12,10 +12,11 @@ anything is read (see the README section on `--report`).
 
 ## How the object is built
 
-The top-level object is built in `crates/lr2lc/src/output.rs`
-(`report_json_with`) and written by `report_file::write` in
+The top-level object is built in `crates/lr2lc-core/src/output.rs`
+(`report_json_with`, called by `Finished::report_json` in
+`crates/lr2lc-core/src/job.rs`) and written by `report_file::write` in
 `crates/lr2lc/src/main.rs`. The `writer` value comes from
-`crates/lr2lc/src/writer.rs` and is an untagged enum: in a dry run it holds
+`crates/lr2lc-core/src/writer.rs` and is an untagged enum: in a dry run it holds
 the planned section; with `--apply` it holds the applied section. Because it
 is untagged, the JSON carries the inner fields directly, with no
 discriminator. `writer` is always present in any report file that is written.

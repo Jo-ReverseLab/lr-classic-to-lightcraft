@@ -1,0 +1,21 @@
+[package]
+name = "lr2lc-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Conversion core of lr2lc: read a Lightroom Classic catalog, plan and write a LightCraft library"
+repository.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+lc-writer = { path = "../lc-writer" }
+lr-reader = { path = "../lr-reader" }
+model = { path = "../model" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+lrcat-fixtures = { path = "../../tests/fixtures/generator" }
+tempfile = "3"
