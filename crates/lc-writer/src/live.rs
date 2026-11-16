@@ -13,7 +13,7 @@
 
 use crate::albums::parse_album_list;
 use crate::apply::{QUERY_PAGE, id_text, parse_keyword_list, parse_query_page, same_id};
-use crate::control::{ControlClient, Outcome, WriteError};
+use crate::control::{CommandSink, Outcome, WriteError};
 use crate::state::State;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -77,7 +77,7 @@ pub struct LiveState {
 }
 
 /// Reads the library state for the photos and collections of `state`.
-pub fn read_live(client: &mut ControlClient, state: &State) -> Result<LiveState, WriteError> {
+pub fn read_live(client: &mut dyn CommandSink, state: &State) -> Result<LiveState, WriteError> {
     // LightCraft id (as text) -> global id.
     let by_id: HashMap<String, String> = state
         .photos()
@@ -138,7 +138,7 @@ type PresentPhoto = (String, Value, LivePhoto);
 /// live summary, each listed id once) and the number of distinct LightCraft
 /// ids the mapping file does not know.
 fn read_photo_streams(
-    client: &mut ControlClient,
+    client: &mut dyn CommandSink,
     by_id: &HashMap<String, String>,
 ) -> Result<(Vec<PresentPhoto>, usize), WriteError> {
     // Keyed by LightCraft id as text: a photo listed by both streams appears
@@ -178,7 +178,7 @@ fn read_photo_streams(
 
 /// Sends a read command; an answer like a writing command is a protocol
 /// error.
-fn read(client: &mut ControlClient, command: &str, params: Value) -> Result<Value, WriteError> {
+fn read(client: &mut dyn CommandSink, command: &str, params: Value) -> Result<Value, WriteError> {
     match client.execute(command, params)? {
         Outcome::Applied(value) => Ok(value),
         Outcome::AppliedNotSaved(_) => Err(WriteError::Protocol(format!(
@@ -188,7 +188,7 @@ fn read(client: &mut ControlClient, command: &str, params: Value) -> Result<Valu
 }
 
 /// The photo ids of an album, read page by page.
-fn album_members(client: &mut ControlClient, album: &Value) -> Result<Vec<Value>, WriteError> {
+fn album_members(client: &mut dyn CommandSink, album: &Value) -> Result<Vec<Value>, WriteError> {
     let mut held: Vec<Value> = Vec::new();
     loop {
         let value = read(

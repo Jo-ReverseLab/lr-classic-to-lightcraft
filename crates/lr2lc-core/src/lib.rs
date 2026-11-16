@@ -10,4 +10,7 @@ pub mod output;
 pub mod report_file;
 pub mod writer;
 
-pub use job::{ErrorKind, Finished, Job, Prepared, RunError, finish, prepare};
+pub use job::{ErrorKind, Finished, Job, Prepared, RunError, finish, finish_with, prepare};
+/// Re-exported so a front end needs no direct dependency on lc-writer to
+/// write through its own [`CommandSink`].
+pub use lc_writer::control::{CommandSink, HostSink, Request};

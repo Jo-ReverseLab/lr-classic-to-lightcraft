@@ -108,6 +108,94 @@ pub enum Outcome {
     AppliedNotSaved(String),
 }
 
+/// Where the writer sends LightCraft commands. [`ControlClient`] sends them
+/// to the control port of the running app; a host that runs LightCraft's
+/// engine in the same process can implement this on top of its own command
+/// dispatch, and tests use an in-process fake.
+///
+/// Both calls carry the same contract as the control port: a command runs
+/// at most once, an error reply is [`WriteError::Command`], and an applied
+/// command whose save failed is [`Outcome::AppliedNotSaved`].
+pub trait CommandSink {
+    /// Run one engine command (`library.import`, `photo.rate`, ...).
+    fn execute(&mut self, command: &str, params: Value) -> Result<Outcome, WriteError>;
+
+    /// Call a method of the host that is not an engine command (today only
+    /// `ui.inspect` during the pre-flight checks).
+    fn call(&mut self, method: &str, params: Value) -> Result<Outcome, WriteError>;
+}
+
+impl CommandSink for ControlClient {
+    fn execute(&mut self, command: &str, params: Value) -> Result<Outcome, WriteError> {
+        ControlClient::execute(self, command, params)
+    }
+
+    fn call(&mut self, method: &str, params: Value) -> Result<Outcome, WriteError> {
+        ControlClient::call(self, method, params)
+    }
+}
+
+/// What a [`HostSink`] is asked to run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Request<'a> {
+    /// An engine command, as `engine.execute` would run it.
+    Command(&'a str),
+    /// A method of the host itself, such as `ui.inspect`.
+    Method(&'a str),
+}
+
+/// A [`CommandSink`] for a host that runs LightCraft's commands in the same
+/// process: `run` gets the request and its params and answers with the
+/// command's result or the host's error text, exactly what the control port
+/// would put in `result` or `error`. The error text is interpreted as the
+/// control port's is: a failed save becomes [`Outcome::AppliedNotSaved`],
+/// anything else [`WriteError::Command`].
+pub struct HostSink<F> {
+    run: F,
+}
+
+impl<F> HostSink<F>
+where
+    F: FnMut(Request<'_>, Value) -> Result<Value, String>,
+{
+    pub fn new(run: F) -> Self {
+        HostSink { run }
+    }
+}
+
+impl<F> CommandSink for HostSink<F>
+where
+    F: FnMut(Request<'_>, Value) -> Result<Value, String>,
+{
+    fn execute(&mut self, command: &str, params: Value) -> Result<Outcome, WriteError> {
+        host_reply(command, (self.run)(Request::Command(command), params))
+    }
+
+    fn call(&mut self, method: &str, params: Value) -> Result<Outcome, WriteError> {
+        host_reply(method, (self.run)(Request::Method(method), params))
+    }
+}
+
+/// A host's answer as the control port would report it.
+fn host_reply(command: &str, reply: Result<Value, String>) -> Result<Outcome, WriteError> {
+    match reply {
+        Ok(result) => Ok(Outcome::Applied(result)),
+        Err(message) => failed(command, message),
+    }
+}
+
+/// An error reply: applied but not saved, or rejected.
+fn failed(command: &str, message: String) -> Result<Outcome, WriteError> {
+    if message.contains(SAVED_IN_MEMORY) {
+        Ok(Outcome::AppliedNotSaved(message))
+    } else {
+        Err(WriteError::Command {
+            command: command.to_string(),
+            message,
+        })
+    }
+}
+
 /// An open line-based connection.
 struct Connection {
     reader: BufReader<TcpStream>,
@@ -297,21 +385,14 @@ fn parse_reply(line: &str, id: u64, command: &str) -> Result<Outcome, WriteError
                 .get("error")
                 .and_then(Value::as_str)
                 .ok_or_else(|| protocol("error reply without error text"))?;
-            if message.contains(SAVED_IN_MEMORY) {
-                Ok(Outcome::AppliedNotSaved(message.to_string()))
-            } else {
-                Err(WriteError::Command {
-                    command: command.to_string(),
-                    message: message.to_string(),
-                })
-            }
+            failed(command, message.to_string())
         }
         _ => Err(protocol("reply has no boolean `ok`")),
     }
 }
 
 /// Run a read-only command and return its result.
-fn read(client: &mut ControlClient, command: &str) -> Result<Value, WriteError> {
+fn read(client: &mut dyn CommandSink, command: &str) -> Result<Value, WriteError> {
     match client.execute(command, json!({}))? {
         Outcome::Applied(value) => Ok(value),
         Outcome::AppliedNotSaved(message) => Err(WriteError::Command {
@@ -330,7 +411,7 @@ fn read(client: &mut ControlClient, command: &str) -> Result<Value, WriteError> 
 /// app reports a library problem, or XMP auto-write is on and `allow_xmp`
 /// is false.
 pub fn preflight(
-    client: &mut ControlClient,
+    client: &mut dyn CommandSink,
     library: &Path,
     allow_xmp: bool,
 ) -> Result<(), WriteError> {

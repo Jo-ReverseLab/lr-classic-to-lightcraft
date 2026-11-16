@@ -5,7 +5,7 @@ use crate::dry_run::Converted;
 use crate::output::group_reasons;
 use anyhow::{Context, Result};
 use lc_writer::apply::{Aborted, ApplySummary, apply_partial};
-use lc_writer::control::{ControlClient, WriteError, preflight};
+use lc_writer::control::{CommandSink, ControlClient, WriteError, preflight};
 use lc_writer::plan::{Conflict, MovedPhoto, Plan, RemovedPhoto, RenamedKeyword, Step, WriteInput};
 use lc_writer::state::{State, state_path};
 use model::Skipped;
@@ -726,16 +726,31 @@ pub struct Target<'a> {
 pub fn write(
     target: &Target<'_>,
     input: &WriteInput,
+    state: State,
+) -> Result<ApplySummary, Aborted> {
+    let mut client = ControlClient::connect(target.port).map_err(before_writing)?;
+    write_to(&mut client, target, input, state)
+}
+
+/// Like [`write`], through `sink` instead of a new control-port
+/// connection (`target.port` is not used).
+pub fn write_to(
+    sink: &mut dyn CommandSink,
+    target: &Target<'_>,
+    input: &WriteInput,
     mut state: State,
 ) -> Result<ApplySummary, Aborted> {
-    let before_writing = |error| Aborted {
+    let state_file = state_path(target.library);
+    preflight(sink, target.library, target.allow_xmp).map_err(before_writing)?;
+    apply_partial(sink, input, &mut state, &state_file)
+}
+
+/// A stop before anything was written: all numbers are 0.
+fn before_writing(error: WriteError) -> Aborted {
+    Aborted {
         error,
         summary: Box::default(),
-    };
-    let state_file = state_path(target.library);
-    let mut client = ControlClient::connect(target.port).map_err(before_writing)?;
-    preflight(&mut client, target.library, target.allow_xmp).map_err(before_writing)?;
-    apply_partial(&mut client, input, &mut state, &state_file)
+    }
 }
 
 /// The error message of a run that stopped, with a hint what to do.

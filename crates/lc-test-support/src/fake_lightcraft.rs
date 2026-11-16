@@ -543,6 +543,35 @@ impl FakeLightCraft {
         self.shared.library.lock().unwrap().seeds.get(&id).cloned()
     }
 
+    /// Answers one request in the same process, without the port: an
+    /// engine command when `engine` is true, a port method (`ui.inspect`)
+    /// otherwise. The request is logged as if it had come on connection 0,
+    /// so `commands()` and `methods()` see it. Idle-close and connection
+    /// drops are port behaviour and do not apply here; configured failures
+    /// do.
+    pub fn dispatch(&self, name: &str, params: Value, engine: bool) -> Result<Value, String> {
+        let request = if engine {
+            json!({"method": "engine.execute", "params": {"command": name, "params": params}})
+        } else {
+            json!({"method": name, "params": params})
+        };
+        self.shared.log.lock().unwrap().push(Received {
+            conn: 0,
+            line: request.to_string(),
+        });
+        let (command, params) = request_parts(&request);
+        let known = engine != PORT_METHODS.contains(&command.as_str());
+        let mut lib = self.shared.library.lock().unwrap();
+        lib.seen += 1;
+        if known {
+            run(&self.shared, &mut lib, &command, &params)
+        } else if engine {
+            Err(format!("unknown command: {command}"))
+        } else {
+            Err(format!("unknown method: {command}"))
+        }
+    }
+
     /// The file path a photo is linked to.
     pub fn path_of(&self, id: i64) -> Option<String> {
         let lib = self.shared.library.lock().unwrap();

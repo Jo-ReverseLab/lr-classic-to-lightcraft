@@ -7,7 +7,8 @@ use crate::dry_run::{self, Outcome};
 use crate::labels::LabelMode;
 use crate::output;
 use crate::writer::{self, DevelopJson, WriterJson};
-use lc_writer::control::WriteError;
+use lc_writer::apply::{Aborted, ApplySummary};
+use lc_writer::control::{CommandSink, WriteError};
 use lc_writer::plan::{Plan, WriteInput};
 use lc_writer::state::State;
 use model::PathMappings;
@@ -145,9 +146,30 @@ pub struct Finished {
     dry_run: bool,
 }
 
-/// Writes the plan (when `job` writes) or keeps it as the dry-run result,
-/// then checks that the catalog is still unchanged.
+/// Writes the plan (when `job` writes) through the control port on
+/// `job.port`, or keeps it as the dry-run result, then checks that the
+/// catalog is still unchanged.
 pub fn finish(job: &Job, prepared: Prepared) -> Result<Finished, RunError> {
+    finish_by(job, prepared, writer::write)
+}
+
+/// Like [`finish`], but writes through `sink`, for a host that runs
+/// LightCraft's commands itself; `job.port` is not used.
+pub fn finish_with(
+    job: &Job,
+    prepared: Prepared,
+    sink: &mut dyn CommandSink,
+) -> Result<Finished, RunError> {
+    finish_by(job, prepared, |target, input, state| {
+        writer::write_to(sink, target, input, state)
+    })
+}
+
+fn finish_by(
+    job: &Job,
+    prepared: Prepared,
+    write: impl FnOnce(&writer::Target<'_>, &WriteInput, State) -> Result<ApplySummary, Aborted>,
+) -> Result<Finished, RunError> {
     let Prepared {
         mut outcome,
         input,
@@ -168,7 +190,7 @@ pub fn finish(job: &Job, prepared: Prepared) -> Result<Finished, RunError> {
                 allow_xmp: job.allow_xmp,
             };
             // A run that stops still reports what it did (Principle 4).
-            let (summary, stop) = match writer::write(&target, &input, state) {
+            let (summary, stop) = match write(&target, &input, state) {
                 Ok(summary) => (summary, None),
                 Err(aborted) => (*aborted.summary, Some(aborted.error)),
             };

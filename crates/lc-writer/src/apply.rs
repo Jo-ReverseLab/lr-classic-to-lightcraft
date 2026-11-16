@@ -77,7 +77,7 @@
 //!   photos and collections, the Lightroom id; never a collection name.
 
 use crate::albums::{Decision, Existing, Node, parse_album_list};
-use crate::control::{ControlClient, Outcome, WriteError};
+use crate::control::{CommandSink, Outcome, WriteError};
 use crate::live::read_live;
 use crate::plan::{
     Conflict, MovedPhoto, RemovedPhoto, RenamedKeyword, Step, WriteInput, group_params,
@@ -280,7 +280,7 @@ pub struct Aborted {
 /// ([`crate::control::preflight`]) must have passed before. Use
 /// [`apply_partial`] to keep the numbers of a run that stops.
 pub fn apply(
-    client: &mut ControlClient,
+    client: &mut dyn CommandSink,
     input: &WriteInput,
     state: &mut State,
     state_file: &Path,
@@ -291,7 +291,7 @@ pub fn apply(
 /// Like [`apply`], but a run that stops hands back what it did up to the
 /// stop.
 pub fn apply_partial(
-    client: &mut ControlClient,
+    client: &mut dyn CommandSink,
     input: &WriteInput,
     state: &mut State,
     state_file: &Path,
@@ -457,7 +457,7 @@ pub(crate) fn id_text(v: &Value) -> Option<String> {
 }
 
 /// The keywords the library has, from `keyword.list`.
-fn list_keywords(client: &mut ControlClient) -> Result<BTreeSet<String>, WriteError> {
+fn list_keywords(client: &mut dyn CommandSink) -> Result<BTreeSet<String>, WriteError> {
     match client.execute("keyword.list", json!({}))? {
         Outcome::Applied(value) => parse_keyword_list(&value),
         Outcome::AppliedNotSaved(_) => Err(WriteError::Protocol(
@@ -482,7 +482,7 @@ struct Current {
 }
 
 struct Run<'a> {
-    client: &'a mut ControlClient,
+    client: &'a mut dyn CommandSink,
     state: &'a mut State,
     state_file: &'a Path,
     summary: ApplySummary,
@@ -2270,6 +2270,7 @@ fn edits_in_kelvin(inspect: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::control::ControlClient;
 
     fn set(items: &[&str]) -> BTreeSet<String> {
         items.iter().map(|s| s.to_string()).collect()

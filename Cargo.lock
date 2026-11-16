@@ -259,6 +259,7 @@ name = "lr2lc-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "lc-test-support",
  "lc-writer",
  "lr-reader",
  "lrcat-fixtures",

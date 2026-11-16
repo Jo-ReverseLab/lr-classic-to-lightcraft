@@ -36,6 +36,10 @@ The first release is 0.1.0.
 - The conversion now lives in a library crate, `lr2lc-core` (`Job`,
   `prepare`, `finish`, typed `RunError`), shared by the command line and a
   coming GUI. Output, report and exit codes are unchanged.
+- The writer sends LightCraft commands through a `CommandSink` trait. The
+  control-port client is one implementation; `HostSink` lets a host that runs
+  LightCraft's commands in its own process drive a whole run
+  (`lr2lc_core::finish_with`) without the port.
 - A named white-balance mode (As Shot, Auto, Daylight, …) no longer counts
   as `white_balance_not_carried`: the mode carries it, as in LightCraft's own
   Lightroom import. `Temperature`, `Tint` and the `Incremental*` names no
