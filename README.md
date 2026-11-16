@@ -40,6 +40,46 @@ not converted is listed with a reason in the summary and in `report.json`.
 
 CI runs formatting, lint and tests on Linux, macOS and Windows (pull requests on Linux only).
 
+## Desktop window
+
+`lr2lc-gui` is a window for the same conversion: choose a catalog and a
+LightCraft library, choose what to transfer, run a dry run or the
+transfer, and read the run log. It runs `lr2lc-core` in its own process
+and talks to LightCraft over the control port, like the command line.
+
+```sh
+cargo run --release -p lr2lc-gui   # needs Rust 1.95 or later
+```
+
+- **Transfer**: the catalog with its checks (file found, catalog version,
+  open in Lightroom, LightCraft writing XMP automatically, photos without
+  original), the target library with LightCraft's connection, path
+  mappings (kept per catalog), the parts to transfer (the same as
+  [`--skip`](#--skip-areas)), the advanced options (label names, control
+  port, continue despite XMP auto-write) and a summary from a read-only
+  scan of the catalog. A blocking check disables the buttons and says why.
+  Dropping a `.lrcat` file on the window chooses it.
+- **Running**: progress per phase in the order lr2lc works (read the
+  catalog, read the library when needed, keywords, photos with their
+  metadata and develop settings, albums and stacks), counters and the
+  last log entries. Cancel stops at the next photo; a new run continues
+  without duplicates.
+- **Log**: every run's [run log](#run-log), filterable by status, area and
+  text, with details per entry. Runs are kept in the app's data folder
+  (`~/Library/Application Support/lr2lc/runs` on macOS); **Save
+  report.json** saves the report with names or, with **Anonymized**,
+  without them.
+
+The theme follows the system and can be switched in the top bar. The
+window uses the Inter font (SIL Open Font License, see
+`crates/lr2lc-gui/assets/fonts`).
+
+Not available yet: **Retry this photo** and **Overwrite with Lightroom
+state** in the Log are disabled until lr2lc can run a single photo
+([#36](https://github.com/Ben-ReverseLab/lr2lc/issues/36)). There is no
+pause, and the spinner does not follow the system's reduced-motion
+setting.
+
 ## Options
 
 | Option | Purpose |

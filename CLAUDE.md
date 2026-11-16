@@ -34,6 +34,7 @@ Cargo workspace, edition 2024, MSRV 1.88.0, licence MIT OR Apache-2.0.
 | `crates/model` | Neutral data model, skip codes (`skip.rs`), develop model, label sets, mapping file format |
 | `crates/lc-writer` | Writes to LightCraft: `control.rs` (port client), `plan.rs` (commands per photo), `apply.rs` (execution, re-sync), `live.rs` (reads the library state), `state.rs` (mapping file `<library>.lr2lc.json`), `albums`, `smart` |
 | `crates/lr2lc-core` | Conversion core shared by CLI and GUI, prints nothing: `job.rs` (`Job`, `prepare`, `finish`, `RunError`), `dry_run.rs`, `writer.rs`, `output.rs` (summary, `report.json`), `report_file.rs`, `labels.rs` |
+| `crates/lr2lc-gui` | Desktop window (egui, Rust 1.95): `app.rs` (state, top/status bar, events), `transfer.rs`, `running.rs`, `log_view.rs`, `host.rs` (`Host` trait, `StandaloneHost`), `run.rs` (worker thread), `history.rs`, `theme.rs` (tokens, Inter), `icons.rs`, `widgets.rs`; renderings: `LR2LC_RENDER_DIR=dir cargo test -p lr2lc-gui --test window render_screens -- --ignored` |
 | `crates/lr2lc` | The binary: `args.rs`, `main.rs` (prints, writes `--report`/`--script`, exit codes) |
 | `crates/lc-test-support` | Fake LightCraft control port for tests (not shipped) |
 | `tests/fixtures/generator` | Generates test catalogs (`lrcat-fixtures`, not shipped); see `tests/fixtures/README.md` |

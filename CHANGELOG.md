@@ -9,6 +9,14 @@ The first release is 0.1.0.
 
 ### Added
 
+- Desktop window `lr2lc-gui` (egui): Transfer, Running and Log screens,
+  dark and light theme following the system, run history with named and
+  anonymized reports, live progress and safe cancel. The window reaches its
+  surroundings only through a `Host` trait, so it can later live inside
+  LightCraft.
+- `lr2lc_core::probe`: read-only check of the running LightCraft (open
+  library, XMP auto-write); `Prepared::live_log` and `stage_totals` for
+  front ends; live failure entries while writing.
 - Run log in `report.json` (`entries`, `entry_counts`, `anonymized`): one
   entry per photo, keyword, album and field that was transferred, adjusted,
   skipped, in conflict or failed, with area, item name, message, code,

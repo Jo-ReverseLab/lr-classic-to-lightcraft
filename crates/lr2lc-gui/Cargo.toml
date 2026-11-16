@@ -1,0 +1,31 @@
+[package]
+name = "lr2lc-gui"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.95"
+license.workspace = true
+description = "Desktop window for lr2lc: convert a Lightroom Classic catalog into a LightCraft library"
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "lr2lc-gui"
+path = "src/main.rs"
+
+[dependencies]
+lr2lc-core = { path = "../lr2lc-core" }
+model = { path = "../model" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+egui = { version = "0.37", default-features = false, features = ["default_fonts"] }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "accesskit", "wayland", "x11"] }
+rfd = "0.17"
+dirs = "6"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[dev-dependencies]
+egui_kittest = { version = "0.37", features = ["wgpu"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+lc-test-support = { path = "../lc-test-support" }
+lrcat-fixtures = { path = "../../tests/fixtures/generator" }
+tempfile = "3"

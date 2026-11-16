@@ -1,0 +1,161 @@
+//! Running a conversion off the UI thread and reporting it as [`Event`]s.
+//!
+//! The window only sees events and a [`RunResult`]; how the run reaches
+//! LightCraft (the control port here, a host's own command dispatch when the
+//! window lives inside LightCraft) is the [`crate::host::Host`]'s business.
+
+use lr2lc_core::log::{Log, LogEntry};
+use lr2lc_core::{CommandSink, ErrorKind, Job, Phase, Progress, finish, finish_with, prepare};
+use model::{Entry, Stage};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, Sender, channel};
+
+/// What a running conversion reports.
+#[derive(Debug)]
+pub enum Event {
+    /// A reading phase started; `total` units, 0 when unknown.
+    Phase(Phase, usize),
+    /// Units done in the current phase.
+    Advance(usize),
+    /// The catalog is read and planned: steps per stage.
+    Planned(BTreeMap<Stage, usize>),
+    /// A step finished while writing.
+    Entry(Box<LogEntry>),
+    /// The run ended, successfully or not.
+    Done(Box<RunResult>),
+}
+
+/// The end of a run: what the window shows and can save.
+#[derive(Debug, Clone)]
+pub struct RunResult {
+    /// Whether this run wrote to LightCraft.
+    pub apply: bool,
+    /// `report.json` with names (empty when reading failed).
+    pub report_text: String,
+    /// `report.json` without names, paths and values.
+    pub anonymized_text: String,
+    /// Why the run failed or stopped.
+    pub error: Option<(ErrorKind, String)>,
+}
+
+impl RunResult {
+    pub fn failed(apply: bool, kind: ErrorKind, message: String) -> RunResult {
+        RunResult {
+            apply,
+            report_text: String::new(),
+            anonymized_text: String::new(),
+            error: Some((kind, message)),
+        }
+    }
+}
+
+/// Sends progress as events and answers the cancel flag.
+pub struct ChannelProgress {
+    events: Sender<Event>,
+    cancel: Arc<AtomicBool>,
+    total: usize,
+    /// Names entries as they arrive, once the catalog is read.
+    live: Option<Log>,
+}
+
+impl ChannelProgress {
+    pub fn new(events: Sender<Event>, cancel: Arc<AtomicBool>) -> Self {
+        ChannelProgress {
+            events,
+            cancel,
+            total: 0,
+            live: None,
+        }
+    }
+}
+
+impl Progress for ChannelProgress {
+    fn phase(&mut self, phase: Phase, total: usize) {
+        self.total = total;
+        let _ = self.events.send(Event::Phase(phase, total));
+    }
+
+    fn advance(&mut self, done: usize) {
+        // About 200 updates per phase are plenty for a progress bar.
+        let step = (self.total / 200).max(1);
+        if done.is_multiple_of(step) || done == self.total {
+            let _ = self.events.send(Event::Advance(done));
+        }
+    }
+
+    fn entry(&mut self, entry: &Entry) {
+        if let Some(live) = &self.live {
+            let _ = self
+                .events
+                .send(Event::Entry(Box::new(live.render_entry(entry, false))));
+        }
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+}
+
+/// Runs `job` to the end: reads and plans, then writes through `sink` (the
+/// control port on `job.port` when `None`) or keeps the plan in a dry run.
+pub fn execute(
+    job: &Job,
+    progress: &mut ChannelProgress,
+    sink: Option<&mut dyn CommandSink>,
+) -> RunResult {
+    let prepared = match prepare(job, progress) {
+        Ok(prepared) => prepared,
+        Err(e) => return RunResult::failed(job.apply, e.kind, e.to_string()),
+    };
+    if job.writes_to().is_some()
+        && let Err(e) = prepared.check_writable()
+    {
+        return RunResult::failed(job.apply, e.kind, e.to_string());
+    }
+    progress.live = Some(prepared.live_log());
+    let _ = progress
+        .events
+        .send(Event::Planned(prepared.stage_totals()));
+    let finished = match sink {
+        Some(sink) => finish_with(job, prepared, sink, progress),
+        None => finish(job, prepared, progress),
+    };
+    let finished = match finished {
+        Ok(finished) => finished,
+        Err(e) => return RunResult::failed(job.apply, e.kind, e.to_string()),
+    };
+    RunResult {
+        apply: job.apply,
+        report_text: finished.report_json_as(false),
+        anonymized_text: finished.report_json_as(true),
+        error: finished.result().err().map(|e| (e.kind, e.to_string())),
+    }
+}
+
+/// A run on its own thread.
+pub struct Running {
+    pub events: Receiver<Event>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Running {
+    /// Starts `job` on a new thread, writing through the control port.
+    pub fn spawn(job: Job) -> Running {
+        let (tx, events) = channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        std::thread::spawn(move || {
+            let mut progress = ChannelProgress::new(tx.clone(), flag);
+            let result = execute(&job, &mut progress, None);
+            let _ = tx.send(Event::Done(Box::new(result)));
+        });
+        Running { events, cancel }
+    }
+
+    /// Asks the run to stop at the next safe point.
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+}

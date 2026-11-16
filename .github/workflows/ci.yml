@@ -82,4 +82,5 @@ jobs:
           shared-key: msrv
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check
-        run: cargo check --workspace --all-targets --locked
+        # The GUI needs Rust 1.95 (egui); the CLI crates keep 1.88.
+        run: cargo check --workspace --all-targets --locked --exclude lr2lc-gui
