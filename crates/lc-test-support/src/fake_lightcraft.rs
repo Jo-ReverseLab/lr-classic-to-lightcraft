@@ -739,7 +739,7 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let matches = |list: &[String]| list.iter().any(|t| *t == name);
+            let matches = |list: &[String]| list.contains(&name);
             let preview_only = matches(&config.preview_only_for);
             let kelvin = preview_only || matches(&config.kelvin_raw_for);
             let mut wb = json!({"mode": "asShot", "temp": 6500, "tint": 0});
