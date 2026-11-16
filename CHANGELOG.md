@@ -9,6 +9,10 @@ The first release is 0.1.0.
 
 ### Added
 
+- Lightroom's current brush masks (`Mask/Aggregate`) are carried over as
+  brush masks with their strokes and erasers, and the AI background mask
+  maps to LightCraft's background mask. On a real catalog, photos with a
+  converted mask rose from 25 to 115 of 157 (#11).
 - Custom white balance is carried over (#9). A relative pair (JPEG, TIFF and
   other rendered files) is converted to LightCraft's relative scale and
   written. A Kelvin pair (raw, DNG) is written only when LightCraft reports
@@ -40,6 +44,12 @@ The first release is 0.1.0.
 
 ### Fixed
 
+- AI mask and range-mask codes are read when the catalog stores them as
+  numbers, as Lightroom Classic does; before, every subject or sky mask from
+  a catalog was reported as `Mask: AI mask (?)` (#11).
+- Brush points with per-stroke state (`f`, `h`, `r` entries) are no longer
+  reported as `Spot: dabs` / `Mask: dabs`, and an `M` entry starts a new,
+  unconnected stroke (#12).
 - Photos whose files have identical bytes at different paths (the same file
   copied into two folders) no longer collapse into one LightCraft photo.
   Each gets its own record, linked to its own file, and is counted in the new
