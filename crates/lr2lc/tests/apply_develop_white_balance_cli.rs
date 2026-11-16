@@ -321,8 +321,11 @@ fn file_name_of(lightroom_id: i64) -> String {
     let out = s.apply(&fake.port().to_string());
     assert_eq!(out.status.code(), Some(0));
     let path = fake.path_of(lightcraft_id(&s, lightroom_id)).unwrap();
-    let name = Path::new(&path).file_name().unwrap().to_string_lossy();
-    format!("/{name}")
+    Path::new(&path)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// The `develop.set` parameters the run sent for one LightCraft photo that

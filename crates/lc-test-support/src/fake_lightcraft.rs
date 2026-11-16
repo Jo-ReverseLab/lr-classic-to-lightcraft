@@ -256,7 +256,7 @@ pub struct Config {
     /// library answers it as a duplicate with reason `content`, like the real
     /// app (which hashes the bytes). Paths not listed have unique content.
     pub file_contents: BTreeMap<String, String>,
-    /// `photo.inspect` of a photo whose path contains one of these texts
+    /// `photo.inspect` of a photo whose file name is one of these texts
     /// answers like a raw LightCraft edits in Kelvin (`kind: "raw"`,
     /// `develop.wb.scale: "kelvin"`). Every other photo answers like a
     /// rendered file (`kind: "image"`, no scale).
@@ -735,7 +735,11 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                 .find(|(_, v)| **v == id)
                 .map(|(p, _)| p.as_str())
                 .unwrap_or_default();
-            let matches = |list: &[String]| list.iter().any(|t| path.contains(t.as_str()));
+            let name = std::path::Path::new(path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let matches = |list: &[String]| list.iter().any(|t| *t == name);
             let preview_only = matches(&config.preview_only_for);
             let kelvin = preview_only || matches(&config.kelvin_raw_for);
             let mut wb = json!({"mode": "asShot", "temp": 6500, "tint": 0});
