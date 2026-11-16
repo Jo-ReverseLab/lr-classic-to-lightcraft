@@ -145,7 +145,9 @@ impl ControlClient {
     /// Run one engine command and wait for its reply.
     ///
     /// The command is sent exactly once. If the reply cannot be read the
-    /// result is `ConnectionLost`, never a retry.
+    /// result is `ConnectionLost`, never a retry. The one exception is the
+    /// app's idle-close notice (see [`is_idle_notice`]): the request crossed
+    /// it and never ran, so it is sent once more on a new connection.
     pub fn execute(&mut self, command: &str, params: Value) -> Result<Outcome, WriteError> {
         self.send(
             "engine.execute",
@@ -163,8 +165,22 @@ impl ControlClient {
         self.send(method, params, method)
     }
 
-    /// Send one request and read its reply; `name` is used in errors.
+    /// Send one request and read its reply; `name` is used in errors. A
+    /// request answered by the idle-close notice is sent once more on a new
+    /// connection; a second notice counts as a lost connection.
     fn send(&mut self, method: &str, params: Value, name: &str) -> Result<Outcome, WriteError> {
+        match self.send_once(method, &params, name)? {
+            Sent::Reply(outcome) => Ok(outcome),
+            Sent::IdleClosed => match self.send_once(method, &params, name)? {
+                Sent::Reply(outcome) => Ok(outcome),
+                Sent::IdleClosed => Err(WriteError::ConnectionLost {
+                    command: name.to_string(),
+                }),
+            },
+        }
+    }
+
+    fn send_once(&mut self, method: &str, params: &Value, name: &str) -> Result<Sent, WriteError> {
         let command = name;
         let mut connection = match self.connection.take() {
             Some(c) => c,
@@ -183,12 +199,13 @@ impl ControlClient {
         // `Value::to_string` never emits a raw newline: newlines inside
         // strings are escaped, so the request is exactly one line.
         let line = format!("{request}\n");
-        connection
+        let written = connection
             .writer
             .write_all(line.as_bytes())
-            .and_then(|()| connection.writer.flush())
-            .map_err(|_| lost())?;
+            .and_then(|()| connection.writer.flush());
 
+        // Even if the write failed, the app may have sent its idle notice
+        // before it closed the connection: read what is there.
         let mut reply = String::new();
         match connection.reader.read_line(&mut reply) {
             Ok(0) | Err(_) => return Err(lost()),
@@ -198,14 +215,49 @@ impl ControlClient {
             // The connection closed in the middle of a reply line.
             return Err(lost());
         }
-        let outcome = parse_reply(reply.trim_end_matches(['\r', '\n']), id, command)?;
+        let reply = reply.trim_end_matches(['\r', '\n']);
+        if is_idle_notice(reply) {
+            // The connection is closed; `self.connection` stays empty, so
+            // the next attempt opens a new one.
+            return Ok(Sent::IdleClosed);
+        }
+        if written.is_err() {
+            return Err(lost());
+        }
+        let outcome = parse_reply(reply, id, command)?;
         if let Outcome::Applied(_) = outcome {
             // Only a clean success keeps the connection; any other path has
             // already dropped it.
             self.connection = Some(connection);
         }
-        Ok(outcome)
+        Ok(Sent::Reply(outcome))
     }
+}
+
+/// What one attempt to send a request got back.
+enum Sent {
+    Reply(Outcome),
+    /// The app's idle-close notice: the request did not run.
+    IdleClosed,
+}
+
+/// The error text of the app's idle-close notice. Apps from before the
+/// `closed` marker (LightCraft < 0.21) are recognised by this exact text.
+const IDLE_NOTICE: &str = "control connection idle read timed out; closing the connection";
+
+/// Whether `line` is the notice LightCraft sends when it closes an idle
+/// connection: `ok: false`, no `id`, and either `closed: "idle"` or exactly
+/// the notice text. Such a reply answers no request, so the request that
+/// crossed it never ran and may be sent again once.
+fn is_idle_notice(line: &str) -> bool {
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    let no_id = matches!(object.get("id"), None | Some(Value::Null));
+    let failed = object.get("ok") == Some(&Value::Bool(false));
+    let marked = object.get("closed").and_then(Value::as_str) == Some("idle");
+    let text = object.get("error").and_then(Value::as_str) == Some(IDLE_NOTICE);
+    no_id && failed && (marked || text)
 }
 
 fn open(port: u16, timeout: Duration) -> Result<Connection, WriteError> {
@@ -383,6 +435,29 @@ mod tests {
             errors[3].short_reason(),
             "connection lost during library.import; outcome unknown"
         );
+    }
+
+    #[test]
+    fn idle_notice_is_recognised_with_marker_or_exact_text_only() {
+        let text = IDLE_NOTICE;
+        assert!(is_idle_notice(&format!(
+            r#"{{"ok":false,"error":"{text}","closed":"idle"}}"#
+        )));
+        assert!(is_idle_notice(&format!(
+            r#"{{"ok":false,"error":"{text}"}}"#
+        )));
+        assert!(is_idle_notice(
+            r#"{"ok":false,"error":"other","closed":"idle"}"#
+        ));
+        // A reply to a request (with id) or another error is not the notice.
+        assert!(!is_idle_notice(&format!(
+            r#"{{"id":3,"ok":false,"error":"{text}"}}"#
+        )));
+        assert!(!is_idle_notice(
+            r#"{"ok":false,"error":"no photos selected"}"#
+        ));
+        assert!(!is_idle_notice(r#"{"ok":true,"closed":"idle"}"#));
+        assert!(!is_idle_notice("not json"));
     }
 
     #[test]

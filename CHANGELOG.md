@@ -35,6 +35,9 @@ The first release is 0.1.0.
 - A virtual copy no longer keeps keywords, ratings, labels, texts,
   development settings, albums or the stack of its master in LightCraft; it
   is reset to import defaults before its own values are written (#3).
+- A request that crosses LightCraft's idle-close notice on the control port
+  is sent once more on a new connection instead of being reported as
+  rejected (#8).
 
 ## [0.1.0] - 2026-11-15
 

@@ -199,6 +199,14 @@ pub struct Config {
     pub close_at: Option<usize>,
     /// Whether the command that gets no reply takes effect anyway.
     pub close_applies: bool,
+    /// When one of these command lines (1-based, counted over the whole run
+    /// of the fake) arrives, answer with the app's idle-close notice instead
+    /// (no `id`, the command is not run) and close the connection, like an
+    /// app whose idle timeout expired just as the request was sent.
+    pub idle_close_at: Vec<usize>,
+    /// Send the idle notice without the `closed` marker, like apps from
+    /// before LightCraft 0.21.
+    pub idle_notice_without_marker: bool,
     /// Keywords the library already has.
     pub keywords: BTreeSet<String>,
     /// Reply `saved in memory but not written to disk` to every update.
@@ -262,6 +270,8 @@ impl Config {
             failures: Vec::new(),
             close_at: None,
             close_applies: false,
+            idle_close_at: Vec::new(),
+            idle_notice_without_marker: false,
             keywords: BTreeSet::new(),
             not_saved_updates: false,
             import_failed_for: None,
@@ -597,6 +607,21 @@ fn serve(stream: TcpStream, index: usize, shared: &Shared) {
 
         let mut lib = shared.library.lock().unwrap();
         lib.seen += 1;
+        if shared.config.idle_close_at.contains(&lib.seen) {
+            drop(lib);
+            let mut notice = json!({
+                "ok": false,
+                "error": "control connection idle read timed out; closing the connection",
+                "closed": "idle",
+            });
+            if shared.config.idle_notice_without_marker {
+                notice.as_object_mut().map(|o| o.remove("closed"));
+            }
+            let _ = writeln!(writer, "{notice}");
+            let _ = writer.flush();
+            let _ = writer.shutdown(Shutdown::Both);
+            return;
+        }
         let close_now = shared.config.close_at == Some(lib.seen) && !lib.closed_once;
         if close_now {
             lib.closed_once = true;
