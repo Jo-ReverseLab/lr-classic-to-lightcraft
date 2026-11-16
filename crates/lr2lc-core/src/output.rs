@@ -60,6 +60,9 @@ pub struct TimingJson {
 pub struct LogJson<'a> {
     /// Whether names, paths and values were left out (`--anonymize`).
     pub anonymized: bool,
+    /// Photos counted once each: `total`, `transferred`, `unchanged`,
+    /// `skipped`, `conflict`, `error`.
+    pub photo_counts: crate::log::PhotoCounts,
     /// Entries per status: `transferred`, `adjusted`, `skipped`,
     /// `conflict`, `error`.
     pub entry_counts: BTreeMap<&'static str, usize>,

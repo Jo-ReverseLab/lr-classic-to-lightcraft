@@ -347,6 +347,7 @@ const TOP_LEVEL_KEYS: &[&str] = &[
     "develop",
     "writer",
     "anonymized",
+    "photo_counts",
     "entry_counts",
     "entries",
 ];

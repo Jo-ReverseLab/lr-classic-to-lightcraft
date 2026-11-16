@@ -289,9 +289,15 @@ fn finish_by(
             not_selected.join(", ")
         )
     };
+    let pc = log.photo_counts(outcome.photos.read_count());
     let _ = writeln!(
         writer_summary,
-        "log: {}",
+        "photos: {} in the catalog, transferred {}, unchanged {}, skipped {}, conflict {}, error {}",
+        pc.total, pc.transferred, pc.unchanged, pc.skipped, pc.conflict, pc.error
+    );
+    let _ = writeln!(
+        writer_summary,
+        "log entries (one per photo, field, keyword and album): {}",
         counts
             .iter()
             .map(|(status, n)| format!("{status} {n}"))
@@ -334,6 +340,7 @@ impl Finished {
             &self.timing,
             Some(output::LogJson {
                 anonymized: anonymize,
+                photo_counts: self.log.photo_counts(self.outcome.photos.read_count()),
                 entry_counts: log::counts(&self.log.entries),
                 entries: &entries,
             }),

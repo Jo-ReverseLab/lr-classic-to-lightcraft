@@ -210,7 +210,59 @@ fn by_gid(input: &WriteInput) -> BTreeMap<String, (i64, PathBuf)> {
         .collect()
 }
 
+/// Says which photos use each keyword that is created: the count in the
+/// message, the file names in `source`.
+fn name_keyword_users(out: &mut [RawEntry], input: &WriteInput) {
+    let mut users: BTreeMap<String, Vec<&std::path::Path>> = BTreeMap::new();
+    for photo in &input.photos {
+        for keyword in input
+            .photo_keywords
+            .get(&photo.lightroom_id)
+            .into_iter()
+            .flatten()
+        {
+            users
+                .entry(lc_writer::state::keyword_text(keyword))
+                .or_default()
+                .push(&photo.path);
+        }
+    }
+    for raw in out {
+        let e = &mut raw.entry;
+        let Subject::Keyword(path) = &e.subject else {
+            continue;
+        };
+        if e.status != Status::Transferred {
+            continue;
+        }
+        let photos = users.get(path).map_or(&[][..], Vec::as_slice);
+        e.message = format!(
+            "{} · used by {}",
+            e.message,
+            lc_writer::entries::counted(photos.len(), "photo")
+        );
+        if !photos.is_empty() {
+            let mut names: Vec<String> = photos
+                .iter()
+                .take(8)
+                .filter_map(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .collect();
+            if photos.len() > 8 {
+                names.push(format!("… ({} more)", photos.len() - 8));
+            }
+            e.source = Some(names.join(", "));
+        }
+    }
+}
+
 fn entries(sources: &Sources<'_>) -> Vec<RawEntry> {
+    let mut out = entries_unnamed(sources);
+    name_keyword_users(&mut out, sources.input);
+    out
+}
+
+fn entries_unnamed(sources: &Sources<'_>) -> Vec<RawEntry> {
     let mut out = Vec::new();
     let o = sources.outcome;
     let read: [(&Report, Area); 9] = [
@@ -453,6 +505,64 @@ fn area_of(name: &str) -> Area {
         "stacks" => Area::Stacks,
         "virtual-copies" => Area::VirtualCopies,
         _ => Area::Develop,
+    }
+}
+
+/// Photos counted once each, however many entries they have.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct PhotoCounts {
+    /// Photos read from the catalog.
+    pub total: usize,
+    /// Something was (or in a dry run would be) written for the photo and
+    /// nothing went wrong.
+    pub transferred: usize,
+    /// Already in the library with nothing to change.
+    pub unchanged: usize,
+    /// Not transferred at all (video, missing original, ...).
+    pub skipped: usize,
+    /// At least one field in conflict, nothing failed.
+    pub conflict: usize,
+    /// At least one step failed.
+    pub error: usize,
+}
+
+impl Log {
+    /// Counts the catalog's `total` photos by what happened to each.
+    pub fn photo_counts(&self, total: usize) -> PhotoCounts {
+        // 1 written, 2 skipped as a whole, 3 conflict, 4 error; the worst wins.
+        let mut worst: BTreeMap<i64, u8> = BTreeMap::new();
+        for raw in &self.entries {
+            let e = &raw.entry;
+            let id = match &e.subject {
+                Subject::Photo(id) => *id,
+                Subject::PhotoGlobal(gid) => match self.by_gid.get(gid) {
+                    Some((id, _)) => *id,
+                    None => continue,
+                },
+                _ => continue,
+            };
+            let whole_photo = matches!(e.area, Area::Photos | Area::VirtualCopies)
+                && !matches!(e.code, Some("photo_removed" | "photo_moved"));
+            let rank = match e.status {
+                Status::Error => 4,
+                Status::Conflict => 3,
+                Status::Skipped if whole_photo => 2,
+                Status::Skipped => 0,
+                Status::Transferred | Status::Adjusted => 1,
+            };
+            let slot = worst.entry(id).or_insert(0);
+            *slot = (*slot).max(rank);
+        }
+        let count = |rank: u8| worst.values().filter(|r| **r == rank).count();
+        let (transferred, skipped, conflict, error) = (count(1), count(2), count(3), count(4));
+        PhotoCounts {
+            total,
+            transferred,
+            unchanged: total.saturating_sub(transferred + skipped + conflict + error),
+            skipped,
+            conflict,
+            error,
+        }
     }
 }
 

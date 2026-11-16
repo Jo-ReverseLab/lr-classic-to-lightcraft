@@ -572,6 +572,14 @@
     "smart_skipped_by_code": {}
   },
   "anonymized": true,
+  "photo_counts": {
+    "total": 21,
+    "transferred": 15,
+    "unchanged": 0,
+    "skipped": 6,
+    "conflict": 0,
+    "error": 0
+  },
   "entry_counts": {
     "adjusted": 0,
     "conflict": 0,
@@ -1410,84 +1418,84 @@
       "area": "keywords",
       "stage": "keywords",
       "item": "keyword",
-      "message": "Keyword will be created"
+      "message": "Keyword will be created · used by 0 photos"
     },
     {
       "status": "transferred",
       "area": "keywords",
       "stage": "keywords",
       "item": "keyword",
-      "message": "Keyword will be created"
+      "message": "Keyword will be created · used by 2 photos"
     },
     {
       "status": "transferred",
       "area": "keywords",
       "stage": "keywords",
       "item": "keyword",
-      "message": "Keyword will be created"
+      "message": "Keyword will be created · used by 3 photos"
     },
     {
       "status": "transferred",
       "area": "keywords",
       "stage": "keywords",
       "item": "keyword",
-      "message": "Keyword will be created"
+      "message": "Keyword will be created · used by 1 photo"
     },
     {
       "status": "transferred",
       "area": "keywords",
       "stage": "keywords",
       "item": "keyword",
-      "message": "Keyword will be created"
+      "message": "Keyword will be created · used by 3 photos"
     },
     {
       "status": "transferred",
       "area": "keywords",
       "stage": "keywords",
       "item": "keyword",
-      "message": "Keyword will be created"
+      "message": "Keyword will be created · used by 2 photos"
     },
     {
       "status": "transferred",
       "area": "keywords",
       "stage": "keywords",
       "item": "keyword",
-      "message": "Keyword will be created"
+      "message": "Keyword will be created · used by 3 photos"
     },
     {
       "status": "transferred",
       "area": "keywords",
       "stage": "keywords",
       "item": "keyword",
-      "message": "Keyword will be created"
+      "message": "Keyword will be created · used by 2 photos"
     },
     {
       "status": "transferred",
       "area": "keywords",
       "stage": "keywords",
       "item": "keyword",
-      "message": "Keyword will be created"
+      "message": "Keyword will be created · used by 1 photo"
     },
     {
       "status": "transferred",
       "area": "keywords",
       "stage": "keywords",
       "item": "keyword",
-      "message": "Keyword will be created"
+      "message": "Keyword will be created · used by 2 photos"
     },
     {
       "status": "transferred",
       "area": "keywords",
       "stage": "keywords",
       "item": "keyword",
-      "message": "Keyword will be created"
+      "message": "Keyword will be created · used by 0 photos"
     },
     {
       "status": "transferred",
       "area": "keywords",
       "stage": "keywords",
       "item": "keyword",
-      "message": "Keyword will be created"
+      "message": "Keyword will be created · used by 2 photos"
     },
     {
       "status": "transferred",
