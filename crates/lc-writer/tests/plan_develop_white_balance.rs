@@ -1,16 +1,17 @@
-//! Acceptance tests for planning white-balance settings (P6-4, phase 6a).
+//! Acceptance tests for planning white-balance settings (P6-4, #9).
 //!
-//! Contract checked here (Lead, P6-4):
+//! Contract checked here:
 //! - `WhiteBalance` (`Develop::white_balance.mode`, LightCraft spelling) is
 //!   written through `develop.merge` as `wb.mode`.
-//! - `Temperature`, `Tint`, `IncrementalTemperature` and
-//!   `IncrementalTint` are never part of a command; only the mode is carried
-//!   while the probe is not implemented. Their names live in
-//!   `Develop::unmapped` and are not sent.
-//! - `wb.scale: "kelvin"` is added only for `WhiteBalanceHint::Kelvin`; the
-//!   reader never produces that hint in P6-4 (no original probe).
-//! - A hint without a mode plans no merge: nothing to write, nothing to
-//!   report as a command.
+//! - Lightroom field names (`Temperature`, `IncrementalTint`, …) never reach
+//!   a command. A hint without stored values plans no white-balance write.
+//! - A relative pair is converted (0.8 mired per step around 6500 K, steps
+//!   clamped to ±100) and written with `develop.set` (`wb.temp`, `wb.tint`),
+//!   also in the script.
+//! - A Kelvin pair (`Undecidable`) plans a checked write: counted as
+//!   `to_check`, left out of the script (only `--apply` can ask LightCraft
+//!   for the photo's scale).
+//! - `wb.scale: "kelvin"` is added only for `WhiteBalanceHint::Kelvin`.
 //! - Sliders are still written even when the white balance is not carried.
 //!
 //! The tests are black-box against `lc_writer::plan`, like `tests/plan.rs`.
@@ -243,4 +244,98 @@ fn two_photos_keep_their_own_mode_and_never_share_a_merge() {
     );
     assert_eq!(merges[1], &json!({"settings": {"wb": {"mode": "flash"}}}));
     assert_ne!(merges[0], merges[1]);
+}
+
+fn with_values(hint: WhiteBalanceHint, temperature: f64, tint: f64) -> Develop {
+    let mut develop = white_balance(Some("custom"), hint);
+    develop.white_balance.temperature = Some(temperature);
+    develop.white_balance.tint = Some(tint);
+    develop
+}
+
+fn white_balance_steps(plan: &Plan) -> Vec<(&std::collections::BTreeMap<String, f64>, bool)> {
+    plan.steps
+        .iter()
+        .filter_map(|step| match step {
+            lc_writer::plan::Step::DevelopWhiteBalance {
+                values,
+                check_kelvin,
+                ..
+            } => Some((values, *check_kelvin)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_relative_pair_is_converted_and_written_in_the_script_too() {
+    let input = WriteInput {
+        photos: vec![photo_with(
+            "rel",
+            1,
+            with_values(WhiteBalanceHint::Relative, 25.0, -8.0),
+        )],
+        ..WriteInput::default()
+    };
+    let state = State::default();
+    let p = plan(&input, &state, &Default::default());
+    let steps = white_balance_steps(&p);
+    assert_eq!(steps.len(), 1);
+    let (values, check) = steps[0];
+    assert!(!check, "a relative pair needs no scale check");
+    let expected = 1e6 / (1e6 / 6500.0 - 0.8 * 25.0);
+    assert!((values["wb.temp"] - expected).abs() < 1e-9);
+    assert_eq!(values["wb.tint"], -8.0);
+    assert_eq!(p.develop_white_balance_custom(), 1);
+    assert_eq!(p.develop_white_balance_to_check(), 0);
+
+    let lines = lines(&p, &state);
+    let sets: Vec<_> = develop_params(&lines)
+        .into_iter()
+        .filter(|(c, p)| *c == "develop.set" && p["values"].get("wb.temp").is_some())
+        .collect();
+    assert_eq!(sets.len(), 1, "{lines:?}");
+}
+
+#[test]
+fn relative_steps_are_clamped_to_lightrooms_range() {
+    let input = WriteInput {
+        photos: vec![photo_with(
+            "far",
+            1,
+            with_values(WhiteBalanceHint::Relative, 250.0, 0.0),
+        )],
+        ..WriteInput::default()
+    };
+    let p = plan(&input, &State::default(), &Default::default());
+    let (values, _) = white_balance_steps(&p)[0];
+    let at_limit = 1e6 / (1e6 / 6500.0 - 0.8 * 100.0);
+    assert!((values["wb.temp"] - at_limit).abs() < 1e-9);
+}
+
+#[test]
+fn a_kelvin_pair_is_checked_and_left_out_of_the_script() {
+    let input = WriteInput {
+        photos: vec![photo_with(
+            "kel",
+            1,
+            with_values(WhiteBalanceHint::Undecidable, 4800.0, 7.0),
+        )],
+        ..WriteInput::default()
+    };
+    let state = State::default();
+    let p = plan(&input, &state, &Default::default());
+    let steps = white_balance_steps(&p);
+    assert_eq!(steps.len(), 1);
+    let (values, check) = steps[0];
+    assert!(check);
+    assert_eq!(values["wb.temp"], 4800.0);
+    assert_eq!(values["wb.tint"], 7.0);
+    assert_eq!(p.develop_white_balance_to_check(), 1);
+
+    let lines = lines(&p, &state);
+    assert!(
+        !lines.iter().any(|(_, p)| p.to_string().contains("4800")),
+        "the script cannot decide the scale: {lines:?}"
+    );
 }
