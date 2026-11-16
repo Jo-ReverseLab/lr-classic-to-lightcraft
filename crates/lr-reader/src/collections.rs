@@ -158,8 +158,9 @@ impl Catalog {
                         members: Vec::new(),
                     });
                 }
-                (_, Err(skip)) => data.report.push_skipped(skip.clone()),
-                (Err(_), Ok(())) => unreachable!("own skips are part of the status"),
+                // Own skips are part of the status; the second arm only
+                // keeps the books balanced should that ever change.
+                (_, Err(skip)) | (Err(skip), Ok(())) => data.report.push_skipped(skip.clone()),
             }
         }
         // Book every smart collection with its final verdict. Those with
@@ -203,10 +204,13 @@ impl Catalog {
             match outcome {
                 Ok((c, p, t)) => {
                     seen.insert((c, p));
-                    match (t, data.quick.as_mut()) {
-                        (Target::Collection(i), _) => data.collections[i].members.push(p),
-                        (Target::Quick, Some(q)) => q.members.push(p),
-                        (Target::Quick, None) => unreachable!("quick target without quick"),
+                    // A Quick target exists only together with `data.quick`.
+                    let members = match t {
+                        Target::Collection(i) => Some(&mut data.collections[i].members),
+                        Target::Quick => data.quick.as_mut().map(|q| &mut q.members),
+                    };
+                    if let Some(members) = members {
+                        members.push(p);
                     }
                     data.members.converted();
                 }

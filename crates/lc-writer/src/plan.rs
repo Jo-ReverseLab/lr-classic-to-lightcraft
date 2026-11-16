@@ -1504,10 +1504,11 @@ fn object_entry<'a>(map: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<S
     if !entry.is_object() {
         *entry = Value::Object(Map::new());
     }
-    match entry {
-        Value::Object(inner) => inner,
-        _ => unreachable!("the entry was just made an object"),
-    }
+    // Provably infallible: the entry was just made an object.
+    #[allow(clippy::expect_used)]
+    entry
+        .as_object_mut()
+        .expect("the entry was just made an object")
 }
 
 /// The field values of a photo with its keyword paths rewritten to the

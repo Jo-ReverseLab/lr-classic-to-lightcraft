@@ -3,6 +3,16 @@
 //! writes them through the control port. Front ends drive a run with
 //! [`prepare`] and [`finish`]; nothing here prints.
 
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable
+)]
+#![forbid(unsafe_code)]
+
 pub mod dry_run;
 mod job;
 pub mod labels;

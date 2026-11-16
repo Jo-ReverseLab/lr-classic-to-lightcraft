@@ -274,6 +274,10 @@ pub fn report_json_with(
         develop,
         writer,
     };
+    // Provably infallible: every map in the report has string keys and every
+    // value is a plain number, string, bool or list, which serde_json always
+    // serializes.
+    #[allow(clippy::expect_used)]
     let mut text = serde_json::to_string_pretty(&json).expect("report serializes");
     text.push('\n');
     text

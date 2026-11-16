@@ -193,13 +193,14 @@ fn build(
                     }
                 }
             };
+            // A row without a photo id always has a reason.
             match (reason, m.image) {
                 (Some(r), _) => skipped.push(r),
                 (None, Some(p)) => {
                     kept.push((p, m.at_one));
                     pending.push(p);
                 }
-                (None, None) => unreachable!("rows without a photo id have a reason"),
+                (None, None) => {}
             }
         }
         for _ in &rows {

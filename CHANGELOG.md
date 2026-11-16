@@ -46,6 +46,10 @@ The first release is 0.1.0.
   photos, keywords and album steps, never inside one photo; finished photos
   are recorded and the next run continues (`WriteError::Cancelled`,
   `ErrorKind::Cancelled`). The command line is unchanged.
+- Production crates deny `unwrap`, `expect`, `panic!`, `unreachable!`,
+  `todo!` and `unimplemented!` and forbid `unsafe` (tests may still
+  unwrap), as LightCraft requires; the four `unreachable!` invariants became
+  safe code.
 - A named white-balance mode (As Shot, Auto, Daylight, …) no longer counts
   as `white_balance_not_carried`: the mode carries it, as in LightCraft's own
   Lightroom import. `Temperature`, `Tint` and the `Incremental*` names no

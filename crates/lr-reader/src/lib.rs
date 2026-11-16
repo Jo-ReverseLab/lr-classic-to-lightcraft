@@ -1,5 +1,15 @@
 //! Reads Lightroom Classic catalogs into the neutral model.
 
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable
+)]
+#![forbid(unsafe_code)]
+
 mod catalog;
 mod collections;
 mod develop;
