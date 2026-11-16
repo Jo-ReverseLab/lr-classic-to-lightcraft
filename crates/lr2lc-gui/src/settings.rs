@@ -299,7 +299,7 @@ mod tests {
         s.rows_mut().push(MappingRow::default());
         s.rows_mut().push(MappingRow {
             old: "C:\\Fotos".into(),
-            new: "/Users/me/Fotos".into(),
+            new: "/Users/example/Fotos".into(),
         });
         assert_eq!(s.job(false).unwrap().mappings.rules().len(), 1);
         s.rows_mut().push(MappingRow {

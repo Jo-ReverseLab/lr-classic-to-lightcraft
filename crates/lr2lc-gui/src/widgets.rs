@@ -355,8 +355,8 @@ mod tests {
     #[test]
     fn long_paths_are_shortened_in_the_middle() {
         assert_eq!(middle_ellipsis("short", 10), "short");
-        let s = middle_ellipsis("/Users/someone/Pictures/Lightroom/Catalog.lrcat", 20);
+        let s = middle_ellipsis("/Volumes/Photos/Lightroom/Catalog.lrcat", 20);
         assert_eq!(s.chars().count(), 20);
-        assert!(s.starts_with("/Users/so") && s.ends_with("og.lrcat") && s.contains('…'));
+        assert!(s.starts_with("/Volumes/") && s.ends_with("og.lrcat") && s.contains('…'));
     }
 }
