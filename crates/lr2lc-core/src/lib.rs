@@ -19,6 +19,7 @@ mod job;
 pub mod labels;
 pub mod log;
 pub mod output;
+pub mod probe;
 pub mod report_file;
 pub mod writer;
 

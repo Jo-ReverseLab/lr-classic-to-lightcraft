@@ -155,6 +155,21 @@ impl Prepared {
     pub fn catalog_summary(&self, job: &Job) -> String {
         output::summary_with(&self.outcome, job.writes_to().is_none())
     }
+
+    /// A log that names the entries a run reports through
+    /// [`Progress::entry`] while it writes.
+    pub fn live_log(&self) -> Log {
+        Log::live(self.names.clone(), &self.input)
+    }
+
+    /// The planned steps per stage, for progress per stage.
+    pub fn stage_totals(&self) -> std::collections::BTreeMap<model::Stage, usize> {
+        let mut out = std::collections::BTreeMap::new();
+        for step in &self.plan.steps {
+            *out.entry(lc_writer::entries::stage_of(step)).or_insert(0) += 1;
+        }
+        out
+    }
 }
 
 /// A finished run: the writer's numbers, and whether it stopped.

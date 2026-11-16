@@ -21,6 +21,25 @@ pub enum StepOutcome {
     NotCarried,
 }
 
+/// The stage a step belongs to.
+pub fn stage_of(step: &Step) -> Stage {
+    match step {
+        Step::CreateKeyword { .. } => Stage::Keywords,
+        Step::Import { .. }
+        | Step::VirtualCopy { .. }
+        | Step::Update { .. }
+        | Step::DevelopSet { .. }
+        | Step::DevelopMerge { .. }
+        | Step::DevelopWhiteBalance { .. } => Stage::Photos,
+        Step::GroupStack { .. }
+        | Step::CreateAlbum { .. }
+        | Step::AddMembers { .. }
+        | Step::QuickAdd { .. }
+        | Step::CreateSmart { .. }
+        | Step::RemoveMembers { .. } => Stage::Organize,
+    }
+}
+
 /// The entries of one step that did not fail.
 pub fn step_entries(step: &Step, outcome: StepOutcome) -> Vec<Entry> {
     let dry = outcome == StepOutcome::Planned;

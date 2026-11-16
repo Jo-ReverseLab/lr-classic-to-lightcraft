@@ -56,6 +56,26 @@ pub struct Log {
 }
 
 impl Log {
+    /// A log without entries that names what `input` and `names` hold, for
+    /// rendering entries as they arrive during a run.
+    pub fn live(names: Names, input: &WriteInput) -> Log {
+        Log {
+            entries: Vec::new(),
+            by_gid: by_gid(input),
+            names,
+        }
+    }
+
+    /// One entry with names looked up (or left out when `anonymize`).
+    pub fn render_entry(&self, entry: &Entry, anonymize: bool) -> LogEntry {
+        let namer = Namer {
+            names: &self.names,
+            by_gid: &self.by_gid,
+            anonymize,
+        };
+        namer.entry(entry.clone(), None)
+    }
+
     /// The entries with names looked up, or with every name, path and value
     /// left out when `anonymize` is set.
     pub fn render(&self, anonymize: bool) -> Vec<LogEntry> {
@@ -175,17 +195,19 @@ pub struct Sources<'a> {
 /// The whole log, in run order: reading, areas left out, the steps, then
 /// what the writer skipped, failed or found in conflict.
 pub fn build(sources: &Sources<'_>, names: Names) -> Log {
-    let by_gid = sources
-        .input
+    Log {
+        entries: entries(sources),
+        by_gid: by_gid(sources.input),
+        names,
+    }
+}
+
+fn by_gid(input: &WriteInput) -> BTreeMap<String, (i64, PathBuf)> {
+    input
         .photos
         .iter()
         .filter_map(|p| Some((p.global_id.clone()?, (p.lightroom_id, p.path.clone()))))
-        .collect();
-    Log {
-        entries: entries(sources),
-        names,
-        by_gid,
-    }
+        .collect()
 }
 
 fn entries(sources: &Sources<'_>) -> Vec<RawEntry> {

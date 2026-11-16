@@ -199,3 +199,18 @@ fn the_log_names_files_unless_anonymized() {
     assert_eq!(named["anonymized"], false);
     assert!(named["entries"].to_string().contains(&catalog_dir));
 }
+
+#[test]
+fn the_probe_reads_the_open_library_and_xmp_setting() {
+    let setup = setup();
+    let library = setup.job.library.clone().unwrap();
+    let mut config = Config::new(&library);
+    config.auto_write = true;
+    let fake = FakeLightCraft::start(config);
+    let probe = lr2lc_core::probe::probe(fake.port()).unwrap();
+    assert!(probe.persistent);
+    assert_eq!(probe.xmp_auto_write, Some(true));
+    assert!(probe.has_open(&library));
+    assert!(fake.write_commands().is_empty());
+    assert!(lr2lc_core::probe::probe(1).is_err());
+}
