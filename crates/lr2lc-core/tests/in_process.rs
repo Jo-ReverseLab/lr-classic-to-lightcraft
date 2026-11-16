@@ -224,3 +224,26 @@ fn the_probe_reads_the_open_library_and_xmp_setting() {
     assert!(fake.write_commands().is_empty());
     assert!(lr2lc_core::probe::probe(1).is_err());
 }
+
+#[test]
+fn a_library_is_created_and_opened_through_the_app() {
+    use lr2lc_core::probe::{LibraryAction, library_action, probe};
+    let setup = setup();
+    let library = setup.job.library.clone().unwrap();
+    let fake = FakeLightCraft::start(Config::new(&library));
+    let folder = library.parent().unwrap().to_path_buf();
+    let created = library_action(
+        fake.port(),
+        &LibraryAction::Create {
+            folder: folder.clone(),
+            name: "New Library".into(),
+        },
+    )
+    .unwrap();
+    let new = folder.join("New Library");
+    assert!(new.is_dir());
+    assert!(created.has_open(&new));
+    let back = library_action(fake.port(), &LibraryAction::Open(library.clone())).unwrap();
+    assert!(back.has_open(&library));
+    assert!(probe(fake.port()).unwrap().has_open(&library));
+}

@@ -303,7 +303,29 @@ fn phase_row(ui: &mut Ui, t: &Tokens, row: &PhaseRow) {
 }
 
 fn counters(ui: &mut Ui, t: &Tokens, run: &RunState, finished: bool, action: &mut Option<Action>) {
-    card(ui, t, Some("So far"), |ui| {
+    card(ui, t, Some("Log entries so far"), |ui| {
+        let photos = match (&run.result, finished) {
+            (Some(result), true) if !result.report_text.is_empty() => {
+                serde_json::from_str::<serde_json::Value>(&result.report_text)
+                    .ok()
+                    .map(|report| crate::logdata::LogData::from_report(&report))
+                    .and_then(|data| data.photo_counts.map(|c| c.line(data.dry_run)))
+            }
+            _ => None,
+        }
+        .unwrap_or_else(|| crate::app::plural(run.photos_seen.len(), "photo") + " so far");
+        Frame::new()
+            .inner_margin(Margin::symmetric(16, 10))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new(photos).font(font(13.0, Some(MEDIUM))));
+                ui.label(
+                    RichText::new("One entry per photo, field, keyword and album.")
+                        .font(font(12.0, None))
+                        .color(t.text_muted),
+                );
+            });
+        divider(ui, t);
         let count = |s: Status| run.counts.get(&s).copied().unwrap_or(0);
         let mut cells = vec![
             (Status::Transferred, "Transferred"),

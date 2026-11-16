@@ -9,6 +9,13 @@ The first release is 0.1.0.
 
 ### Added
 
+- GUI: selected tab is filled; an “i” next to every catalog check explains
+  it; counts from the catalog behind every option; the target follows the
+  library open in LightCraft, can be switched back to it, can open the
+  chosen library in LightCraft and can create a new library after a
+  confirmation; the Log counts photos once (`photo_counts`), shows values
+  in the row, names the photos a keyword is used by, and can group
+  entries by photo.
 - Desktop window `lr2lc-gui` (egui): Transfer, Running and Log screens,
   dark and light theme following the system, run history with named and
   anonymized reports, live progress and safe cancel. The window reaches its

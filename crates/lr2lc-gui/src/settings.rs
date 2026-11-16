@@ -112,6 +112,8 @@ pub struct Settings {
     pub labels: Labels,
     pub port: u16,
     pub theme: ThemeMode,
+    /// The target is whatever library LightCraft has open.
+    pub follow_app: bool,
 }
 
 impl Default for Settings {
@@ -126,6 +128,7 @@ impl Default for Settings {
             labels: Labels::Auto,
             port: DEFAULT_PORT,
             theme: ThemeMode::System,
+            follow_app: true,
         }
     }
 }

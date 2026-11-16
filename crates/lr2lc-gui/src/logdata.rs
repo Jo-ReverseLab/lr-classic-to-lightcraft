@@ -95,11 +95,63 @@ pub const AREAS: [&str; 11] = [
     "develop",
 ];
 
+/// Photos counted once each (the report's `photo_counts`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PhotoCounts {
+    pub total: u64,
+    pub transferred: u64,
+    pub unchanged: u64,
+    pub skipped: u64,
+    pub conflict: u64,
+    pub error: u64,
+}
+
+impl PhotoCounts {
+    /// `59 photos: 56 transferred, 3 skipped` (zero parts left out).
+    pub fn line(&self, dry_run: bool) -> String {
+        let done = if dry_run {
+            "to transfer"
+        } else {
+            "transferred"
+        };
+        let parts: Vec<String> = [
+            (self.transferred, done),
+            (self.unchanged, "unchanged"),
+            (self.skipped, "skipped"),
+            (self.conflict, "with conflicts"),
+            (self.error, "with errors"),
+        ]
+        .into_iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, what)| format!("{n} {what}"))
+        .collect();
+        let photos = if self.total == 1 { "photo" } else { "photos" };
+        if parts.is_empty() {
+            format!("{} {photos}", self.total)
+        } else {
+            format!("{} {photos}: {}", self.total, parts.join(", "))
+        }
+    }
+}
+
+/// One photo with all its entries, for the view grouped by photo.
+#[derive(Debug, Clone)]
+pub struct PhotoGroup {
+    pub photo: i64,
+    /// A row that stands for the photo: its worst status, its name, how
+    /// many entries it has and what they say.
+    pub row: Row,
+    /// Indexes of its entries in [`LogData::rows`].
+    pub entries: Vec<usize>,
+}
+
 /// The log of one run.
 #[derive(Debug, Clone, Default)]
 pub struct LogData {
     pub rows: Vec<Row>,
     pub anonymized: bool,
+    pub photo_counts: Option<PhotoCounts>,
+    pub dry_run: bool,
 }
 
 impl LogData {
@@ -111,6 +163,21 @@ impl LogData {
                 .map(|a| a.iter().map(Row::from_json).collect())
                 .unwrap_or_default(),
             anonymized: report["anonymized"].as_bool().unwrap_or(false),
+            photo_counts: report
+                .get("photo_counts")
+                .filter(|v| v.is_object())
+                .map(|c| {
+                    let n = |key: &str| c[key].as_u64().unwrap_or(0);
+                    PhotoCounts {
+                        total: n("total"),
+                        transferred: n("transferred"),
+                        unchanged: n("unchanged"),
+                        skipped: n("skipped"),
+                        conflict: n("conflict"),
+                        error: n("error"),
+                    }
+                }),
+            dry_run: report["dry_run"].as_bool().unwrap_or(false),
         }
     }
 
@@ -124,6 +191,73 @@ impl LogData {
         AREAS
             .into_iter()
             .filter(|a| self.rows.iter().any(|r| r.area == *a))
+            .collect()
+    }
+
+    /// The `visible` entries grouped by photo, in order of each photo's
+    /// first entry; entries about no single photo are left out.
+    pub fn by_photo(&self, visible: &[usize]) -> Vec<PhotoGroup> {
+        let mut order: Vec<i64> = Vec::new();
+        let mut groups: std::collections::HashMap<i64, Vec<usize>> = Default::default();
+        for &index in visible {
+            if let Some(photo) = self.rows[index].photo {
+                groups
+                    .entry(photo)
+                    .or_insert_with(|| {
+                        order.push(photo);
+                        Vec::new()
+                    })
+                    .push(index);
+            }
+        }
+        order
+            .into_iter()
+            .filter_map(|photo| {
+                let entries = groups.remove(&photo)?;
+                let rows: Vec<&Row> = entries.iter().map(|i| &self.rows[*i]).collect();
+                // A photo is "skipped" only when it was skipped as a whole.
+                let rank = |r: &Row| match r.status {
+                    Status::Error => 4,
+                    Status::Conflict => 3,
+                    Status::Skipped if matches!(r.area.as_str(), "photos" | "virtual-copies") => 2,
+                    Status::Skipped => 0,
+                    Status::Adjusted | Status::Transferred => 1,
+                };
+                let worst = rows.iter().max_by_key(|r| rank(r))?;
+                let status = if rank(worst) == 0 {
+                    Status::Transferred
+                } else {
+                    worst.status
+                };
+                let mut messages: Vec<&str> = Vec::new();
+                for r in &rows {
+                    if !messages.contains(&r.message.as_str()) {
+                        messages.push(&r.message);
+                    }
+                }
+                let n = entries.len();
+                Some(PhotoGroup {
+                    photo,
+                    row: Row {
+                        status,
+                        area: if n == 1 {
+                            "1 entry".into()
+                        } else {
+                            format!("{n} entries")
+                        },
+                        stage: String::new(),
+                        item: rows.first().map(|r| r.item.clone()).unwrap_or_default(),
+                        message: messages.join(" · "),
+                        code: None,
+                        reason: None,
+                        recommendation: None,
+                        source: None,
+                        result: None,
+                        photo: Some(photo),
+                    },
+                    entries,
+                })
+            })
             .collect()
     }
 
@@ -186,6 +320,40 @@ mod tests {
         assert_eq!(d.filtered(&f), [0]);
         f.search = "accept".into();
         assert_eq!(d.filtered(&f), [1]);
+    }
+
+    #[test]
+    fn entries_group_by_photo_with_the_worst_status() {
+        let d = LogData::from_report(&json!({
+            "dry_run": false,
+            "photo_counts": {"total": 3, "transferred": 1, "unchanged": 0, "skipped": 1, "conflict": 0, "error": 1},
+            "entries": [
+                {"status": "transferred", "area": "photos", "item": "a.jpg", "message": "Imported as a reference", "photo": 1},
+                {"status": "transferred", "area": "ratings", "item": "a.jpg", "message": "Star rating set", "photo": 1},
+                {"status": "skipped", "area": "develop", "item": "a.jpg", "message": "2 development fields not carried over", "photo": 1},
+                {"status": "error", "area": "photos", "item": "b.jpg", "message": "LightCraft did not accept the import", "photo": 2},
+                {"status": "transferred", "area": "keywords", "item": "Reise", "message": "Keyword created"},
+            ]
+        }));
+        let groups = d.by_photo(&d.filtered(&Filter::default()));
+        assert_eq!(groups.len(), 2, "the keyword entry belongs to no photo");
+        assert_eq!(
+            groups[0].row.status,
+            Status::Transferred,
+            "a field left out is no skipped photo"
+        );
+        assert_eq!(groups[0].row.area, "3 entries");
+        assert!(
+            groups[0]
+                .row
+                .message
+                .starts_with("Imported as a reference · Star rating set")
+        );
+        assert_eq!(groups[1].row.status, Status::Error);
+        assert_eq!(
+            d.photo_counts.unwrap().line(false),
+            "3 photos: 1 transferred, 1 skipped, 1 with errors"
+        );
     }
 
     #[test]

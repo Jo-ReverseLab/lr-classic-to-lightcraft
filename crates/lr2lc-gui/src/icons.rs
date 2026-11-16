@@ -20,6 +20,8 @@ pub enum Icon {
     Monitor,
     Sun,
     Moon,
+    /// An “i” in a circle: an explanation on hover.
+    Info,
 }
 
 impl Icon {
@@ -77,6 +79,11 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32, angle: f
         Icon::Dot => vec![Shape::circle_filled(p(8.0, 8.0), 1.6 * s, color)],
         // M4 6l4 4 4-4
         Icon::Chevron => vec![line(vec![p(4.0, 6.0), p(8.0, 10.0), p(12.0, 6.0)])],
+        Icon::Info => vec![
+            Shape::circle_stroke(p(8.0, 8.0), 6.0 * s, Stroke::new(1.3 * s.max(1.0), color)),
+            line(vec![p(8.0, 7.3), p(8.0, 11.2)]),
+            Shape::circle_filled(p(8.0, 5.0), 0.9 * s, color),
+        ],
         Icon::Monitor => vec![
             Shape::rect_stroke(
                 Rect::from_min_max(p(2.5, 3.0), p(13.5, 10.5)),

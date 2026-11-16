@@ -59,6 +59,7 @@ matching skipped list.
 | `skipped_by_code` | object | always, may be `{}` | sums the nine catalog areas only (not `writer`) |
 | `writer` | object | always | see [writer](#writer) |
 | `anonymized` | bool | always | `true` with `--anonymize`: entries hold no name, path or value |
+| `photo_counts` | object | always | each photo counted once: `total`, `transferred`, `unchanged`, `skipped`, `conflict`, `error` |
 | `entry_counts` | object | always | entries per status: `adjusted`, `conflict`, `error`, `skipped`, `transferred` |
 | `entries` | array | always | the run log, see the README section “Run log”; each entry has `status`, `area`, `stage`, `item`, `message` and optionally `code`, `reason`, `recommendation`, `source`, `result`, `photo` |
 | `timing` | object | apply | per LightCraft command `{count, ms}`: how often it was sent and the total time waiting for its answers |

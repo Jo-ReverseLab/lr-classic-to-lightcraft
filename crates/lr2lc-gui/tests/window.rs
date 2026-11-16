@@ -5,7 +5,7 @@
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use lr2lc_core::Job;
-use lr2lc_core::probe::Probe;
+use lr2lc_core::probe::{LibraryAction, Probe};
 use lr2lc_gui::app::{App, Tab};
 use lr2lc_gui::host::Host;
 use lr2lc_gui::run::{ChannelProgress, Event, RunResult, execute};
@@ -26,6 +26,9 @@ struct Scripted {
     scans: usize,
     probe: Option<Result<Probe, String>>,
     library: Option<PathBuf>,
+    new_folder: Option<PathBuf>,
+    actions: Vec<LibraryAction>,
+    action_answer: Option<Result<Probe, String>>,
 }
 
 impl Host for Scripted {
@@ -62,6 +65,27 @@ impl Host for Scripted {
     fn probe(&mut self, _port: u16) {}
     fn poll_probe(&mut self) -> Option<Result<Probe, String>> {
         self.probe.clone()
+    }
+    fn pick_new_library_folder(&mut self) -> Option<PathBuf> {
+        self.new_folder.clone()
+    }
+    fn library_action(&mut self, _port: u16, action: LibraryAction) {
+        // Answer like the app: the new or opened library is open now.
+        let path = match &action {
+            LibraryAction::Open(path) => path.clone(),
+            LibraryAction::Create { folder, name } => folder.join(name),
+        };
+        let answer = Probe {
+            persistent: true,
+            library: Some(path),
+            xmp_auto_write: Some(false),
+        };
+        self.probe = Some(Ok(answer.clone()));
+        self.action_answer = Some(Ok(answer));
+        self.actions.push(action);
+    }
+    fn poll_library_action(&mut self) -> Option<Result<Probe, String>> {
+        self.action_answer.take()
     }
 }
 
@@ -120,12 +144,14 @@ struct State {
 }
 
 fn harness(state: State, width: f32) -> Harness<'static, State> {
-    Harness::builder().with_size([width, 860.0]).build_ui_state(
-        |ui, state: &mut State| {
-            state.app.ui(ui, &mut state.host);
-        },
-        state,
-    )
+    Harness::builder()
+        .with_size([width, 1400.0])
+        .build_ui_state(
+            |ui, state: &mut State| {
+                state.app.ui(ui, &mut state.host);
+            },
+            state,
+        )
 }
 
 fn ready(w: &World) -> State {
@@ -383,4 +409,149 @@ fn emoji_in_catalog_names_have_glyphs_in_every_font() {
     h.run_steps(1);
     *h.state_mut() = true;
     h.run_steps(3);
+}
+
+#[test]
+fn an_empty_target_follows_the_library_open_in_lightcraft() {
+    let w = world();
+    let mut state = ready(&w);
+    state.app.settings.library.clear();
+    let mut h = harness(state, 1280.0);
+    h.run_steps(4);
+    assert_eq!(
+        h.state().app.settings.library,
+        w.library.display().to_string()
+    );
+    h.get_by_label("Follows the library that is open in LightCraft.");
+
+    // Choosing another library stops following; one click follows again.
+    let other = w.library.parent().unwrap().join("Other.lightcraft");
+    std::fs::create_dir_all(&other).unwrap();
+    h.state_mut().host.library = Some(other.clone());
+    h.get_by_label("Open existing…").click();
+    h.run_steps(3);
+    assert_eq!(h.state().app.settings.library, other.display().to_string());
+    assert!(!h.state().app.settings.follow_app);
+    h.get_by_label("LightCraft has a different library open than the one chosen here");
+    h.get_by_label("Use library open in LightCraft").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state().app.settings.library,
+        w.library.display().to_string()
+    );
+}
+
+#[test]
+fn the_chosen_library_can_be_opened_in_lightcraft() {
+    let w = world();
+    let mut state = ready(&w);
+    let other = w.library.parent().unwrap().join("Other.lightcraft");
+    std::fs::create_dir_all(&other).unwrap();
+    state.app.settings.library = other.display().to_string();
+    state.app.settings.follow_app = false;
+    let mut h = harness(state, 1280.0);
+    h.run_steps(4);
+    h.get_by_label("Open the chosen library in LightCraft")
+        .click();
+    h.run_steps(4);
+    assert_eq!(h.state().host.actions, [LibraryAction::Open(other)]);
+    h.get_by_label("LightCraft is running, control port connected");
+}
+
+#[test]
+fn a_new_library_is_only_created_after_confirmation() {
+    let w = world();
+    let mut state = ready(&w);
+    let folder = w.library.parent().unwrap().to_path_buf();
+    state.host.new_folder = Some(folder.clone());
+    let mut h = harness(state, 1280.0);
+    h.run_steps(4);
+    h.get_by_label("Create new…").click();
+    h.run_steps(3);
+    assert!(
+        h.state().host.actions.is_empty(),
+        "nothing yet: it asks first"
+    );
+    h.get_by_label("Create a new library");
+    h.get_by_label("Cancel").click();
+    h.run_steps(6);
+    assert!(h.state().host.actions.is_empty());
+    assert!(h.state().app.new_library.is_none());
+
+    h.get_by_label("Create new…").click();
+    h.run_steps(3);
+    h.get_by_label("Create library").click();
+    h.run_steps(4);
+    let expected = folder.join("LightCraft Library");
+    assert_eq!(
+        h.state().host.actions,
+        [LibraryAction::Create {
+            folder,
+            name: "LightCraft Library".into()
+        }]
+    );
+    assert_eq!(
+        h.state().app.settings.library,
+        expected.display().to_string()
+    );
+    assert!(h.state().app.settings.follow_app);
+}
+
+#[test]
+fn checks_explain_themselves_and_options_show_their_counts() {
+    let w = world();
+    let mut h = harness(ready(&w), 1280.0);
+    h.run_steps(4);
+    for what in [
+        "Catalog file (.lrcat)",
+        "Companion file (.lrcat-data)",
+        "Catalog version",
+        "Catalog open in Lightroom",
+        "Write XMP automatically",
+    ] {
+        assert_eq!(
+            h.query_all_by_label_contains(&format!("About {what}: "))
+                .count(),
+            1,
+            "{what} has an explanation"
+        );
+    }
+    // The fixture has 12 keywords; the option row shows the number.
+    let report = h.state().app.scan.report.clone().unwrap();
+    let keywords = report["keywords"]["converted"].as_u64().unwrap();
+    assert!(keywords > 0);
+    assert!(h.query_all_by_label_contains("Keywords").count() >= 1);
+}
+
+#[test]
+fn the_log_counts_photos_once_and_groups_entries_by_photo() {
+    let w = world();
+    let mut h = harness(ready(&w), 1280.0);
+    h.run_steps(4);
+    h.get_by_label("Dry run (writes nothing)").click();
+    h.run_steps(2);
+    h.state_mut()
+        .host
+        .events
+        .push(Event::Done(Box::new(dry_run(&w))));
+    h.run_steps(4);
+    let data = h.state().app.log.data.clone();
+    let counts = data.photo_counts.expect("the report counts photos");
+    assert!(counts.total > 0 && (data.rows.len() as u64) > counts.total);
+    h.get_by_label(&counts.line(true));
+
+    h.get_by_label("Group by photo (one row per photo)").click();
+    h.run_steps(3);
+    assert!(h.state().app.log.group_by_photo);
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(3);
+    let photo = h
+        .state()
+        .app
+        .log
+        .selected_photo
+        .expect("a photo is selected");
+    let groups = data.by_photo(&data.filtered(&Default::default()));
+    assert_eq!(groups[0].photo, photo);
+    assert!(groups.len() as u64 <= counts.total);
 }

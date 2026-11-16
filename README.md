@@ -495,7 +495,10 @@ read, and lr2lc stops with exit code 2 if:
 `report.json` ends with the run log: `entry_counts` (entries per status)
 and `entries`, one entry per thing that was done, adjusted, skipped, in
 conflict or failed, in run order. The summary counts them in a line
-`log: adjusted N, conflict N, error N, skipped N, transferred N`.
+`log entries (one per photo, field, keyword and album): adjusted N, …`,
+after a line that counts each photo once: `photos: N in the catalog,
+transferred N, unchanged N, skipped N, conflict N, error N` (also in
+`report.json` as `photo_counts`).
 
 | Status | Meaning |
 | --- | --- |

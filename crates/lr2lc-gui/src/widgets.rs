@@ -97,10 +97,12 @@ pub fn kv_row(
     value_weight: Option<&'static str>,
     value_color: Color32,
     height: f32,
+    info: Option<&str>,
 ) -> Response {
     let width = ui.available_width();
     let indent = if icon.is_some() { 24.0 } else { 0.0 };
-    let inner = (width - 32.0 - indent).max(40.0);
+    let info_space = if info.is_some() { 22.0 } else { 0.0 };
+    let inner = (width - 32.0 - indent - info_space).max(40.0);
     let layout = |text: &str, weight, color, max: f32| {
         let mut job = LayoutJob::simple_singleline(text.to_owned(), font(13.0, weight), color);
         job.wrap = egui::text::TextWrapping::truncate_at_width(max);
@@ -138,6 +140,7 @@ pub fn kv_row(
         vfull,
         value_color,
     );
+    let label_width = lgal.size().x;
     painter.galley(
         egui::pos2(x, first_y - lgal.size().y / 2.0),
         lgal,
@@ -146,7 +149,38 @@ pub fn kv_row(
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::Role::Label, true, format!("{label}: {value}"))
     });
+    if let Some(info) = info {
+        info_mark(
+            ui,
+            t,
+            egui::pos2(x + label_width + 13.0, first_y),
+            label,
+            info,
+        );
+    }
     response
+}
+
+/// A small “i” in a circle at `center`; hovering it explains `what`.
+pub fn info_mark(ui: &mut Ui, t: &Tokens, center: egui::Pos2, what: &str, info: &str) -> Response {
+    let rect = egui::Rect::from_center_size(center, vec2(18.0, 18.0));
+    let response = ui.interact(rect, ui.scope_id().with(("info", what)), Sense::hover());
+    let color = if response.hovered() {
+        t.text
+    } else {
+        t.text_muted
+    };
+    icons::paint(
+        ui.painter(),
+        egui::Rect::from_center_size(center, vec2(14.0, 14.0)),
+        Icon::Info,
+        color,
+        0.0,
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Label, true, format!("About {what}: {info}"))
+    });
+    response.on_hover_text(info)
 }
 
 /// Uppercase, 11 px semibold, letter-spaced text.
@@ -292,7 +326,15 @@ pub fn chip(
 
 /// A check list row: icon, muted label, value at the right; 36 px high
 /// with a divider above.
-pub fn check_row(ui: &mut Ui, t: &Tokens, icon: Icon, color: Color32, label: &str, value: &str) {
+pub fn check_row(
+    ui: &mut Ui,
+    t: &Tokens,
+    icon: Icon,
+    color: Color32,
+    label: &str,
+    value: &str,
+    info: &str,
+) {
     divider(ui, t);
     kv_row(
         ui,
@@ -303,6 +345,7 @@ pub fn check_row(ui: &mut Ui, t: &Tokens, icon: Icon, color: Color32, label: &st
         Some(MEDIUM),
         t.text,
         36.0,
+        Some(info),
     );
 }
 

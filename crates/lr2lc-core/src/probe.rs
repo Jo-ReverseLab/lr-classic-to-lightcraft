@@ -57,3 +57,39 @@ fn read(sink: &mut dyn CommandSink, command: &str) -> Result<Value, WriteError> 
         }),
     }
 }
+
+/// What to do with LightCraft's open library.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LibraryAction {
+    /// Switch LightCraft to the library at this folder.
+    Open(PathBuf),
+    /// Create a new library folder `name` inside `folder` and switch to it.
+    Create { folder: PathBuf, name: String },
+}
+
+/// Runs `action` in the app on `port` and reports its state afterwards.
+/// Switching libraries can take a while; waits up to two minutes.
+pub fn library_action(port: u16, action: &LibraryAction) -> Result<Probe, WriteError> {
+    let mut client = ControlClient::connect_with_timeout(port, Duration::from_secs(120))?;
+    library_action_with(&mut client, action)
+}
+
+/// Like [`library_action`], through any sink.
+pub fn library_action_with(
+    sink: &mut dyn CommandSink,
+    action: &LibraryAction,
+) -> Result<Probe, WriteError> {
+    let (command, params) = match action {
+        LibraryAction::Open(path) => ("app.openLibrary", json!({"path": path})),
+        LibraryAction::Create { folder, name } => {
+            ("app.newLibrary", json!({"path": folder, "name": name}))
+        }
+    };
+    match sink.execute(command, params)? {
+        Outcome::Applied(_) => probe_with(sink),
+        Outcome::AppliedNotSaved(message) => Err(WriteError::Command {
+            command: command.to_owned(),
+            message,
+        }),
+    }
+}

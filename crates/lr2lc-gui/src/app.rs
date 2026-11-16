@@ -51,6 +51,8 @@ pub struct RunState {
     pub counts: BTreeMap<Status, usize>,
     /// Entries seen so far, per stage.
     pub stage_entries: BTreeMap<Stage, BTreeMap<Status, usize>>,
+    /// The photos that had an entry so far.
+    pub photos_seen: std::collections::BTreeSet<i64>,
     /// The last entries with their time.
     pub tail: VecDeque<(DateTime<Local>, Row)>,
     pub cancelling: bool,
@@ -92,6 +94,10 @@ pub struct LogState {
     pub anonymized_text: String,
     pub filter: Filter,
     pub selected: Option<usize>,
+    /// One row per photo instead of one per entry.
+    pub group_by_photo: bool,
+    /// The photo selected in the grouped view.
+    pub selected_photo: Option<i64>,
     pub copied: bool,
     pub saved: Option<Result<PathBuf, String>>,
     pub anonymize_save: bool,
@@ -113,6 +119,11 @@ pub struct App {
     pub log: LogState,
     pub advanced_open: bool,
     pub problem: Option<String>,
+    /// The new library being confirmed: folder and name.
+    pub new_library: Option<(PathBuf, String)>,
+    /// A library is being opened or created in LightCraft.
+    pub library_busy: bool,
+    pub library_error: Option<String>,
     /// Fonts and themes are installed (on the first frame).
     styled: bool,
 }
@@ -136,6 +147,9 @@ impl App {
             },
             advanced_open: false,
             problem: None,
+            new_library: None,
+            library_busy: false,
+            library_error: None,
             styled: false,
         }
     }
@@ -263,6 +277,12 @@ impl App {
         );
         let (rect, response) =
             ui.allocate_exact_size(vec2(galley.size().x + 32.0, 52.0), Sense::click());
+        // The selected tab is lightly filled, a hovered one a little.
+        if active {
+            ui.painter().rect_filled(rect, 0.0, t.bg_selected);
+        } else if response.hovered() {
+            ui.painter().rect_filled(rect, 0.0, t.bg_raised);
+        }
         ui.painter()
             .galley(rect.center() - galley.size() / 2.0, galley, t.text);
         let bar = egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - 2.0), rect.max);
@@ -408,6 +428,7 @@ impl App {
         self.log.report_text = text;
         self.log.anonymized_text = anonymized;
         self.log.selected = None;
+        self.log.selected_photo = None;
         self.log.copied = false;
         self.log.saved = None;
     }
@@ -437,6 +458,7 @@ impl App {
             writing: false,
             counts: BTreeMap::new(),
             stage_entries: BTreeMap::new(),
+            photos_seen: Default::default(),
             tail: VecDeque::new(),
             cancelling: false,
             result: None,
@@ -463,6 +485,33 @@ impl App {
         }
         if let Some(answer) = host.poll_probe() {
             self.app.answer = Some(answer);
+        }
+        if let Some(answer) = host.poll_library_action() {
+            self.library_busy = false;
+            match answer {
+                Ok(probe) => {
+                    self.library_error = None;
+                    if let Some(path) = &probe.library {
+                        self.settings.library = path.display().to_string();
+                        self.changed = true;
+                    }
+                    self.app.answer = Some(Ok(probe));
+                }
+                Err(e) => self.library_error = Some(e),
+            }
+        }
+        // Following LightCraft: the target is the library it has open.
+        if self.settings.follow_app
+            && !self.is_running()
+            && let Some(Ok(probe)) = &self.app.answer
+            && probe.persistent
+            && let Some(path) = &probe.library
+        {
+            let open = path.display().to_string();
+            if self.settings.library != open {
+                self.settings.library = open;
+                self.changed = true;
+            }
         }
         // LightCraft's state: every 5 s, and at once when the port changes.
         if self.app.port != self.settings.port || self.app.asked_at.is_none_or(|at| now - at > 5.0)
@@ -570,6 +619,9 @@ impl App {
             Event::Entry(entry) => {
                 let row = Row::from_json(&serde_json::to_value(&*entry).unwrap_or(Value::Null));
                 *run.counts.entry(row.status).or_insert(0) += 1;
+                if let Some(photo) = row.photo {
+                    run.photos_seen.insert(photo);
+                }
                 let stage = match row.stage.as_str() {
                     "keywords" => Stage::Keywords,
                     "organize" => Stage::Organize,

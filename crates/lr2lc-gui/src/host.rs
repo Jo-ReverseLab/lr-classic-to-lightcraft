@@ -6,7 +6,7 @@
 
 use crate::run::{ChannelProgress, Event, RunResult, Running, execute};
 use lr2lc_core::Job;
-use lr2lc_core::probe::Probe;
+use lr2lc_core::probe::{LibraryAction, Probe};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -39,6 +39,16 @@ pub trait Host {
     fn probe(&mut self, port: u16);
     /// The probe's answer once it is in.
     fn poll_probe(&mut self) -> Option<Result<Probe, String>>;
+
+    /// Lets the person choose the folder a new library is created in.
+    fn pick_new_library_folder(&mut self) -> Option<PathBuf>;
+    /// Opens or creates a library in LightCraft on `port`.
+    fn library_action(&mut self, port: u16, action: LibraryAction);
+    /// The result of the library action once it is done.
+    fn poll_library_action(&mut self) -> Option<Result<Probe, String>>;
+    /// Brings LightCraft's window forward: it answers commands while its
+    /// window is drawn.
+    fn show_lightcraft(&mut self) {}
 }
 
 /// The standalone app: native dialogs; runs, scans and probes on threads
@@ -48,6 +58,7 @@ pub struct StandaloneHost {
     running: Option<Running>,
     scan: Option<Receiver<RunResult>>,
     probe: Option<Receiver<Result<Probe, String>>>,
+    library: Option<Receiver<Result<Probe, String>>>,
 }
 
 impl Host for StandaloneHost {
@@ -128,5 +139,38 @@ impl Host for StandaloneHost {
         let answer = self.probe.as_ref()?.try_recv().ok()?;
         self.probe = None;
         Some(answer)
+    }
+
+    fn pick_new_library_folder(&mut self) -> Option<PathBuf> {
+        rfd::FileDialog::new()
+            .set_title("Folder for the new library")
+            .pick_folder()
+    }
+
+    fn library_action(&mut self, port: u16, action: LibraryAction) {
+        self.show_lightcraft();
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let answer =
+                lr2lc_core::probe::library_action(port, &action).map_err(|e| e.to_string());
+            let _ = tx.send(answer);
+        });
+        self.library = Some(rx);
+    }
+
+    fn poll_library_action(&mut self) -> Option<Result<Probe, String>> {
+        let answer = self.library.as_ref()?.try_recv().ok()?;
+        self.library = None;
+        Some(answer)
+    }
+
+    fn show_lightcraft(&mut self) {
+        // macOS draws (and so runs commands of) a window that is visible.
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open")
+                .args(["-g", "-a", "LightCraft"])
+                .spawn();
+        }
     }
 }

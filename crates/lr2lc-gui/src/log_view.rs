@@ -117,6 +117,20 @@ fn filters(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
                 }
                 None => {}
             }
+            // Photos first: each counted once, however many entries it has.
+            if let Some(counts) = &app.log.data.photo_counts {
+                ui.label(
+                    RichText::new(counts.line(app.log.data.dry_run))
+                        .font(font(16.0, Some(SEMIBOLD))),
+                );
+            }
+            ui.label(
+                RichText::new(
+                    "Log entries below: one per photo, field, keyword and album, so there are more entries than photos.",
+                )
+                .font(font(12.0, None))
+                .color(t.text_muted),
+            );
             // Segmented status bar (decorative; the chips carry the numbers).
             let data = &app.log.data;
             let order = [
@@ -195,6 +209,15 @@ fn filters(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
                 app.log.search_id = Some(search.id);
             });
             // Area chips.
+            let mut group = app.log.group_by_photo;
+            if ui
+                .checkbox(&mut group, "Group by photo (one row per photo)")
+                .changed()
+            {
+                app.log.group_by_photo = group;
+                app.log.selected = None;
+                app.log.selected_photo = None;
+            }
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("Area").color(t.text_muted));
                 if chip(
@@ -250,16 +273,32 @@ fn entries(app: &mut App, ui: &mut Ui, t: &Tokens) {
         app.log.selected = None;
     }
     let total = app.log.data.rows.len();
+    let groups = if app.log.group_by_photo {
+        let groups = app.log.data.by_photo(&visible);
+        if let Some(sel) = app.log.selected_photo
+            && !groups.iter().any(|g| g.photo == sel)
+        {
+            app.log.selected_photo = None;
+        }
+        Some(groups)
+    } else {
+        None
+    };
     card(ui, t, None, |ui| {
         Frame::new()
             .inner_margin(Margin::symmetric(16, 8))
             .show(ui, |ui| {
                 ui.set_min_height(32.0);
                 ui.horizontal(|ui| {
-                    ui.label(caps(
-                        &format!("Entries · {} of {total}", visible.len()),
-                        t.text_muted,
-                    ));
+                    let title = match &groups {
+                        Some(groups) => format!(
+                            "Photos · {} with {} of {total} entries",
+                            groups.len(),
+                            groups.iter().map(|g| g.entries.len()).sum::<usize>()
+                        ),
+                        None => format!("Entries · {} of {total}", visible.len()),
+                    };
+                    ui.label(caps(&title, t.text_muted));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if text_link(ui, t, "Reset filters").clicked() {
                             app.log.filter = Filter::default();
@@ -277,7 +316,8 @@ fn entries(app: &mut App, ui: &mut Ui, t: &Tokens) {
                 let (rect, _) = ui.allocate_exact_size(vec2(width, 36.0), Sense::hover());
                 ui.painter().rect_filled(rect, 0.0, t.bg_group);
                 let x = cell_xs(rect.min.x, width);
-                for (i, name) in ["Status", "Area", "Item", "Message"]
+                let second = if groups.is_some() { "Entries" } else { "Area" };
+                for (i, name) in ["Status", second, "Item", "Message"]
                     .into_iter()
                     .enumerate()
                 {
@@ -289,7 +329,28 @@ fn entries(app: &mut App, ui: &mut Ui, t: &Tokens) {
                         t.text_muted,
                     );
                 }
-                if visible.is_empty() {
+                if let Some(groups) = &groups
+                    && !groups.is_empty()
+                {
+                    let height = (groups.len() as f32 * 48.0).min(440.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("photos")
+                        .max_height(440.0)
+                        .min_scrolled_height(height)
+                        .auto_shrink([false, true])
+                        .show_rows(ui, 48.0, groups.len(), |ui, range| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            for group in &groups[range] {
+                                let selected = app.log.selected_photo == Some(group.photo);
+                                if entry_row(ui, t, &group.row, selected, width).clicked() {
+                                    app.log.selected_photo = Some(group.photo);
+                                    app.log.copied = false;
+                                }
+                            }
+                        });
+                    return;
+                }
+                if visible.is_empty() || groups.is_some() {
                     Frame::new().inner_margin(Margin::same(24)).show(ui, |ui| {
                         ui.vertical_centered(|ui| {
                             let text = if total == 0 {
@@ -396,7 +457,11 @@ fn entry_row(ui: &mut Ui, t: &Tokens, row: &Row, selected: bool, width: f32) -> 
         ui,
         x[3],
         rect.max.x - 16.0,
-        &row.message,
+        &match &row.source {
+            // The value itself (keyword names, a rating, a path) right in the row.
+            Some(source) if !source.is_empty() => format!("{}: {source}", row.message),
+            _ => row.message.clone(),
+        },
         None,
         t.text_muted,
     );
@@ -428,33 +493,130 @@ fn keyboard(app: &mut App, ui: &mut Ui) {
         return;
     }
     let visible = app.log.data.filtered(&app.log.filter);
-    if visible.is_empty() {
+    // Grouped: move through the photos; else through the entries.
+    let photos: Option<Vec<i64>> = app.log.group_by_photo.then(|| {
+        app.log
+            .data
+            .by_photo(&visible)
+            .iter()
+            .map(|g| g.photo)
+            .collect()
+    });
+    let count = photos.as_ref().map_or(visible.len(), Vec::len);
+    if count == 0 {
         return;
     }
-    let pos = app
-        .log
-        .selected
-        .and_then(|s| visible.iter().position(|&i| i == s));
+    let pos = match &photos {
+        Some(photos) => app
+            .log
+            .selected_photo
+            .and_then(|s| photos.iter().position(|&p| p == s)),
+        None => app
+            .log
+            .selected
+            .and_then(|s| visible.iter().position(|&i| i == s)),
+    };
     let next = ui.input(|i| {
         if i.key_pressed(Key::ArrowDown) {
-            Some(pos.map_or(0, |p| (p + 1).min(visible.len() - 1)))
+            Some(pos.map_or(0, |p| (p + 1).min(count - 1)))
         } else if i.key_pressed(Key::ArrowUp) {
             Some(pos.map_or(0, |p| p.saturating_sub(1)))
         } else if i.key_pressed(Key::Home) {
             Some(0)
         } else if i.key_pressed(Key::End) {
-            Some(visible.len() - 1)
+            Some(count - 1)
         } else {
             None
         }
     });
     if let Some(p) = next {
-        app.log.selected = Some(visible[p]);
+        match &photos {
+            Some(photos) => app.log.selected_photo = photos.get(p).copied(),
+            None => app.log.selected = visible.get(p).copied(),
+        }
         app.log.copied = false;
     }
 }
 
+/// Everything the log has about one photo.
+fn photo_details(app: &mut App, ui: &mut Ui, t: &Tokens, photo: i64) {
+    let visible = app.log.data.filtered(&app.log.filter);
+    let Some(group) = app
+        .log
+        .data
+        .by_photo(&visible)
+        .into_iter()
+        .find(|g| g.photo == photo)
+    else {
+        return;
+    };
+    Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 10.0;
+        ui.add(
+            egui::Label::new(RichText::new(&group.row.item).font(font(16.0, Some(SEMIBOLD))))
+                .wrap(),
+        );
+        ui.label(
+            RichText::new(format!("{} · photo {photo}", group.row.area))
+                .font(font(12.0, None))
+                .color(t.text_muted),
+        );
+        let mut copy = String::new();
+        for index in &group.entries {
+            let row = &app.log.data.rows[*index];
+            divider(ui, t);
+            ui.horizontal(|ui| {
+                let color = status_color(t, row.status);
+                icons::show(ui, Icon::for_status(row.status), color, 16.0);
+                ui.label(
+                    RichText::new(status_label(row.status))
+                        .font(font(13.0, Some(MEDIUM)))
+                        .color(color),
+                );
+                ui.label(RichText::new(area_label(&row.area)).color(t.text_muted));
+            });
+            let text = match &row.source {
+                Some(source) if !source.is_empty() => format!("{}: {source}", row.message),
+                _ => row.message.clone(),
+            };
+            ui.add(egui::Label::new(text).wrap());
+            for extra in [&row.result, &row.reason, &row.recommendation]
+                .into_iter()
+                .flatten()
+            {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(extra)
+                            .font(font(12.0, None))
+                            .color(t.text_muted),
+                    )
+                    .wrap(),
+                );
+            }
+            copy.push_str(&row.details());
+            copy.push('\n');
+        }
+        let label = if app.log.copied {
+            "Copied"
+        } else {
+            "Copy details"
+        };
+        if secondary(ui, t, label, true, 0.0, 40.0).clicked() {
+            ui.ctx().copy_text(copy);
+            app.log.copied = true;
+        }
+    });
+}
+
 fn details(app: &mut App, ui: &mut Ui, t: &Tokens) {
+    if app.log.group_by_photo
+        && let Some(photo) = app.log.selected_photo
+    {
+        card(ui, t, Some("Details"), |ui| {
+            photo_details(app, ui, t, photo)
+        });
+        return;
+    }
     card(ui, t, Some("Details"), |ui| {
         let Some(row) = app
             .log

@@ -330,6 +330,8 @@ struct Library {
     next_album_id: u64,
     seen: usize,
     closed_once: bool,
+    /// The library the app switched to (`app.openLibrary`, `app.newLibrary`).
+    opened: Option<String>,
 }
 
 struct Shared {
@@ -700,8 +702,22 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
     match command {
         "library.info" => Ok(json!({
             "persistent": config.persistent,
-            "path": config.open_library,
+            "path": lib.opened.as_deref().unwrap_or(&config.open_library),
         })),
+        // The app switches libraries; a new one is a folder `name` in `path`.
+        "app.openLibrary" => {
+            let path = params["path"].as_str().ok_or("path missing")?;
+            lib.opened = Some(path.to_string());
+            Ok(json!({"opened": true, "path": path}))
+        }
+        "app.newLibrary" => {
+            let folder = params["path"].as_str().ok_or("path missing")?;
+            let name = params["name"].as_str().ok_or("name missing")?;
+            let dir = std::path::Path::new(folder).join(name);
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            lib.opened = Some(dir.to_string_lossy().into_owned());
+            Ok(json!({"path": dir}))
+        }
         "ui.inspect" => Ok(json!({"libraryProblem": config.library_problem})),
         "library.xmpPreferences" => Ok(json!({"autoWrite": config.auto_write})),
         "library.select" => {

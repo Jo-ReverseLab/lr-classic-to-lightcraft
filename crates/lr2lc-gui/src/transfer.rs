@@ -10,7 +10,9 @@ use crate::theme::{MEDIUM, SEMIBOLD, Tokens, font};
 use crate::widgets::{caps, card, check_row, divider, path_field, primary, secondary};
 use egui::{Align, CornerRadius, Frame, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
 use lr2lc_core::ErrorKind;
+use lr2lc_core::probe::LibraryAction;
 use serde_json::Value;
+use std::path::PathBuf;
 
 /// One reason the start buttons are blocked.
 pub struct Block {
@@ -105,6 +107,35 @@ pub fn blocks(app: &App) -> Vec<Block> {
     out
 }
 
+/// What each check of the catalog means, shown on its “i”.
+fn explain(label: &str) -> &'static str {
+    match label {
+        "Catalog file (.lrcat)" => {
+            "The Lightroom Classic catalog: one file that holds folders, keywords, ratings, collections and development settings. lr2lc only reads it."
+        }
+        "Companion file (.lrcat-data)" => {
+            "A folder newer Lightroom versions keep next to the catalog for AI masks and similar data. lr2lc does not need it; it is fine if it is not there."
+        }
+        "Catalog version" => {
+            "The Lightroom Classic version that last wrote the catalog. lr2lc checks that it knows this format before it reads anything."
+        }
+        "Catalog open in Lightroom" => {
+            "Lightroom keeps unsaved changes outside the catalog file while it is open, so the catalog must be closed to be read reliably. Detected by Lightroom's lock file next to the catalog."
+        }
+        "Write XMP automatically" => {
+            "A LightCraft setting. When it is on, LightCraft writes .xmp files next to your originals for every change, so a transfer would create or change files in your photo folders. lr2lc stops unless you allow it under Advanced."
+        }
+        "Photos without original" => {
+            "Photos whose original file is not found at the path Lightroom recorded (after path mapping). lr2lc creates photos as references to their files, so these are skipped and listed in the log. Connect the drive or add a path mapping."
+        }
+        _ => "",
+    }
+}
+
+fn row(ui: &mut Ui, t: &Tokens, icon: Icon, color: egui::Color32, label: &str, value: &str) {
+    check_row(ui, t, icon, color, label, value, explain(label));
+}
+
 fn source(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
     let running = app.is_running();
     card(ui, t, Some("Source · Lightroom catalog"), |ui| {
@@ -132,13 +163,13 @@ fn source(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
         } else {
             (Icon::Cross, t.error, "not found")
         };
-        check_row(ui, t, icon, color, "Catalog file (.lrcat)", value);
+        row(ui, t, icon, color, "Catalog file (.lrcat)", value);
         let (icon, color, value) = if app.files.companion {
             (Icon::Check, ok, "found")
         } else {
             (Icon::Dash, t.skipped, "not present")
         };
-        check_row(ui, t, icon, color, "Companion file (.lrcat-data)", value);
+        row(ui, t, icon, color, "Companion file (.lrcat-data)", value);
         let scan = &app.scan;
         let (icon, color, value) = match (&scan.report, &scan.error) {
             (_, Some((ErrorKind::Catalog, message))) if message.contains("version") => {
@@ -154,9 +185,9 @@ fn source(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
             ),
             _ => (Icon::Dot, t.skipped, "…".to_owned()),
         };
-        check_row(ui, t, icon, color, "Catalog version", &value);
+        row(ui, t, icon, color, "Catalog version", &value);
         if app.files.open_in_lightroom {
-            check_row(
+            row(
                 ui,
                 t,
                 Icon::Exclamation,
@@ -165,11 +196,11 @@ fn source(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
                 "yes, close Lightroom first",
             );
         } else {
-            check_row(ui, t, Icon::Check, ok, "Catalog open in Lightroom", "no");
+            row(ui, t, Icon::Check, ok, "Catalog open in Lightroom", "no");
         }
         match &app.app.answer {
             Some(Ok(probe)) => match probe.xmp_auto_write {
-                Some(true) if app.settings.allow_xmp => check_row(
+                Some(true) if app.settings.allow_xmp => row(
                     ui,
                     t,
                     Icon::Exclamation,
@@ -177,7 +208,7 @@ fn source(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
                     "Write XMP automatically",
                     "on, continuing as chosen",
                 ),
-                Some(true) => check_row(
+                Some(true) => row(
                     ui,
                     t,
                     Icon::Exclamation,
@@ -185,9 +216,9 @@ fn source(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
                     "Write XMP automatically",
                     "on, lr2lc will stop",
                 ),
-                _ => check_row(ui, t, Icon::Check, ok, "Write XMP automatically", "off"),
+                _ => row(ui, t, Icon::Check, ok, "Write XMP automatically", "off"),
             },
-            _ => check_row(
+            _ => row(
                 ui,
                 t,
                 Icon::Dash,
@@ -200,7 +231,7 @@ fn source(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
             let missing = n(report, &["photos", "by_code", "missing"]);
             if missing > 0 {
                 let total = n(report, &["photos", "read"]);
-                check_row(
+                row(
                     ui,
                     t,
                     Icon::Exclamation,
@@ -231,60 +262,168 @@ fn file_row(
 }
 
 fn target(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
-    let running = app.is_running();
+    let idle = !app.is_running() && !app.library_busy;
+    let connected = matches!(app.app.answer, Some(Ok(_)));
     card(ui, t, Some("Target · LightCraft library"), |ui| {
-        file_row(
-            ui,
-            t,
-            &app.settings.library.clone(),
-            "No library chosen",
-            running,
-            |ui| {
-                if secondary(ui, t, "Choose…", !running, 0.0, 40.0).clicked()
+        Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 10.0;
+            let width = ui.available_width();
+            path_field(ui, t, &app.settings.library, "No library chosen", width);
+            if app.settings.follow_app {
+                ui.label(
+                    RichText::new("Follows the library that is open in LightCraft.")
+                        .font(font(12.0, None))
+                        .color(t.text_muted),
+                );
+            }
+            ui.horizontal_wrapped(|ui| {
+                if secondary(ui, t, "Open existing…", idle, 0.0, 40.0).clicked()
                     && let Some(path) = host.pick_library()
                 {
                     app.settings.library = path.display().to_string();
+                    app.settings.follow_app = false;
+                    app.new_library = None;
                     app.changed = true;
                 }
-            },
-        );
-        Frame::new()
-            .inner_margin(Margin {
-                left: 16,
-                right: 16,
-                top: 0,
-                bottom: 16,
-            })
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let (icon, color, text) = match &app.app.answer {
-                        Some(Ok(probe))
-                            if !app.settings.library.is_empty()
-                                && !probe.has_open(std::path::Path::new(&app.settings.library)) =>
-                        {
-                            (
-                                Icon::Exclamation,
-                                t.conflict,
-                                "LightCraft is running with another library open".to_owned(),
-                            )
-                        }
-                        Some(Ok(_)) => (
-                            Icon::Check,
-                            t.ok,
-                            "LightCraft is running, control port connected".to_owned(),
-                        ),
-                        Some(Err(_)) => (
-                            Icon::Cross,
-                            t.error,
-                            format!("LightCraft not reachable on port {}", app.settings.port),
-                        ),
-                        None => (Icon::Dot, t.skipped, "Checking LightCraft…".to_owned()),
-                    };
-                    icons::show(ui, icon, color, 16.0);
-                    ui.add(egui::Label::new(RichText::new(text).color(t.text_muted)).wrap());
-                });
+                if secondary(ui, t, "Create new…", idle && connected, 0.0, 40.0).clicked()
+                    && let Some(folder) = host.pick_new_library_folder()
+                {
+                    app.new_library = Some((folder, "LightCraft Library".to_owned()));
+                }
+                if !app.settings.follow_app
+                    && secondary(ui, t, "Use library open in LightCraft", idle, 0.0, 40.0).clicked()
+                {
+                    app.settings.follow_app = true;
+                    app.new_library = None;
+                    app.changed = true;
+                }
             });
+            new_library_confirm(app, ui, host, t, idle);
+            // LightCraft's state, and a way to switch it to the chosen library.
+            let mismatch = match &app.app.answer {
+                Some(Ok(probe)) => {
+                    !app.settings.library.is_empty()
+                        && !probe.has_open(std::path::Path::new(&app.settings.library))
+                }
+                _ => false,
+            };
+            let (icon, color, text) = match &app.app.answer {
+                _ if app.library_busy => (
+                    Icon::Arc,
+                    t.ok,
+                    "LightCraft is switching libraries…".to_owned(),
+                ),
+                Some(Ok(_)) if mismatch => (
+                    Icon::Exclamation,
+                    t.conflict,
+                    "LightCraft has a different library open than the one chosen here".to_owned(),
+                ),
+                Some(Ok(_)) => (
+                    Icon::Check,
+                    t.ok,
+                    "LightCraft is running, control port connected".to_owned(),
+                ),
+                Some(Err(_)) => (
+                    Icon::Cross,
+                    t.error,
+                    format!("LightCraft not reachable on port {}", app.settings.port),
+                ),
+                None => (Icon::Dot, t.skipped, "Checking LightCraft…".to_owned()),
+            };
+            ui.horizontal(|ui| {
+                icons::show(ui, icon, color, 16.0);
+                ui.add(egui::Label::new(RichText::new(text).color(t.text_muted)).wrap());
+            });
+            if mismatch
+                && secondary(
+                    ui,
+                    t,
+                    "Open the chosen library in LightCraft",
+                    idle,
+                    0.0,
+                    40.0,
+                )
+                .clicked()
+            {
+                app.library_busy = true;
+                app.library_error = None;
+                host.library_action(
+                    app.settings.port,
+                    LibraryAction::Open(PathBuf::from(&app.settings.library)),
+                );
+            }
+            if let Some(error) = &app.library_error {
+                ui.add(egui::Label::new(RichText::new(error).color(t.error)).wrap());
+            }
+        });
     });
+}
+
+/// The confirmation before a new library is created.
+fn new_library_confirm(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens, idle: bool) {
+    let Some((folder, name)) = &mut app.new_library else {
+        return;
+    };
+    let mut decided = None;
+    Frame::new()
+        .fill(t.bg_group)
+        .stroke(Stroke::new(1.0, t.border_control))
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(Margin::same(12))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 8.0;
+            ui.label(RichText::new("Create a new library").font(font(13.0, Some(SEMIBOLD))));
+            ui.label(RichText::new("Name").font(font(12.0, None)).color(t.text_muted));
+            ui.add(
+                egui::TextEdit::singleline(name)
+                    .desired_width(ui.available_width())
+                    .min_size(vec2(120.0, 40.0))
+                    .align(egui::Align2::LEFT_CENTER),
+            );
+            let valid = !name.trim().is_empty() && !name.contains(['/', '\\']);
+            let target = folder.join(name.trim());
+            let exists = target.exists();
+            ui.add(
+                egui::Label::new(
+                    RichText::new(format!(
+                        "A new LightCraft library will be created in {} and LightCraft will switch to it. Nothing is transferred yet.",
+                        target.display()
+                    ))
+                    .color(t.text_muted),
+                )
+                .wrap(),
+            );
+            if exists {
+                ui.label(RichText::new("This folder already exists. Choose another name.").color(t.error));
+            }
+            ui.horizontal(|ui| {
+                if primary(ui, t, "Create library", idle && valid && !exists, 0.0).clicked() {
+                    decided = Some(true);
+                }
+                if secondary(ui, t, "Cancel", true, 0.0, 44.0).clicked() {
+                    decided = Some(false);
+                }
+            });
+        });
+    match decided {
+        Some(true) => {
+            if let Some((folder, name)) = app.new_library.take() {
+                app.library_busy = true;
+                app.library_error = None;
+                app.settings.follow_app = true;
+                app.changed = true;
+                host.library_action(
+                    app.settings.port,
+                    LibraryAction::Create {
+                        folder,
+                        name: name.trim().to_owned(),
+                    },
+                );
+            }
+        }
+        Some(false) => app.new_library = None,
+        None => {}
+    }
 }
 
 fn mapping(app: &mut App, ui: &mut Ui, t: &Tokens) {
@@ -394,10 +533,30 @@ fn option_row(
     enabled: bool,
     indent: bool,
 ) -> bool {
+    option_row_with(ui, t, None, value, label, hint, enabled, indent)
+}
+
+/// [`option_row`] with the area's count from the catalog at the right.
+#[allow(clippy::too_many_arguments)]
+fn option_row_with(
+    ui: &mut Ui,
+    t: &Tokens,
+    count: Option<&str>,
+    value: &mut bool,
+    label: &str,
+    hint: Option<&str>,
+    enabled: bool,
+    indent: bool,
+) -> bool {
     divider(ui, t);
     let left = if indent { 46.0 } else { 16.0 };
     let width = ui.available_width();
-    let text_width = width - left - 18.0 - 10.0 - 16.0;
+    let count_galley = count.map(|c| {
+        ui.painter()
+            .layout_no_wrap(c.to_owned(), font(12.0, None), t.text_muted)
+    });
+    let count_width = count_galley.as_ref().map_or(0.0, |g| g.size().x + 12.0);
+    let text_width = width - left - 18.0 - 10.0 - 16.0 - count_width;
     let label_galley = ui.painter().layout(
         label.to_owned(),
         font(13.0, Some(MEDIUM)),
@@ -444,6 +603,13 @@ fn option_row(
             Icon::Check,
             if enabled { t.on_accent } else { t.text_muted },
             0.0,
+        );
+    }
+    if let Some(g) = count_galley {
+        painter.galley(
+            egui::pos2(rect.max.x - 16.0 - g.size().x, rect.min.y + 12.0),
+            g,
+            t.text_muted,
         );
     }
     let text_x = box_rect.max.x + 10.0;
@@ -506,6 +672,10 @@ fn what(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
                     });
                 });
             });
+        let counts: std::collections::BTreeMap<&str, String> = summary_rows(app)
+            .into_iter()
+            .map(|(label, _, value)| (label, value))
+            .collect();
         let s = &mut app.settings.selection;
         let mut changed = false;
         group(ui, t, "Always included");
@@ -520,9 +690,10 @@ fn what(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
             false,
         );
         group(ui, t, "Metadata");
-        changed |= option_row(
+        changed |= option_row_with(
             ui,
             t,
+            counts.get("Keywords").map(String::as_str),
             &mut s.keywords,
             "Keywords",
             Some(
@@ -531,20 +702,40 @@ fn what(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
             enabled,
             false,
         );
-        changed |= option_row(
+        changed |= option_row_with(
             ui,
             t,
+            counts.get("Star ratings").map(String::as_str),
             &mut s.ratings,
             "Star ratings (0–5)",
             None,
             enabled,
             false,
         );
-        changed |= option_row(ui, t, &mut s.labels, "Color labels", None, enabled, false);
-        changed |= option_row(ui, t, &mut s.flags, "Flags", None, enabled, false);
-        changed |= option_row(
+        changed |= option_row_with(
             ui,
             t,
+            counts.get("Color labels").map(String::as_str),
+            &mut s.labels,
+            "Color labels",
+            None,
+            enabled,
+            false,
+        );
+        changed |= option_row_with(
+            ui,
+            t,
+            counts.get("Flags").map(String::as_str),
+            &mut s.flags,
+            "Flags",
+            None,
+            enabled,
+            false,
+        );
+        changed |= option_row_with(
+            ui,
+            t,
+            counts.get("Caption and copyright").map(String::as_str),
             &mut s.texts,
             "Caption and copyright",
             Some("Title, caption, copyright and creator, from the IPTC table."),
@@ -552,9 +743,10 @@ fn what(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
             false,
         );
         group(ui, t, "Organization");
-        changed |= option_row(
+        changed |= option_row_with(
             ui,
             t,
+            counts.get("Collections").map(String::as_str),
             &mut s.collections,
             "Collections and collection sets",
             Some(
@@ -563,18 +755,20 @@ fn what(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
             enabled,
             false,
         );
-        changed |= option_row(
+        changed |= option_row_with(
             ui,
             t,
+            counts.get("Stacks").map(String::as_str),
             &mut s.stacks,
             "Stacks and quick collection",
             None,
             enabled,
             false,
         );
-        changed |= option_row(
+        changed |= option_row_with(
             ui,
             t,
+            counts.get("Virtual copies").map(String::as_str),
             &mut s.virtual_copies,
             "Virtual copies",
             None,
@@ -582,9 +776,10 @@ fn what(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
             false,
         );
         group(ui, t, "Develop");
-        changed |= option_row(
+        changed |= option_row_with(
             ui,
             t,
+            counts.get("Develop settings").map(String::as_str),
             &mut s.develop,
             "Develop settings",
             Some("Sliders, curves, crop, masks and spots."),
@@ -743,8 +938,8 @@ fn sum(v: &Value, path: &[&str], keys: &[&str]) -> u64 {
         .sum()
 }
 
-/// The summary value of each area: counts from the scan.
-fn summary(app: &App, ui: &mut Ui, t: &Tokens) {
+/// The count of each area from the scan: label, selected, value.
+fn summary_rows(app: &App) -> Vec<(&'static str, bool, String)> {
     let s = &app.settings.selection;
     let report = app.scan.report.as_ref();
     let count = |f: &dyn Fn(&Value) -> String| match report {
@@ -753,7 +948,7 @@ fn summary(app: &App, ui: &mut Ui, t: &Tokens) {
         None => "–".to_owned(),
     };
     let photos_n = |k: u64| crate::app::plural(k as usize, "photo");
-    let rows: Vec<(&str, bool, String)> = vec![
+    vec![
         (
             "Photos",
             true,
@@ -839,26 +1034,22 @@ fn summary(app: &App, ui: &mut Ui, t: &Tokens) {
             s.develop,
             count(&|r| photos_n(n(r, &["develop", "photos"]))),
         ),
-    ];
+    ]
+}
+
+fn summary(app: &App, ui: &mut Ui, t: &Tokens) {
+    let rows = summary_rows(app);
     card(ui, t, Some("Summary"), |ui| {
         for (i, (label, on, value)) in rows.into_iter().enumerate() {
             if i > 0 {
                 divider(ui, t);
             }
-            if on {
-                crate::widgets::kv_row(ui, t, None, label, &value, Some(MEDIUM), t.text, 36.0);
+            let (value, weight, color) = if on {
+                (value.as_str(), Some(MEDIUM), t.text)
             } else {
-                crate::widgets::kv_row(
-                    ui,
-                    t,
-                    None,
-                    label,
-                    "not transferred",
-                    None,
-                    t.text_muted,
-                    36.0,
-                );
-            }
+                ("not transferred", None, t.text_muted)
+            };
+            crate::widgets::kv_row(ui, t, None, label, value, weight, color, 36.0, None);
         }
     });
 }
