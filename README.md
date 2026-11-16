@@ -489,7 +489,8 @@ same way LightCraft's catalog import does. The angle appears only inside
 Masks (local corrections) go in the same `develop.merge` as LightCraft's
 `masks` array: each mask carries an id, the Lightroom correction name or
 `Mask N`, its visibility, inversion, typed components (linear, radial, brush,
-luminance range, depth range, subject, sky) with their blend operation, and a
+luminance range, depth range, subject, sky, background) with their blend
+operation, and a
 sparse `adjust` object holding the local sliders that were set plus `amount`
 (scaled to 0..200). The four Lightroom mask containers are read in a fixed
 order, so the ids and default names are stable. A mask LightCraft cannot

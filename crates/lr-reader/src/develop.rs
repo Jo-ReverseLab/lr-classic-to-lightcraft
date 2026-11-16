@@ -1166,6 +1166,19 @@ fn field_number(table: &Table, name: &str) -> Option<f64> {
     table_field(table, name).and_then(as_number)
 }
 
+/// A code field such as `MaskSubType`: the catalog stores it as a number,
+/// an XMP packet as text. Both come back as text; a number only when it is
+/// a whole number.
+fn field_code(table: &Table, name: &str) -> Option<String> {
+    match table_field(table, name) {
+        Some(LuaValue::Text(text)) if !text.is_empty() => Some(text.clone()),
+        Some(LuaValue::Number(n)) if n.fract() == 0.0 && n.abs() < 1e9 => {
+            Some(format!("{}", *n as i64))
+        }
+        _ => None,
+    }
+}
+
 fn field_text<'a>(table: &'a Table, name: &str) -> Option<&'a str> {
     match table_field(table, name) {
         Some(LuaValue::Text(text)) if !text.is_empty() => Some(text),
@@ -1363,30 +1376,9 @@ fn read_spot(area: &Table, aspect: f64, skipped: &mut Vec<String>) -> Result<Spo
             )
         }
         "Mask/Paint" => {
-            let points: Vec<Point> = match table_field(mask, "Dabs") {
-                Some(LuaValue::Table(dabs)) => {
-                    let mut points = Vec::new();
-                    let mut invalid = false;
-                    for (_, value) in &dabs.fields {
-                        match value {
-                            LuaValue::Text(dab) => match parse_dab(dab) {
-                                Some(point) => points.push(point),
-                                None => invalid = true,
-                            },
-                            _ => invalid = true,
-                        }
-                    }
-                    if invalid {
-                        skipped.push("dabs".to_owned());
-                    }
-                    points
-                }
-                Some(_) => {
-                    skipped.push("dabs".to_owned());
-                    Vec::new()
-                }
-                None => Vec::new(),
-            };
+            // A spot is one path: its segments are joined, as in
+            // LightCraft's importer.
+            let points: Vec<Point> = dab_segments(mask, skipped).into_iter().flatten().collect();
             if points.is_empty() {
                 return Err("empty brush".to_owned());
             }
@@ -1735,66 +1727,22 @@ fn read_component(
                 invert: !radial_inside(component, container, skipped),
             }
         }
-        "Mask/Paint" => {
-            let points: Vec<Point> = match table_field(component, "Dabs") {
-                Some(LuaValue::Table(dabs)) => {
-                    let mut points = Vec::new();
-                    let mut invalid = false;
-                    for (_, value) in &dabs.fields {
-                        match value {
-                            LuaValue::Text(dab) => match parse_dab(dab) {
-                                Some(point) => points.push(point),
-                                None => invalid = true,
-                            },
-                            _ => invalid = true,
-                        }
-                    }
-                    if invalid {
-                        skipped.push("dabs".to_owned());
-                    }
-                    points
-                }
-                Some(_) => {
-                    skipped.push("dabs".to_owned());
-                    Vec::new()
-                }
-                None => Vec::new(),
-            };
-            if points.is_empty() {
-                return Err("empty brush".to_owned());
-            }
-            let mask_value = match table_field(component, "MaskValue") {
-                None => None,
-                Some(LuaValue::Number(value)) => Some(*value),
-                Some(_) => {
-                    skipped.push("brush density".to_owned());
-                    None
-                }
-            };
-            MaskShape::Brush {
-                strokes: vec![BrushStroke {
-                    points,
-                    size: number_or_default(component, "Radius", 0.03, "brush radius", skipped)
-                        .clamp(0.001, 1.0),
-                    feather: (number_or_default(
-                        component,
-                        "CenterWeight",
-                        0.5,
-                        "brush feather",
-                        skipped,
-                    ) * 100.0)
-                        .clamp(0.0, 100.0),
-                    flow: (number_or_default(component, "Flow", 1.0, "brush flow", skipped)
-                        * 100.0)
-                        .clamp(0.0, 100.0),
-                    density: (mask_value.unwrap_or(1.0).abs() * 100.0).clamp(0.0, 100.0),
-                    erase: mask_value.is_some_and(|value| value <= 0.0),
-                }],
-            }
-        }
-        "Mask/Image" => match field_text(component, "MaskSubType") {
+        "Mask/Paint" => MaskShape::Brush {
+            strokes: paint_strokes(component, skipped)?,
+        },
+        // Lightroom's current brush: a group of paint strokes (erase strokes
+        // included) with the group's own blend mode and invert flag.
+        "Mask/Aggregate" => MaskShape::Brush {
+            strokes: aggregate_strokes(component, skipped)?,
+        },
+        "Mask/Image" => match field_code(component, "MaskSubType").as_deref() {
             Some("1") => MaskShape::Subject,
             Some("2") => MaskShape::Sky,
+            // Subtype 0 is an object selection unless its category is the
+            // background (22).
+            Some("0") if field_code(component, "MaskSubCategoryID").as_deref() == Some("22") => {
+                MaskShape::Background
+            }
             other => {
                 return Err(format!("AI mask ({})", other.unwrap_or("?")));
             }
@@ -1804,7 +1752,7 @@ fn read_component(
                 Some(LuaValue::Table(range)) => range,
                 _ => component,
             };
-            match field_text(range, "Type") {
+            match field_code(range, "Type").as_deref() {
                 Some("2") => {
                     let values = range_values(range, "LumRange", "0 0 1 1", skipped);
                     let [a, b, c, d] = values[..] else {
@@ -1882,16 +1830,149 @@ fn range_values(range: &Table, name: &str, default: &str, skipped: &mut Vec<Stri
     }
 }
 
-/// One brush dab (`d x y`) as a point; the leading command word is skipped.
-fn parse_dab(dab: &str) -> Option<Point> {
-    let mut numbers = dab
-        .split_whitespace()
-        .skip(1)
-        .filter_map(|v| v.parse::<f64>().ok());
-    Some(Point {
-        x: numbers.next()?,
-        y: numbers.next()?,
-    })
+/// One entry of a `Dabs` list.
+#[derive(Debug, PartialEq)]
+enum Dab {
+    /// `M x y`: a point that starts a new, unconnected segment.
+    Move(Point),
+    /// `d x y`: a point connected to the one before.
+    Line(Point),
+    /// Per-stroke state between the points (`f` flow, `h` hardness, `r`
+    /// radius); it carries no position.
+    State,
+}
+
+/// Parses one `Dabs` entry; `None` for anything unknown.
+fn parse_dab(dab: &str) -> Option<Dab> {
+    let mut parts = dab.split_whitespace();
+    let word = parts.next()?;
+    if matches!(word, "f" | "h" | "r") {
+        return Some(Dab::State);
+    }
+    let mut numbers = parts.map(|v| v.parse::<f64>().ok());
+    let (Some(Some(x)), Some(Some(y))) = (numbers.next(), numbers.next()) else {
+        return None;
+    };
+    match word {
+        "M" => Some(Dab::Move(Point { x, y })),
+        "d" => Some(Dab::Line(Point { x, y })),
+        _ => None,
+    }
+}
+
+/// The points of a `Dabs` list as connected segments: every `M` starts a new
+/// segment. A list of the wrong type or an unknown entry is reported as
+/// `dabs`; the readable points are kept.
+fn dab_segments(table: &Table, skipped: &mut Vec<String>) -> Vec<Vec<Point>> {
+    let dabs = match table_field(table, "Dabs") {
+        Some(LuaValue::Table(dabs)) => dabs,
+        Some(_) => {
+            skipped.push("dabs".to_owned());
+            return Vec::new();
+        }
+        None => return Vec::new(),
+    };
+    let mut segments: Vec<Vec<Point>> = Vec::new();
+    let mut invalid = false;
+    for (_, value) in &dabs.fields {
+        let dab = match value {
+            LuaValue::Text(text) => parse_dab(text),
+            _ => None,
+        };
+        match dab {
+            Some(Dab::Move(point)) => segments.push(vec![point]),
+            Some(Dab::Line(point)) => match segments.last_mut() {
+                Some(segment) => segment.push(point),
+                None => segments.push(vec![point]),
+            },
+            Some(Dab::State) => {}
+            None => invalid = true,
+        }
+    }
+    if invalid {
+        skipped.push("dabs".to_owned());
+    }
+    segments
+}
+
+/// One `Mask/Paint` component as brush strokes, one per segment of its
+/// `Dabs` list, all with the component's size, feather, flow and density.
+fn paint_strokes(component: &Table, skipped: &mut Vec<String>) -> Result<Vec<BrushStroke>, String> {
+    let segments = dab_segments(component, skipped);
+    if segments.is_empty() {
+        return Err("empty brush".to_owned());
+    }
+    let mask_value = match table_field(component, "MaskValue") {
+        None => None,
+        Some(LuaValue::Number(value)) => Some(*value),
+        Some(_) => {
+            skipped.push("brush density".to_owned());
+            None
+        }
+    };
+    let size =
+        number_or_default(component, "Radius", 0.03, "brush radius", skipped).clamp(0.001, 1.0);
+    let feather = (number_or_default(component, "CenterWeight", 0.5, "brush feather", skipped)
+        * 100.0)
+        .clamp(0.0, 100.0);
+    let flow = (number_or_default(component, "Flow", 1.0, "brush flow", skipped) * 100.0)
+        .clamp(0.0, 100.0);
+    let density = (mask_value.unwrap_or(1.0).abs() * 100.0).clamp(0.0, 100.0);
+    let erase = mask_value.is_some_and(|value| value <= 0.0);
+    Ok(segments
+        .into_iter()
+        .map(|points| BrushStroke {
+            points,
+            size,
+            feather,
+            flow,
+            density,
+            erase,
+        })
+        .collect())
+}
+
+/// The strokes of a `Mask/Aggregate` component. Every child must be a paint
+/// stroke that adds to the group (`MaskBlendMode` 0 or absent, not
+/// inverted); erase strokes are paint strokes with `MaskValue` 0. LightCraft
+/// combines mask components flat, so another child cannot be expressed and
+/// the whole group is reported as `Aggregate (<child>)`.
+fn aggregate_strokes(
+    component: &Table,
+    skipped: &mut Vec<String>,
+) -> Result<Vec<BrushStroke>, String> {
+    let Some(LuaValue::Table(children)) = table_field(component, "Masks") else {
+        return Err("Aggregate (no strokes)".to_owned());
+    };
+    let mut strokes = Vec::new();
+    for (_, child) in &children.fields {
+        let LuaValue::Table(child) = child else {
+            return Err("Aggregate (unknown child)".to_owned());
+        };
+        let what = field_text(child, "What").unwrap_or("?");
+        if what != "Mask/Paint" {
+            return Err(format!("Aggregate ({what})"));
+        }
+        let adds = matches!(
+            table_field(child, "MaskBlendMode"),
+            None | Some(LuaValue::Number(0.0))
+        );
+        let inverted = matches!(
+            table_field(child, "MaskInverted"),
+            Some(LuaValue::Bool(true))
+        );
+        if !adds || inverted {
+            return Err("Aggregate (combined strokes)".to_owned());
+        }
+        // An empty child stroke draws nothing; the others still count.
+        if let Ok(child_strokes) = paint_strokes(child, skipped) {
+            strokes.extend(child_strokes);
+        }
+    }
+    if strokes.is_empty() {
+        return Err("empty brush".to_owned());
+    }
+    Ok(strokes)
 }
 
 /// Whether a radial component puts its effect inside the ellipse. `Flipped`
@@ -2406,6 +2487,153 @@ mod tests {
             [1, 2, 3, 4]
         );
         assert!(develop.unmapped.is_empty(), "{:?}", develop.unmapped);
+    }
+
+    #[test]
+    fn dab_state_entries_are_skipped_silently() {
+        let develop = parse(
+            r#"s = { MaskGroupBasedCorrections = { { CorrectionMasks = {
+                { What = "Mask/Paint", Dabs = { "r 0.05", "d 0.1 0.2", "f 0.8",
+                  "h 0.3", "d 0.3 0.4" } } } } } }"#,
+        );
+        assert!(develop.unmapped.is_empty(), "{:?}", develop.unmapped);
+        let MaskShape::Brush { strokes } = &develop.masks[0].components[0].shape else {
+            panic!("{:?}", develop.masks[0].components[0].shape);
+        };
+        assert_eq!(
+            strokes[0].points,
+            [Point { x: 0.1, y: 0.2 }, Point { x: 0.3, y: 0.4 }]
+        );
+
+        let spots = parse(
+            r#"s = { RetouchAreas = { { Masks = { { What = "Mask/Paint",
+                Dabs = { "r 0.02", "d 0.5 0.5", "d 0.6 0.5" } } },
+                SpotType = "heal", SourceState = "sourceAutoComputed" } } }"#,
+        );
+        assert!(
+            !spots.unmapped.iter().any(|n| n == "Spot: dabs"),
+            "{:?}",
+            spots.unmapped
+        );
+    }
+
+    #[test]
+    fn every_move_dab_starts_its_own_stroke() {
+        let develop = parse(
+            r#"s = { MaskGroupBasedCorrections = { { CorrectionMasks = {
+                { What = "Mask/Paint", Radius = 0.02, Dabs = {
+                  "M 0.1 0.1", "M 0.5 0.5", "d 0.6 0.5", "r 0.03", "M 0.9 0.9" } } } } } }"#,
+        );
+        assert!(develop.unmapped.is_empty(), "{:?}", develop.unmapped);
+        let MaskShape::Brush { strokes } = &develop.masks[0].components[0].shape else {
+            panic!();
+        };
+        let lens: Vec<usize> = strokes.iter().map(|s| s.points.len()).collect();
+        assert_eq!(lens, [1, 2, 1]);
+        assert!(strokes.iter().all(|s| (s.size - 0.02).abs() < 1e-12));
+    }
+
+    #[test]
+    fn an_unknown_dab_entry_is_reported_and_the_points_kept() {
+        let develop = parse(
+            r#"s = { MaskGroupBasedCorrections = { { CorrectionMasks = {
+                { What = "Mask/Paint", Dabs = { "q 1", "d 0.1 0.2", "d 0.5" } } } } } }"#,
+        );
+        assert_eq!(develop.unmapped, ["Mask: dabs"]);
+        let MaskShape::Brush { strokes } = &develop.masks[0].components[0].shape else {
+            panic!();
+        };
+        assert_eq!(strokes[0].points, [Point { x: 0.1, y: 0.2 }]);
+    }
+
+    #[test]
+    fn an_aggregate_becomes_one_brush_with_its_strokes_and_erasers() {
+        let develop = parse(
+            r#"s = { MaskGroupBasedCorrections = { { CorrectionMasks = {
+                { What = "Mask/Aggregate", MaskBlendMode = 1, MaskInverted = true,
+                  Masks = {
+                    { What = "Mask/Paint", MaskBlendMode = 0, MaskValue = 1,
+                      Radius = 0.04, CenterWeight = 0.2, Flow = 0.5,
+                      Dabs = { "r 0.04", "d 0.1 0.1", "d 0.2 0.2" } },
+                    { What = "Mask/Paint", MaskBlendMode = 0, MaskValue = 0,
+                      Radius = 0.01, Dabs = { "d 0.15 0.15" } },
+                  } } } } } }"#,
+        );
+        assert!(develop.unmapped.is_empty(), "{:?}", develop.unmapped);
+        let component = &develop.masks[0].components[0];
+        assert_eq!(component.op, MaskOp::Subtract);
+        assert!(component.invert);
+        let MaskShape::Brush { strokes } = &component.shape else {
+            panic!("{:?}", component.shape);
+        };
+        assert_eq!(strokes.len(), 2);
+        assert!(!strokes[0].erase);
+        assert_eq!(strokes[0].points.len(), 2);
+        assert!((strokes[0].feather - 20.0).abs() < 1e-9);
+        assert!((strokes[0].flow - 50.0).abs() < 1e-9);
+        assert!(strokes[1].erase, "MaskValue 0 is an eraser");
+    }
+
+    #[test]
+    fn an_aggregate_with_another_child_kind_is_reported_whole() {
+        let develop = parse(
+            r#"s = { MaskGroupBasedCorrections = { { CorrectionMasks = {
+                { What = "Mask/Aggregate", Masks = {
+                    { What = "Mask/Paint", Dabs = { "d 0.1 0.1" } },
+                    { What = "Mask/Gradient" },
+                  } } } } } }"#,
+        );
+        assert!(develop.masks.is_empty());
+        assert_eq!(develop.unmapped, ["Mask: Aggregate (Mask/Gradient)"]);
+
+        let develop = parse(
+            r#"s = { MaskGroupBasedCorrections = { { CorrectionMasks = {
+                { What = "Mask/Aggregate", Masks = {
+                    { What = "Mask/Paint", MaskBlendMode = 2, Dabs = { "d 0.1 0.1" } },
+                  } } } } } }"#,
+        );
+        assert_eq!(develop.unmapped, ["Mask: Aggregate (combined strokes)"]);
+    }
+
+    #[test]
+    fn catalog_codes_stored_as_numbers_map_like_text() {
+        let develop = parse(
+            r#"s = { MaskGroupBasedCorrections = {
+                { CorrectionMasks = { { What = "Mask/Image", MaskSubType = 1 } } },
+                { CorrectionMasks = { { What = "Mask/Image", MaskSubType = 2 } } },
+                { CorrectionMasks = {
+                    { What = "Mask/Image", MaskSubType = 0, MaskSubCategoryID = 22 } } },
+                { CorrectionMasks = { { What = "Mask/RangeMask",
+                    CorrectionRangeMask = { Type = 3, DepthRange = "0.1 0.2 0.8 0.9" } } } },
+                { CorrectionMasks = { { What = "Mask/Image", MaskSubType = 3 } } },
+            } }"#,
+        );
+        let shapes: Vec<&MaskShape> = develop
+            .masks
+            .iter()
+            .map(|m| &m.components[0].shape)
+            .collect();
+        assert_eq!(shapes.len(), 4, "{:?}", develop.unmapped);
+        assert_eq!(*shapes[0], MaskShape::Subject);
+        assert_eq!(*shapes[1], MaskShape::Sky);
+        assert_eq!(*shapes[2], MaskShape::Background);
+        assert!(matches!(shapes[3], MaskShape::DepthRange { .. }));
+        assert_eq!(develop.unmapped, ["Mask: AI mask (3)"]);
+    }
+
+    #[test]
+    fn the_ai_background_maps_and_an_object_stays_reported() {
+        let develop = parse(
+            r#"s = { MaskGroupBasedCorrections = {
+                { CorrectionMasks = {
+                    { What = "Mask/Image", MaskSubType = "0", MaskSubCategoryID = "22" } } },
+                { CorrectionMasks = {
+                    { What = "Mask/Image", MaskSubType = "0" } } },
+            } }"#,
+        );
+        assert_eq!(develop.masks.len(), 1);
+        assert_eq!(develop.masks[0].components[0].shape, MaskShape::Background);
+        assert_eq!(develop.unmapped, ["Mask: AI mask (0)"]);
     }
 
     #[test]

@@ -235,6 +235,8 @@ pub enum MaskShape {
     Subject,
     /// An AI sky selection.
     Sky,
+    /// An AI background selection (everything but the subject).
+    Background,
 }
 
 /// One brush stroke of a brush mask.

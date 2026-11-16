@@ -477,8 +477,9 @@ lrcat-extractor (MPL-2.0).
 | other `Local*` sliders | matching `adjust.*` | stored −1..1 → ×100; hue in degrees | `xmp-interop.md:223-224` |
 | `Mask/Gradient` | linear mask | endpoints from `FullX/Y`, `ZeroX/Y` | `xmp-interop.md:226` |
 | `Mask/CircularGradient` | radial mask | box fractions → long-edge radii; feather and `Flipped` rules differ per container | `xmp-interop.md:227`; `crs_masks.rs:190-195` |
-| `Mask/Paint` | brush mask | dabs, radius, flow, `MaskValue` ≤ 0 erases | `crs_masks.rs:196-220` |
-| `Mask/Image` `MaskSubType` 1 / 2 | subject / sky mask | other AI subtypes are reported as `Mask: AI mask (n)` | `crs_masks.rs:221-225` |
+| `Mask/Paint` | brush mask | `d x y` points, radius, flow, `MaskValue` ≤ 0 erases; `M x y` starts a new unconnected stroke (lr2lc; LightCraft joins them); per-stroke `f`/`h`/`r` entries carry no position and are skipped | `crs_masks.rs:196-220` |
+| `Mask/Aggregate` | brush mask | Lightroom's current brush: its `Masks` children are `Mask/Paint` strokes (erase strokes with `MaskValue` 0) and become the strokes of one brush component with the group's `MaskBlendMode` and `MaskInverted`. A child of another kind or with its own blend mode or invert is reported as `Mask: Aggregate (…)`. LightCraft's importer drops aggregates (`crs_masks.rs:247`); lr2lc maps them (#11) | — |
+| `Mask/Image` `MaskSubType` 1 / 2, or 0 with `MaskSubCategoryID` 22 | subject / sky / background mask | the catalog stores the codes as numbers, XMP as text; both are read. Objects (0 without category 22) and people parts (3) are reported as `Mask: AI mask (n)` | `crs_masks.rs:221-225` |
 | `Mask/RangeMask` type 2 / 3 | luminance / depth range | lightness converted; colour ranges are reported | `crs_masks.rs:226-245` |
 | `MaskBlendMode`, `MaskInverted` | add / subtract / intersect, invert | numbers 0/1/2; any other number is reported as `Mask: blend mode N`, never silently `add` | `xmp-interop.md:231` |
 | `RetouchAreas`, `RetouchInfo` | `spots[]` | mapped (P6-7b): `SpotType = clone` → clone, everything else heal; `Masks[0]` as ellipse (X, Y, SizeX × min(aspect, 1)), circular gradient (box centre, half width × min(aspect, 1)) or brush (dabs after the first token, `Radius` as stored); size clamped 0.001..0.25; feather and opacity ×100, clamped 0..100 (defaults 0 and 1); source offset from absolute `SourceX`/`OffsetY` when `SourceState` is missing or `sourceSetExplicitly`, null when missing or at the same position. `RetouchInfo` is the fallback only when `RetouchAreas` yields no spot: `size = radius × min(aspect, 1)`, feather 0 | `crs_masks.rs:298-431` |
@@ -726,7 +727,7 @@ states which of those names are confirmed and which remain open.
 | Adobe AI denoise | not read by the mapper | `enhance.denoise` control exists | reported (field names not verified) — **(assumption)** | `xmp-interop.md:191-192`; `controls.rs:254` |
 | `SDRBlend` | LightCraft's `Hdr` model has no field for it (section 1.2) | no matching control | reported as `SDRBlend` | section 1.2; `settings.rs:1126-1137`; confirmed on a catalog copy, 2026-11-04 |
 | saved Upright matrices | coordinate convention not imported | geometry mode is recalculated | reported | `crs.rs:528-536` |
-| AI masks other than subject/sky | no counterpart | mask is skipped, other components of the same correction survive | `Mask: AI mask (n)` | `crs_masks.rs:221-225` |
+| AI masks other than subject/sky/background | objects need segmentation points, people parts need mattes most files lack; both would render as a central blob | mask is skipped, other components of the same correction survive | `Mask: AI mask (n)` | `crs_masks.rs:221-225`; `pipeline/src/masks.rs:274-320` |
 | colour-range masks | LightCraft has no colour range shape | mask component skipped | `Mask: colour range` | `crs_masks.rs:240-245` |
 | local sliders without counterpart | no matching `adjust.*` | correction otherwise carried over | `Mask: <field>` | `crs_masks.rs:102-115` |
 | lens profile name/file/digests | LightCraft uses file-embedded corrections | ignored | **silent** (bookkeeping) | `crs.rs:96-104` |

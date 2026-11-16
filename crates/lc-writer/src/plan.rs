@@ -1439,6 +1439,7 @@ fn shape_json(shape: &MaskShape) -> Value {
         }
         MaskShape::Subject => json!({"kind": "subject"}),
         MaskShape::Sky => json!({"kind": "sky"}),
+        MaskShape::Background => json!({"kind": "background"}),
     }
 }
 
@@ -2803,6 +2804,7 @@ mod tests {
             ),
             (MaskShape::Subject, json!({"kind": "subject"})),
             (MaskShape::Sky, json!({"kind": "sky"})),
+            (MaskShape::Background, json!({"kind": "background"})),
         ];
         for (shape, expected) in shapes {
             assert_eq!(shape_json(&shape), expected);
