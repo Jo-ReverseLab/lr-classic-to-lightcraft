@@ -60,11 +60,11 @@ uploads an artefact or creates a GitHub Release; the file ends at line 31.
 
 ### 1.5 Automation
 
-`ci.yml` runs on pushes to `main` and on pull requests (`ci.yml:3-6`): format
-(`ci.yml:41-42`), relative links (`ci.yml:43-45`), personal data in added lines
-(`ci.yml:46-57`), clippy (`ci.yml:58-59`), tests (`ci.yml:60-61`), and an MSRV
-check (`ci.yml:63-79`), across Ubuntu, macOS and Windows (`ci.yml:22-24`). The
-personal-data scan runs only for pull requests (`ci.yml:47`), so a commit
+`ci.yml` runs on pushes to `main`, on pull requests and on manual runs (`ci.yml:3-8`): format
+(`ci.yml:46-47`), relative links (`ci.yml:48-50`), personal data in added lines
+(`ci.yml:51-62`), clippy (`ci.yml:63-64`), tests (`ci.yml:65-66`), and an MSRV
+check (`ci.yml:68-85`), across Ubuntu, macOS and Windows; pull requests run the test job on Ubuntu only and skip the MSRV check (`ci.yml:22-29`, `ci.yml:70`). The
+personal-data scan runs only for pull requests (`ci.yml:52`), so a commit
 pushed straight to `main` is never scanned. `audit.yml` runs weekly and is
 report-only unless an advisory is `high` or `critical` (`audit.yml:3-8`);
 `performance.yml` runs weekly.
@@ -119,10 +119,10 @@ Current practice keeps them; they do not block the release.
      0 failed.
    - `cargo +1.88.0 check --workspace --all-targets --locked` — Expected:
      exit 0, if that toolchain is installed; otherwise rely on the MSRV job
-     (`ci.yml:63-79`).
+     (`ci.yml:68-85`).
 9. Scan the release diff by hand, because CI skips it on a direct push
-   (`ci.yml:47`). Use the pattern and the two example exemptions from
-   `ci.yml:52-54` against the added lines of `git diff --unified=0 main -- .`.
+   (`ci.yml:52`). Use the pattern and the two example exemptions from
+   `ci.yml:58-59` against the added lines of `git diff --unified=0 main -- .`.
    Expected: no output.
 10. Commit in English, imperative mood, one concern per commit (manifest and
     changelog may share one; the `tasks/` removal gets its own). Check:
@@ -220,7 +220,7 @@ A bare header with no body also satisfies the gate (`release.yml:28-31`).
   (`release.yml:11-31`); 0.1.0 ships source only, and a build job is a separate change.
 - **No crates.io publication.** No shipped crate sets `publish = false` and no
   publishing step exists; publication would also need a licence decision.
-- **macOS and Windows beyond CI.** The test matrix (`ci.yml:18-24`) is the only
+- **macOS and Windows beyond CI.** The test matrix (`ci.yml:22-29`) is the only
   proof for those platforms; a real run against the app stays a manual check.
 - **GitHub-side metadata.** Description, topics and visibility live on the
   repository, not in the tree (steps 18-19).
@@ -243,7 +243,7 @@ A bare header with no body also satisfies the gate (`release.yml:28-31`).
 ## Recommendation
 
 Do steps 1-4 on `main`, then steps 5-11 on a short branch merged through a
-pull request, so the personal-data scan (`ci.yml:46-57`) sees the release diff,
+pull request, so the personal-data scan (`ci.yml:51-62`) sees the release diff,
 which a direct push does not. Tag only after that merge is green. Make the
 repository public after the tag run succeeds: the release is then the first
 thing a visitor sees, and a failed gate is fixed while still private. Answer

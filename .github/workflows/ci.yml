@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Full matrix on any branch: `gh workflow run ci.yml --ref <branch>`.
+  workflow_dispatch:
 
 # A newer run on the same ref supersedes the older one, so a branch update
 # does not pay for two full matrices.
@@ -14,13 +16,16 @@ concurrency:
 permissions:
   contents: read
 
+# Private-repository minutes count macOS ten times and Windows twice, so pull
+# requests run on Ubuntu only. Pushes to `main` and manual runs use the full
+# matrix and the MSRV check.
 jobs:
   test:
     name: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -62,6 +67,7 @@ jobs:
 
   msrv:
     name: MSRV (1.88.0)
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

@@ -34,7 +34,7 @@ curves, crop geometry, the white-balance mode, masks and spots).
 Without `--apply`, lr2lc only reports what it would do. Everything that is
 not converted is listed with a reason in the summary and in `report.json`.
 
-CI runs formatting, lint and tests on Linux, macOS and Windows.
+CI runs formatting, lint and tests on Linux, macOS and Windows (pull requests on Linux only).
 
 ## Options
 
@@ -817,7 +817,7 @@ counts the smart collections converted as smart albums.
   Lightroom are only reported, never applied. A moved photo is not imported
   again, and a renamed keyword is neither created nor added. Photos that left
   a collection are removed from the album, but only what lr2lc wrote itself.
-- The CI workflow runs format, lint and tests on Linux, macOS and Windows.
+- The CI workflow runs format, lint and tests on Linux, macOS and Windows; pull requests run on Linux only.
 - Only `127.0.0.1` is contacted; a LightCraft app on another machine is not
   supported.
 
