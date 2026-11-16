@@ -9,7 +9,7 @@ use crate::output;
 use crate::writer::{self, DevelopJson, WriterJson};
 use lc_writer::apply::{Aborted, ApplySummary};
 use lc_writer::control::{CommandSink, WriteError};
-use lc_writer::plan::{Plan, WriteInput};
+use lc_writer::plan::{Areas, Plan, WriteInput};
 use lc_writer::progress::Progress;
 use lc_writer::state::State;
 use model::PathMappings;
@@ -31,6 +31,8 @@ pub struct Job {
     pub port: u16,
     pub allow_xmp: bool,
     pub overwrite_develop: bool,
+    /// The parts of the catalog to write; everything by default.
+    pub areas: Areas,
 }
 
 impl Job {
@@ -109,6 +111,7 @@ pub fn prepare(job: &Job, progress: &mut dyn Progress) -> Result<Prepared, RunEr
         })?;
     let mut input = writer::input(std::mem::take(&mut outcome.converted));
     input.overwrite_develop = job.overwrite_develop;
+    input.areas = job.areas;
     let state = writer::load_state(job.library.as_deref())
         .map_err(|e| RunError::new(ErrorKind::MappingFile, &e))?;
     // Without a connection the library's own keywords are unknown; the
@@ -156,6 +159,7 @@ pub struct Finished {
     /// Why writing stopped, if it did.
     pub stop: Option<WriteError>,
     dry_run: bool,
+    not_selected: Vec<&'static str>,
 }
 
 /// Writes the plan (when `job` writes) through the control port on
@@ -227,6 +231,15 @@ fn finish_by(
             None,
         ),
     };
+    let not_selected = job.areas.not_selected();
+    let writer_summary = if not_selected.is_empty() {
+        writer_summary
+    } else {
+        format!(
+            "not selected: {}\n{writer_summary}",
+            not_selected.join(", ")
+        )
+    };
     // Check again after writing: the catalog must still be unchanged.
     outcome.catalog_unchanged = outcome.catalog_unchanged
         && lr_reader::checksum(&job.catalog).ok() == Some(outcome.catalog_checksum);
@@ -237,6 +250,7 @@ fn finish_by(
         develop,
         stop,
         dry_run: !job.apply,
+        not_selected,
     })
 }
 
@@ -248,6 +262,7 @@ impl Finished {
             self.dry_run,
             Some(&self.writer),
             &self.develop,
+            &self.not_selected,
         )
     }
 

@@ -112,6 +112,7 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
         port: options.port,
         allow_xmp: options.allow_xmp,
         overwrite_develop: options.overwrite_develop,
+        areas: options.areas,
     };
     let prepared = prepare(&job, &mut NoProgress)?;
     if let (Some(target), Some(given)) = (&targets.script, &options.script) {
@@ -155,6 +156,7 @@ mod tests {
             script,
             overwrite_develop: false,
             probe_white_balance: false,
+            areas: lr2lc_core::Areas::ALL,
         }
     }
 

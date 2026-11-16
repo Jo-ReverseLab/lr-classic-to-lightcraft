@@ -29,6 +29,7 @@ fn setup() -> Setup {
         port: 0,
         allow_xmp: false,
         overwrite_develop: false,
+        areas: lr2lc_core::Areas::ALL,
     };
     Setup {
         _photos: photos,
@@ -129,4 +130,29 @@ fn a_cancel_while_reading_is_its_own_error_kind() {
         error.to_string(),
         "stopped by the user; nothing was written"
     );
+}
+
+#[test]
+fn areas_left_out_are_named_in_report_and_summary() {
+    let mut setup = setup();
+    setup.job.apply = false;
+    setup.job.areas = lr2lc_core::Areas::skipping("develop,keywords").unwrap();
+    let prepared = prepare(&setup.job, &mut NoProgress).unwrap();
+    let done = finish(&setup.job, prepared, &mut NoProgress).unwrap();
+    assert!(
+        done.writer_summary
+            .starts_with("not selected: keywords, develop\n")
+    );
+    let report: serde_json::Value = serde_json::from_str(&done.report_json()).unwrap();
+    assert_eq!(
+        report["not_selected"],
+        serde_json::json!(["keywords", "develop"])
+    );
+    assert_eq!(report["writer"]["planned"]["keywords"], 0);
+
+    setup.job.areas = lr2lc_core::Areas::ALL;
+    let prepared = prepare(&setup.job, &mut NoProgress).unwrap();
+    let done = finish(&setup.job, prepared, &mut NoProgress).unwrap();
+    let report: serde_json::Value = serde_json::from_str(&done.report_json()).unwrap();
+    assert!(report.get("not_selected").is_none());
 }

@@ -80,7 +80,7 @@ use crate::albums::{Decision, Existing, Node, parse_album_list};
 use crate::control::{CommandSink, Outcome, WriteError};
 use crate::live::read_live_with;
 use crate::plan::{
-    Conflict, MovedPhoto, RemovedPhoto, RenamedKeyword, Step, WriteInput, group_params,
+    Areas, Conflict, MovedPhoto, RemovedPhoto, RenamedKeyword, Step, WriteInput, group_params,
     import_params, members_select_params, needs_live, plan, renamed_keywords, same_members,
     select_params, smart_skip_reason, snapshot_with_renames,
 };
@@ -346,6 +346,7 @@ pub fn apply_partial_with(
     let renamed = renamed_keywords(input, state).0;
     let mut run = Run {
         client,
+        areas: input.areas,
         progress,
         state,
         state_file,
@@ -502,6 +503,7 @@ struct Current {
 
 struct Run<'a> {
     client: &'a mut dyn CommandSink,
+    areas: Areas,
     progress: &'a mut dyn Progress,
     state: &'a mut State,
     state_file: &'a Path,
@@ -2057,7 +2059,13 @@ impl Run<'_> {
             .recorded
             .get(&current.global_id)
             .cloned()
-            .unwrap_or_else(|| snapshot_with_renames(photo, keywords, &self.renamed));
+            .unwrap_or_else(|| {
+                let mut fields = snapshot_with_renames(photo, keywords, &self.renamed);
+                // An imported photo got none of the areas left out.
+                self.areas
+                    .mask(&mut fields, &PhotoFields::imported_default());
+                fields
+            });
         let develop_changed = develop_hash
             .as_deref()
             .is_some_and(|hash| entry.develop_hash.as_deref() != Some(hash));

@@ -9,6 +9,12 @@ The first release is 0.1.0.
 
 ### Added
 
+- `--skip AREAS` leaves parts of the catalog out: keywords, ratings,
+  labels, flags, texts, collections, stacks, virtual-copies, develop. A part
+  left out sends nothing and is not compared; its fields keep their last
+  imported value, so a later full run writes them. `report.json` lists them
+  under `not_selected`, the summary in a `not selected:` line. Library API:
+  `Job.areas` / `WriteInput.areas` (`Areas`).
 - Lightroom's current brush masks (`Mask/Aggregate`) are carried over as
   brush masks with their strokes and erasers, and the AI background mask
   maps to LightCraft's background mask. On a real catalog, photos with a

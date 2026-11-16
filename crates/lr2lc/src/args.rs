@@ -1,5 +1,6 @@
 //! Command-line argument parsing.
 
+use lr2lc_core::Areas;
 use lr2lc_core::labels::LabelChoice;
 use model::{PathMapping, PathMappings};
 use std::ffi::OsString;
@@ -29,6 +30,10 @@ Options:
   --script FILE    Also write the planned commands as JSON lines to FILE
   --apply          Actually write the LightCraft library through the
                    running app (default: dry run); needs --library
+  --skip AREAS     Leave these parts of the catalog out, comma-separated:
+                   keywords, ratings, labels, flags, texts (title,
+                   caption, copyright, creator), collections, stacks
+                   (with the Quick Collection), virtual-copies, develop
   --overwrite-develop
                    Also rewrite the development settings of known photos
                    that changed in Lightroom (default: left alone)
@@ -65,6 +70,8 @@ pub struct RunOptions {
     /// Opt-in probe of the original file for a white-balance scale. Not
     /// implemented yet: a run given this option stops before it reads anything.
     pub probe_white_balance: bool,
+    /// The parts of the catalog to write (`--skip` leaves some out).
+    pub areas: Areas,
 }
 
 /// The default control port of the LightCraft app.
@@ -84,6 +91,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
     let mut script: Option<PathBuf> = None;
     let mut overwrite_develop = false;
     let mut probe_white_balance = false;
+    let mut areas: Option<Areas> = None;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("-h" | "--help") => return Ok(Command::Help),
@@ -123,6 +131,14 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
                     return Err(format!("--map {spec}: the new prefix is empty"));
                 }
                 rules.push(rule);
+            }
+            Some("--skip") => {
+                if areas.is_some() {
+                    return Err("--skip given more than once".to_string());
+                }
+                let value = args.next().ok_or("--skip needs a list of areas")?;
+                let list = value.to_str().ok_or("--skip value is not valid UTF-8")?;
+                areas = Some(Areas::skipping(list).map_err(|e| format!("--skip: {e}"))?);
             }
             Some("--report") => {
                 if report.is_some() {
@@ -170,6 +186,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
         script,
         overwrite_develop,
         probe_white_balance,
+        areas: areas.unwrap_or_default(),
     }))
 }
 
@@ -392,5 +409,22 @@ mod tests {
         ] {
             assert!(USAGE.contains(opt), "{opt}");
         }
+    }
+
+    #[test]
+    fn skip_leaves_areas_out_once() {
+        let o = run(&["--skip", "develop,keywords", "c.lrcat"]);
+        assert_eq!(o.areas.not_selected(), ["keywords", "develop"]);
+        assert_eq!(run(&["c.lrcat"]).areas, Areas::ALL);
+        assert!(
+            parse(&["--skip", "faces", "c.lrcat"])
+                .unwrap_err()
+                .contains("--skip: unknown area `faces`")
+        );
+        assert!(
+            parse(&["--skip", "develop", "--skip", "flags", "c.lrcat"])
+                .unwrap_err()
+                .contains("--skip given more than once")
+        );
     }
 }

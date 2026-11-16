@@ -128,6 +128,138 @@ pub struct WriteInput {
     /// changed in Lightroom since the last run. Without it such a photo is
     /// only counted (`develop_not_applied`), never silently overwritten.
     pub overwrite_develop: bool,
+    /// The parts of the catalog this run writes; everything by default.
+    pub areas: Areas,
+}
+
+/// The parts of a catalog a run can leave out. A part that is not selected
+/// is neither written nor compared: its fields keep their last imported
+/// value in the mapping file (an import's defaults for a new photo), so
+/// selecting it again later picks up every Lightroom value as a change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Areas {
+    pub keywords: bool,
+    pub ratings: bool,
+    pub labels: bool,
+    pub flags: bool,
+    /// Title, caption, copyright and creator.
+    pub texts: bool,
+    /// Collections, collection sets and smart collections.
+    pub collections: bool,
+    /// Folder stacks and the Quick Collection.
+    pub stacks: bool,
+    pub virtual_copies: bool,
+    pub develop: bool,
+}
+
+impl Default for Areas {
+    fn default() -> Self {
+        Areas::ALL
+    }
+}
+
+impl Areas {
+    /// Everything selected.
+    pub const ALL: Areas = Areas {
+        keywords: true,
+        ratings: true,
+        labels: true,
+        flags: true,
+        texts: true,
+        collections: true,
+        stacks: true,
+        virtual_copies: true,
+        develop: true,
+    };
+
+    /// The name of every area, as `--skip` takes it and the report lists it.
+    pub const NAMES: [&'static str; 9] = [
+        "keywords",
+        "ratings",
+        "labels",
+        "flags",
+        "texts",
+        "collections",
+        "stacks",
+        "virtual-copies",
+        "develop",
+    ];
+
+    fn flag(&mut self, name: &str) -> Option<&mut bool> {
+        Some(match name {
+            "keywords" => &mut self.keywords,
+            "ratings" => &mut self.ratings,
+            "labels" => &mut self.labels,
+            "flags" => &mut self.flags,
+            "texts" => &mut self.texts,
+            "collections" => &mut self.collections,
+            "stacks" => &mut self.stacks,
+            "virtual-copies" => &mut self.virtual_copies,
+            "develop" => &mut self.develop,
+            _ => return None,
+        })
+    }
+
+    /// Whether the area `name` is selected; `None` for an unknown name.
+    pub fn get(&self, name: &str) -> Option<bool> {
+        let mut copy = *self;
+        copy.flag(name).map(|on| *on)
+    }
+
+    /// Selects or deselects the area `name`; false for an unknown name.
+    pub fn set(&mut self, name: &str, on: bool) -> bool {
+        match self.flag(name) {
+            Some(flag) => {
+                *flag = on;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Everything except the areas in the comma-separated `list`.
+    pub fn skipping(list: &str) -> Result<Areas, String> {
+        let mut areas = Areas::ALL;
+        for name in list.split(',').map(str::trim) {
+            if !areas.set(name, false) {
+                return Err(format!(
+                    "unknown area `{name}` (one of {})",
+                    Areas::NAMES.join(", ")
+                ));
+            }
+        }
+        Ok(areas)
+    }
+
+    /// The names of the areas that are not selected, in [`Areas::NAMES`] order.
+    pub fn not_selected(&self) -> Vec<&'static str> {
+        Areas::NAMES
+            .into_iter()
+            .filter(|name| self.get(name) == Some(false))
+            .collect()
+    }
+
+    /// Replaces the fields of every area that is not selected by `base`.
+    pub fn mask(&self, fields: &mut PhotoFields, base: &PhotoFields) {
+        if !self.ratings {
+            fields.rating = base.rating;
+        }
+        if !self.flags {
+            fields.flag = base.flag.clone();
+        }
+        if !self.labels {
+            fields.label = base.label.clone();
+        }
+        if !self.texts {
+            fields.title = base.title.clone();
+            fields.caption = base.caption.clone();
+            fields.copyright = base.copyright.clone();
+            fields.creator = base.creator.clone();
+        }
+        if !self.keywords {
+            fields.keywords = base.keywords.clone();
+        }
+    }
 }
 
 /// One command of the plan.
@@ -758,16 +890,27 @@ pub fn select_params(id: &Value) -> Value {
 /// created again.
 pub fn plan(input: &WriteInput, state: &State, library_keywords: &BTreeSet<String>) -> Plan {
     let mut out = Plan::default();
+    let areas = input.areas;
     let (renamed, renamed_report) = renamed_keywords(input, state);
-    out.renamed_keywords = renamed_report;
-    plan_keywords(input, state, library_keywords, &renamed, &mut out);
+    if areas.keywords {
+        out.renamed_keywords = renamed_report;
+        plan_keywords(input, state, library_keywords, &renamed, &mut out);
+    }
     out.keyword_skips = out.skipped.len();
     plan_photos(input, state, &renamed, &mut out);
     plan_removed_and_moved(input, state, &mut out);
-    plan_stacks(input, state, &mut out);
-    plan_collections(input, state, &mut out);
-    plan_quick(input, state, &mut out);
-    plan_smart(input, state, &mut out);
+    if areas.stacks {
+        plan_stacks(input, state, &mut out);
+    }
+    if areas.collections {
+        plan_collections(input, state, &mut out);
+    }
+    if areas.stacks {
+        plan_quick(input, state, &mut out);
+    }
+    if areas.collections {
+        plan_smart(input, state, &mut out);
+    }
     out
 }
 
@@ -790,8 +933,9 @@ pub(crate) fn needs_live(input: &WriteInput, state: &State) -> bool {
             .get(&photo.lightroom_id)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        let new = snapshot_with_renames(photo, keywords, &renamed);
+        let mut new = snapshot_with_renames(photo, keywords, &renamed);
         let old = &entry.fields;
+        input.areas.mask(&mut new, old);
         new.rating != old.rating
             || new.flag != old.flag
             || new.label != old.label
@@ -1045,6 +1189,9 @@ fn plan_photos(
 
     for gid in order {
         let p = by_gid[gid];
+        if p.master.is_some() && !input.areas.virtual_copies {
+            continue;
+        }
         if let Some(develop) = &p.develop {
             out.develop_photos += 1;
             // An empty name is no profile (the reader already drops it).
@@ -1077,7 +1224,7 @@ fn plan_photos(
             .get(&p.lightroom_id)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        let new = snapshot_with_renames(p, keywords, renamed);
+        let mut new = snapshot_with_renames(p, keywords, renamed);
         let known = state.photo(gid).is_some();
         let old = match state.photo(gid) {
             Some(entry) => entry.fields.clone(),
@@ -1122,6 +1269,7 @@ fn plan_photos(
                 PhotoFields::imported_default()
             }
         };
+        input.areas.mask(&mut new, &old);
         let changes = if known {
             // Memberships that left the photo in Lightroom: they stay in
             // LightCraft, so they are only counted, never sent.
@@ -1163,7 +1311,7 @@ fn plan_photos(
                 params,
             });
         }
-        if let Some(develop) = &p.develop {
+        if let Some(develop) = p.develop.as_ref().filter(|_| input.areas.develop) {
             plan_develop(gid, state.photo(gid), develop, input.overwrite_develop, out);
         }
     }

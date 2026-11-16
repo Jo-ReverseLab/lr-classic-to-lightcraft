@@ -35,6 +35,10 @@ pub struct ReportJson<'a> {
     /// What the writer plans (dry run) or did (`--apply`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub writer: Option<&'a WriterJson>,
+    /// Areas left out of this run (`--skip`), in a fixed order; absent when
+    /// everything was selected.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    pub not_selected: &'a [&'static str],
 }
 
 /// Counts of one kind of element.
@@ -221,7 +225,7 @@ impl<'a> AreaJson<'a> {
 /// Builds the JSON report of a dry run without writer section.
 #[cfg(test)]
 pub fn report_json(outcome: &Outcome) -> String {
-    report_json_with(outcome, true, None, &DevelopJson::default())
+    report_json_with(outcome, true, None, &DevelopJson::default(), &[])
 }
 
 /// Builds the JSON report of a run.
@@ -230,6 +234,7 @@ pub fn report_json_with(
     dry_run: bool,
     writer: Option<&WriterJson>,
     develop: &DevelopJson,
+    not_selected: &[&'static str],
 ) -> String {
     let json = ReportJson {
         tool_version: env!("CARGO_PKG_VERSION"),
@@ -273,6 +278,7 @@ pub fn report_json_with(
             .collect(),
         develop,
         writer,
+        not_selected,
     };
     // Provably infallible: every map in the report has string keys and every
     // value is a plain number, string, bool or list, which serde_json always

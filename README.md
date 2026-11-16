@@ -51,6 +51,7 @@ CI runs formatting, lint and tests on Linux, macOS and Windows (pull requests on
 | `--overwrite-develop` | Also rewrite the development settings of known photos that changed in Lightroom |
 | `--probe-white-balance` | Read an original file to derive the white-balance scale (not implemented yet: the run stops with exit code 2) |
 | `--map OLD=NEW` | Replace a path prefix, repeatable |
+| `--skip AREAS` | Leave parts of the catalog out (comma-separated, see below) |
 | `--label-set SET` | Names of the colour labels: `en`, `de`, `auto` (default) or a JSON file |
 | `--report FILE` | Write `report.json` |
 | `--script FILE` | Write the planned commands as JSON lines |
@@ -280,6 +281,27 @@ yet: LightCraft's control port has no command for it. Support has been
 requested from the LightCraft project
 ([storytold/lightcraft#4392](https://github.com/storytold/lightcraft/issues/4392));
 once it exists, lr2lc will offer it as an option.
+
+### `--skip AREAS`
+
+Leaves parts of the catalog out of the run. `AREAS` is a comma-separated
+list of `keywords`, `ratings`, `labels`, `flags`, `texts` (title, caption,
+copyright and creator), `collections` (with smart collections), `stacks`
+(with the Quick Collection), `virtual-copies` and `develop`. Folders and
+photos are always converted.
+
+```sh
+lr2lc --skip develop,keywords --library ~/Pictures/Lib --apply catalog.lrcat
+```
+
+A part that is left out sends no command and is not compared. Its fields
+keep the value of the last import in the mapping file (a new photo keeps
+LightCraft's import defaults), and items recorded earlier are not reported
+as removed. A later run without `--skip` therefore writes every Lightroom
+value of that part. The summary starts the writer part with `not selected:
+…` and `report.json` lists the names under `not_selected`; both are absent
+when nothing is left out. An unknown name is a command-line error (exit
+code 2).
 
 ### `--label-set SET`
 

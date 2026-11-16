@@ -366,6 +366,8 @@ pub fn input(converted: Converted) -> WriteInput {
         overwrite_develop: false,
         // A dry run never connects; an apply run reads the live state itself.
         live: None,
+        // Set from the job before the plan is built.
+        areas: lc_writer::plan::Areas::ALL,
     }
 }
 

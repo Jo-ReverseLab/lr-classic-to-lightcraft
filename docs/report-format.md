@@ -58,6 +58,7 @@ matching skipped list.
 | `develop` | object | always | see [develop](#develop) |
 | `skipped_by_code` | object | always, may be `{}` | sums the nine catalog areas only (not `writer`) |
 | `writer` | object | always | see [writer](#writer) |
+| `not_selected` | array of strings | only with `--skip` | areas left out, in the order `keywords`, `ratings`, `labels`, `flags`, `texts`, `collections`, `stacks`, `virtual-copies`, `develop`; absent when nothing is left out |
 
 ## Areas
 
