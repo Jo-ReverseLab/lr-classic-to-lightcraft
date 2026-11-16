@@ -44,6 +44,12 @@ The first release is 0.1.0.
   in a German catalog, stays without colour and is reported as custom, as in
   Lightroom. New report field `photos.labels.detected_set`; the summary line
   names the detected set (#5).
+- README: new section "Missing originals" explains why such photos are
+  skipped, what stays behind and how to bring them over (connect the disk or
+  `--map`, then run again). Offline records were requested from LightCraft
+  (storytold/lightcraft#4392). Development settings and known limits now
+  describe white balance, brush and background masks and Upright as they
+  are written (#23).
 
 ### Fixed
 

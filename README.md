@@ -19,8 +19,8 @@ their hierarchy, synonyms and attributes and their assignments to photos, star
 ratings, pick/reject flags, colour labels, titles, captions, copyright and
 creator, collections as albums and collection sets as album folders (with
 their members), smart collections, folder stacks, the Quick Collection and
-development settings (sliders, tone curves, crop geometry, the
-white-balance mode, masks and spots; the stored Lua table is parsed, never
+development settings (sliders, tone curves, crop geometry, Upright mode,
+white balance, masks and spots; the stored Lua table is parsed, never
 executed).
 
 What `--apply` writes into a LightCraft library, through the control port of
@@ -29,7 +29,11 @@ files), ratings, flags, labels, titles, captions, copyright and creator,
 albums and album folders with their members, smart albums (only when the rule
 translates exactly), stacks (always written expanded), the Quick
 Collection (only adding photos) and development settings (sliders, tone
-curves, crop geometry, the white-balance mode, masks and spots).
+curves, crop geometry, Upright mode, white balance, masks and spots).
+
+Photos whose original file cannot be found are skipped; see
+[Missing originals](#missing-originals) for what that means and how to
+bring them over.
 
 Without `--apply`, lr2lc only reports what it would do. Everything that is
 not converted is listed with a reason in the summary and in `report.json`.
@@ -238,6 +242,44 @@ lr2lc --map '/Users/example/Pictures=D:\Photos' catalog.lrcat
 Matching works on the text only and never touches the file system, so it
 behaves the same on every platform. Names are not Unicode-normalized: a
 composed and a decomposed accent stay two different paths.
+
+### Missing originals
+
+lr2lc imports each photo into LightCraft as a reference to its original
+file, so the file has to be there. Before anything is planned it checks
+every photo's original at its path (after `--map`). A photo whose file is
+not found, or cannot be checked, is skipped with the code `missing` and the
+reason `photo N: original file is missing`. Everything that belongs to the
+photo stays behind with it: rating, flag, label, keywords, title and
+caption, album and stack memberships, virtual copies and development
+settings. The summary counts them in the line `N x missing` under
+`skip codes photos:`, and `report.json` lists them under `photos.skipped`
+with the code `missing`; no path is printed.
+
+Typical causes are an external disk or network share that is not connected,
+photos that moved to another disk or computer, and originals that were
+deleted.
+
+To bring them over:
+
+1. Make the originals reachable: connect the disk or mount the share at the
+   path Lightroom knows. If they now live somewhere else, give the old and
+   the new location with [`--map OLD=NEW`](#--map-oldnew).
+2. Run a dry run and check that the `missing` count dropped to the photos
+   you expect.
+3. Run `--apply` again with the same `--library`. Photos converted earlier
+   are recognised through the [mapping file](#mapping-file) and not
+   imported twice; the photos that were missing before are added with their
+   metadata, keywords, albums and development settings, as on a first run.
+
+Photos whose originals are gone for good cannot be converted by lr2lc.
+LightCraft's own Lightroom import (File › Import Lightroom Catalog…) keeps
+such photos as offline records that can be relinked later, but it has no
+re-sync, report or mapping of its own. lr2lc cannot create offline records
+yet: LightCraft's control port has no command for it. Support has been
+requested from the LightCraft project
+([storytold/lightcraft#4392](https://github.com/storytold/lightcraft/issues/4392));
+once it exists, lr2lc will offer it as an option.
 
 ### `--label-set SET`
 
@@ -453,10 +495,8 @@ mode — go as one `develop.merge` directly after a `library.select`, because
 LightCraft applies it to the selection. A photo that needs both gets the
 `develop.set` first.
 
-White balance is written only when the mode is known. A Kelvin hint becomes
-`wb.scale: "kelvin"`; a relative or undecidable hint writes the mode alone.
-Temperature and tint themselves are never written, and neither is any value
-of an unmapped field: those are collected and reported by name.
+A field lr2lc cannot carry over exactly is never written; it is collected
+and reported by name in `unmapped`.
 
 White balance follows LightCraft's own Lightroom import. A named mode
 (As Shot, Auto, Daylight, …) is carried by the mode alone; Lightroom's stored
@@ -486,6 +526,14 @@ into the displayed frame through the stored orientation and image size the
 same way LightCraft's catalog import does. The angle appears only inside
 `crop.geometry`, never as a control.
 
+Upright goes in the same `develop.merge` as `geometry.upright`: Lightroom's
+Auto, Level, Vertical and Full become `auto`, `level`, `vertical` and
+`full`, and LightCraft computes the correction from the photo itself, as its
+own importer does. Guided Upright is not carried over and is reported as
+`PerspectiveUpright`; its guide lines would have to be converted into
+LightCraft's frame. The other `Upright*` fields only matter while Upright is
+on, so they are reported only for photos that use it.
+
 Masks (local corrections) go in the same `develop.merge` as LightCraft's
 `masks` array: each mask carries an id, the Lightroom correction name or
 `Mask N`, its visibility, inversion, typed components (linear, radial, brush,
@@ -493,10 +541,15 @@ luminance range, depth range, subject, sky, background) with their blend
 operation, and a
 sparse `adjust` object holding the local sliders that were set plus `amount`
 (scaled to 0..200). The four Lightroom mask containers are read in a fixed
-order, so the ids and default names are stable. A mask LightCraft cannot
-express — a colour range, an unknown AI subtype, a grain slider, an empty
-brush — is reported under a stable name such as `Mask: colour range` in
-`unmapped`, never written as a partial mask. Masks travel only through
+order, so the ids and default names are stable. Lightroom's current brush
+masks (a group of painted strokes, including erased parts) become brush
+strokes; the AI masks Subject, Sky and Background become `subject`, `sky`
+and `background`. A mask LightCraft cannot express — a colour range, an AI
+object or people part (`Mask: AI mask (N)`; LightCraft would need the
+selection itself, not just its type), a grain slider, an empty brush, a
+brush group with other parts (`Mask: Aggregate (…)`) — is reported under a
+stable name such as `Mask: colour range` in `unmapped`, never written as a
+partial mask. Masks travel only through
 `develop.merge`, never `develop.set`, and the develop hash covers them, so a
 second run plans nothing.
 
@@ -511,6 +564,8 @@ no feather. A spot LightCraft cannot express is reported under a stable name
 (`Spot: <kind>`, `Spot: no mask`, `Spot: empty brush`, `Spot: legacy line`)
 in `unmapped`, never written as a partial spot. Spots travel only through
 `develop.merge`, never `develop.set`, and the develop hash covers them too.
+Lightroom's generative Remove (`RemoveAreas`) cannot be reproduced and is
+reported by name.
 
 The camera profile (`CameraProfile`) is kept byte for byte in the model but
 never written: there is no profile or LUT converter, and a photo that only
@@ -546,8 +601,6 @@ converted photos, sorted, at most 20 entries; `camera_profiles_count` is the
 full number of distinct names and `photos_with_profile` the number of
 converted photos with a profile. Neither the report nor the summary ever
 holds a rendering value.
-
-Spots (healing and cloning) are converted and written through `develop.merge`.
 
 ### `--apply`
 
@@ -814,14 +867,17 @@ counts the smart collections converted as smart albums.
   reported, with a code.
 - The collapsed or expanded state of stacks is only counted, not written;
   stacks are always written expanded.
-- Development settings are written as sliders, tone curves, crop geometry, the
-  white-balance mode and masks. Spots (healing and cloning) are written through
-  `develop.merge`. The camera profile and look are only reported by name, never
-  written, as are temperature, tint and the other unmapped fields. Temperature
-  and tint wait for a probe of the original file because their stored scale is
-  ambiguous.
-  That probe is not implemented yet; `--probe-white-balance` is refused with
-  exit code 2 before the catalog is opened.
+- Photos whose original file is missing are skipped with everything that
+  belongs to them; LightCraft offers no way yet to add them as offline
+  records over the control port (see [Missing originals](#missing-originals)).
+- Development settings are written as sliders, tone curves, crop geometry,
+  Upright mode, white balance, masks and spots. Not carried over, only
+  reported by name: the camera profile and look, Guided Upright, colour range
+  masks, AI object and people-part masks, generative Remove, a Kelvin white
+  balance on a photo LightCraft does not edit in Kelvin, and every other
+  unmapped field (see [Development settings](#development-settings)).
+  `--probe-white-balance` (reading the original file) is not implemented and
+  is refused with exit code 2 before the catalog is opened.
 - A known photo whose development settings changed in Lightroom is left alone
   unless `--overwrite-develop` is given (see
   [Development settings](#development-settings)).

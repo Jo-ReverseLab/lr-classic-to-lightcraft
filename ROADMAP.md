@@ -31,14 +31,18 @@ Open:
 ## 0.3.0 – development settings, part 2
 
 - White balance temperature and tint, using the scale LightCraft reports
-  for each photo (#9)
+  for each photo (#9, done)
 - Confirm and map the remaining development fields: red eye, lens blur,
   point color, manual chromatic aberration, crop flip, enhance (#10)
-- AI masks and aggregate masks (#11)
-- Brush spots and remove areas (#12)
-- Upright and guided perspective corrections (#13)
+- AI masks and aggregate masks (#11; brush groups and background done,
+  objects and people parts open)
+- Brush spots and remove areas (#12; brush spots done, generative Remove
+  open)
+- Upright and guided perspective corrections (#13; Auto, Level, Vertical
+  and Full done, Guided open)
 - Photos whose original file is missing: import them as offline instead of
-  skipping them (#23)
+  skipping them (#23; waits for a LightCraft control command,
+  storytold/lightcraft#4392)
 
 ## Later
 
