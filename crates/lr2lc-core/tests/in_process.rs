@@ -4,7 +4,7 @@
 
 use lc_test_support::fake_lightcraft::{Config, FakeLightCraft};
 use lr2lc_core::labels::LabelMode;
-use lr2lc_core::{HostSink, Job, Request, finish, finish_with, prepare};
+use lr2lc_core::{HostSink, Job, NoProgress, Request, finish, finish_with, prepare};
 use lrcat_fixtures::write_keyword_edge_catalog_with_files;
 use model::PathMappings;
 use std::path::PathBuf;
@@ -54,9 +54,9 @@ fn a_run_through_a_host_sink_matches_a_run_through_the_port() {
     let mut by_port = setup();
     let port_fake = FakeLightCraft::start(Config::new(by_port.job.library.as_deref().unwrap()));
     by_port.job.port = port_fake.port();
-    let prepared = prepare(&by_port.job).unwrap();
+    let prepared = prepare(&by_port.job, &mut NoProgress).unwrap();
     prepared.check_writable().unwrap();
-    let port_done = finish(&by_port.job, prepared).unwrap();
+    let port_done = finish(&by_port.job, prepared, &mut NoProgress).unwrap();
     port_done.result().unwrap();
 
     let local = setup();
@@ -65,8 +65,8 @@ fn a_run_through_a_host_sink_matches_a_run_through_the_port() {
         Request::Command(command) => fake.dispatch(command, params, true),
         Request::Method(method) => fake.dispatch(method, params, false),
     });
-    let prepared = prepare(&local.job).unwrap();
-    let local_done = finish_with(&local.job, prepared, &mut sink).unwrap();
+    let prepared = prepare(&local.job, &mut NoProgress).unwrap();
+    let local_done = finish_with(&local.job, prepared, &mut sink, &mut NoProgress).unwrap();
     local_done.result().unwrap();
 
     assert!(!fake.commands().is_empty());
@@ -81,5 +81,52 @@ fn a_run_through_a_host_sink_matches_a_run_through_the_port() {
     assert_eq!(
         state_text(&local.job).lines().count(),
         state_text(&by_port.job).lines().count()
+    );
+}
+
+/// Records phases; cancels once `stop_at` has started.
+struct Phases {
+    seen: Vec<lr2lc_core::Phase>,
+    stop_at: Option<lr2lc_core::Phase>,
+}
+
+impl lr2lc_core::Progress for Phases {
+    fn phase(&mut self, phase: lr2lc_core::Phase, _total: usize) {
+        self.seen.push(phase);
+    }
+    fn cancelled(&self) -> bool {
+        self.stop_at.is_some_and(|p| self.seen.contains(&p))
+    }
+}
+
+#[test]
+fn reading_reports_its_phases() {
+    use lr2lc_core::Phase;
+    let setup = setup();
+    let mut progress = Phases {
+        seen: Vec::new(),
+        stop_at: None,
+    };
+    prepare(&setup.job, &mut progress).unwrap();
+    assert_eq!(
+        progress.seen,
+        [Phase::Checksum, Phase::Reading, Phase::CheckingOriginals]
+    );
+}
+
+#[test]
+fn a_cancel_while_reading_is_its_own_error_kind() {
+    let setup = setup();
+    let mut progress = Phases {
+        seen: Vec::new(),
+        stop_at: Some(lr2lc_core::Phase::Checksum),
+    };
+    let Err(error) = prepare(&setup.job, &mut progress) else {
+        panic!("expected a cancel");
+    };
+    assert_eq!(error.kind, lr2lc_core::ErrorKind::Cancelled);
+    assert_eq!(
+        error.to_string(),
+        "stopped by the user; nothing was written"
     );
 }

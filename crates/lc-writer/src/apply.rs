@@ -78,12 +78,13 @@
 
 use crate::albums::{Decision, Existing, Node, parse_album_list};
 use crate::control::{CommandSink, Outcome, WriteError};
-use crate::live::read_live;
+use crate::live::read_live_with;
 use crate::plan::{
     Conflict, MovedPhoto, RemovedPhoto, RenamedKeyword, Step, WriteInput, group_params,
     import_params, members_select_params, needs_live, plan, renamed_keywords, same_members,
     select_params, smart_skip_reason, snapshot_with_renames,
 };
+use crate::progress::{NoProgress, Phase, Progress};
 use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, hex_hash, keyword_text};
 use model::{Collection, CollectionKind, Keyword, Photo, SkipCode, Skipped, SmartCollection};
 use serde_json::{Value, json};
@@ -296,6 +297,21 @@ pub fn apply_partial(
     state: &mut State,
     state_file: &Path,
 ) -> Result<ApplySummary, Aborted> {
+    apply_partial_with(client, input, state, state_file, &mut NoProgress)
+}
+
+/// Like [`apply_partial`], reporting progress to `progress`
+/// ([`Phase::ReadingLibrary`], then [`Phase::Writing`] per plan step). A
+/// cancel is honoured only between photos, keywords and album steps; the run
+/// then stops with [`WriteError::Cancelled`] and everything finished so far
+/// is recorded in the mapping file.
+pub fn apply_partial_with(
+    client: &mut dyn CommandSink,
+    input: &WriteInput,
+    state: &mut State,
+    state_file: &Path,
+    progress: &mut dyn Progress,
+) -> Result<ApplySummary, Aborted> {
     let listed = list_keywords(client).map_err(|error| Aborted {
         error,
         summary: Box::default(),
@@ -308,10 +324,12 @@ pub fn apply_partial(
     let live = match &input.live {
         Some(_) => None,
         None if !needs_live(input, state) => None,
-        None => Some(read_live(client, state).map_err(|error| Aborted {
-            error,
-            summary: Box::default(),
-        })?),
+        None => Some(
+            read_live_with(client, state, progress).map_err(|error| Aborted {
+                error,
+                summary: Box::default(),
+            })?,
+        ),
     };
     let with_live;
     let input = if let Some(live) = live {
@@ -328,6 +346,7 @@ pub fn apply_partial(
     let renamed = renamed_keywords(input, state).0;
     let mut run = Run {
         client,
+        progress,
         state,
         state_file,
         summary: ApplySummary {
@@ -483,6 +502,7 @@ struct Current {
 
 struct Run<'a> {
     client: &'a mut dyn CommandSink,
+    progress: &'a mut dyn Progress,
     state: &'a mut State,
     state_file: &'a Path,
     summary: ApplySummary,
@@ -579,11 +599,35 @@ fn wanting(input: &WriteInput, steps: &[Step]) -> BTreeMap<CollectionKey, usize>
 
 impl Run<'_> {
     fn steps(&mut self, steps: &[Step]) -> Result<(), WriteError> {
-        for step in steps {
+        self.progress.phase(Phase::Writing, steps.len());
+        for (done, step) in steps.iter().enumerate() {
+            if self.progress.cancelled() && self.starts_unit(step) {
+                // The photo before has all its steps done; the fields of
+                // known photos are recorded only after a whole run, as after
+                // any other stop, so their updates are sent again.
+                self.finish_photo()?;
+                return Err(WriteError::Cancelled);
+            }
+            self.progress.advance(done);
             self.step(step)?;
         }
+        self.progress.advance(steps.len());
         self.finish_photo()?;
         self.record_converged()
+    }
+
+    /// Whether `step` begins a new unit: anything but a further step of the
+    /// photo being written. Stopping before such a step leaves no photo
+    /// half written.
+    fn starts_unit(&self, step: &Step) -> bool {
+        let photo = match step {
+            Step::Update { global_id, .. }
+            | Step::DevelopSet { global_id, .. }
+            | Step::DevelopMerge { global_id, .. }
+            | Step::DevelopWhiteBalance { global_id, .. } => Some(global_id),
+            _ => None,
+        };
+        photo.is_none() || self.current.as_ref().map(|c| &c.global_id) != photo
     }
 
     fn step(&mut self, step: &Step) -> Result<(), WriteError> {

@@ -75,6 +75,10 @@ pub enum WriteError {
     /// never user content (paths or names).
     #[error("internal invariant broken: {detail}")]
     Internal { detail: String },
+    /// The user stopped the run. Every finished step is recorded; the next
+    /// run continues from there.
+    #[error("stopped by the user; run again to continue")]
+    Cancelled,
 }
 
 impl WriteError {
@@ -94,6 +98,7 @@ impl WriteError {
             WriteError::XmpAutoWrite => "the library writes XMP sidecars automatically".into(),
             WriteError::State(_) => "the mapping file could not be read or written".into(),
             WriteError::Internal { .. } => "an internal invariant broke; the run stopped".into(),
+            WriteError::Cancelled => "stopped by the user".into(),
         }
     }
 }

@@ -14,6 +14,7 @@
 use crate::albums::parse_album_list;
 use crate::apply::{QUERY_PAGE, id_text, parse_keyword_list, parse_query_page, same_id};
 use crate::control::{CommandSink, Outcome, WriteError};
+use crate::progress::{NoProgress, Phase, Progress};
 use crate::state::State;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -78,6 +79,17 @@ pub struct LiveState {
 
 /// Reads the library state for the photos and collections of `state`.
 pub fn read_live(client: &mut dyn CommandSink, state: &State) -> Result<LiveState, WriteError> {
+    read_live_with(client, state, &mut NoProgress)
+}
+
+/// Like [`read_live`], reporting [`Phase::ReadingLibrary`] per photo; a
+/// cancel stops the read with [`WriteError::Cancelled`] (nothing is written
+/// while reading).
+pub fn read_live_with(
+    client: &mut dyn CommandSink,
+    state: &State,
+    progress: &mut dyn Progress,
+) -> Result<LiveState, WriteError> {
     // LightCraft id (as text) -> global id.
     let by_id: HashMap<String, String> = state
         .photos()
@@ -88,7 +100,12 @@ pub fn read_live(client: &mut dyn CommandSink, state: &State) -> Result<LiveStat
     let (present, foreign) = read_photo_streams(client, &by_id)?;
     live.foreign_photos = foreign;
 
-    for (gid, id, mut photo) in present {
+    progress.phase(Phase::ReadingLibrary, present.len());
+    for (done, (gid, id, mut photo)) in present.into_iter().enumerate() {
+        if progress.cancelled() {
+            return Err(WriteError::Cancelled);
+        }
+        progress.advance(done);
         let value = read(client, "photo.inspect", json!({"id": id}))?;
         let (caption, copyright, creator) = parse_inspect(&value)?;
         photo.caption = caption;

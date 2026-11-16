@@ -14,3 +14,4 @@ pub use job::{ErrorKind, Finished, Job, Prepared, RunError, finish, finish_with,
 /// Re-exported so a front end needs no direct dependency on lc-writer to
 /// write through its own [`CommandSink`].
 pub use lc_writer::control::{CommandSink, HostSink, Request};
+pub use lc_writer::progress::{NoProgress, Phase, Progress};

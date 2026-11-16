@@ -4,6 +4,7 @@
 
 use crate::labels::{self, LabelCounts, LabelMode};
 use anyhow::{Context, Result, bail};
+use lc_writer::progress::{NoProgress, Phase, Progress};
 use lr_reader::{Catalog, KeywordData, checksum, drop_missing_originals};
 use model::{
     Collection, CollectionKind, Flag, Folder, Keyword, MappedPath, PathMappings, Photo,
@@ -198,7 +199,39 @@ impl KeywordAttributes {
 /// Fails if the catalog cannot be opened or read. A changed checksum is not
 /// an error here; the caller decides after writing the report.
 pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Result<Outcome> {
+    run_with(path, mappings, label_mode, &mut NoProgress)
+}
+
+/// The run was stopped by the user while the catalog was read.
+#[derive(Debug)]
+pub struct Cancelled;
+
+impl std::fmt::Display for Cancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("stopped by the user; nothing was written")
+    }
+}
+
+impl std::error::Error for Cancelled {}
+
+/// Like [`run`], reporting its phases to `progress`; a cancel between two
+/// phases ends the run with [`Cancelled`].
+pub fn run_with(
+    path: &Path,
+    mappings: &PathMappings,
+    label_mode: &LabelMode,
+    progress: &mut dyn Progress,
+) -> Result<Outcome> {
+    let phase = |progress: &mut dyn Progress, phase: Phase| -> Result<()> {
+        if progress.cancelled() {
+            return Err(Cancelled.into());
+        }
+        progress.phase(phase, 0);
+        Ok(())
+    };
+    phase(progress, Phase::Checksum)?;
     let before = checksum(path).context("cannot read catalog file")?;
+    phase(progress, Phase::Reading)?;
     let (
         catalog_version,
         folders,
@@ -298,6 +331,7 @@ pub fn run(path: &Path, mappings: &PathMappings, label_mode: &LabelMode) -> Resu
                 kept_before_originals.push(p);
             }
         }
+        phase(progress, Phase::CheckingOriginals)?;
         let mut kept_photos = drop_missing_originals(kept_before_originals, &mut photos);
         let labels = labels::apply(&mut kept_photos, &photo_data.color_labels, label_mode);
         for _ in &kept_photos {

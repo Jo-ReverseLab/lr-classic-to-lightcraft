@@ -10,6 +10,7 @@ use crate::writer::{self, DevelopJson, WriterJson};
 use lc_writer::apply::{Aborted, ApplySummary};
 use lc_writer::control::{CommandSink, WriteError};
 use lc_writer::plan::{Plan, WriteInput};
+use lc_writer::progress::Progress;
 use lc_writer::state::State;
 use model::PathMappings;
 use std::collections::BTreeSet;
@@ -50,6 +51,9 @@ pub enum ErrorKind {
     CatalogChanged,
     /// Writing to LightCraft stopped (no connection, pre-flight, lost connection, ...).
     Stopped,
+    /// The user stopped the run. Before writing nothing was written; while
+    /// writing every finished photo is recorded and a new run continues.
+    Cancelled,
 }
 
 /// A failed run: its kind and the message the command line prints.
@@ -91,10 +95,18 @@ pub struct Prepared {
     pub plan: Plan,
 }
 
-/// Reads the catalog, loads the mapping file and plans the writer commands.
-pub fn prepare(job: &Job) -> Result<Prepared, RunError> {
-    let mut outcome = dry_run::run(&job.catalog, &job.mappings, &job.labels)
-        .map_err(|e| RunError::new(ErrorKind::Catalog, &e))?;
+/// Reads the catalog, loads the mapping file and plans the writer commands,
+/// reporting the reading phases to `progress`.
+pub fn prepare(job: &Job, progress: &mut dyn Progress) -> Result<Prepared, RunError> {
+    let mut outcome = dry_run::run_with(&job.catalog, &job.mappings, &job.labels, progress)
+        .map_err(|e| {
+            let kind = if e.is::<dry_run::Cancelled>() {
+                ErrorKind::Cancelled
+            } else {
+                ErrorKind::Catalog
+            };
+            RunError::new(kind, &e)
+        })?;
     let mut input = writer::input(std::mem::take(&mut outcome.converted));
     input.overwrite_develop = job.overwrite_develop;
     let state = writer::load_state(job.library.as_deref())
@@ -149,8 +161,14 @@ pub struct Finished {
 /// Writes the plan (when `job` writes) through the control port on
 /// `job.port`, or keeps it as the dry-run result, then checks that the
 /// catalog is still unchanged.
-pub fn finish(job: &Job, prepared: Prepared) -> Result<Finished, RunError> {
-    finish_by(job, prepared, writer::write)
+pub fn finish(
+    job: &Job,
+    prepared: Prepared,
+    progress: &mut dyn Progress,
+) -> Result<Finished, RunError> {
+    finish_by(job, prepared, |target, input, state| {
+        writer::write(target, input, state, progress)
+    })
 }
 
 /// Like [`finish`], but writes through `sink`, for a host that runs
@@ -159,9 +177,10 @@ pub fn finish_with(
     job: &Job,
     prepared: Prepared,
     sink: &mut dyn CommandSink,
+    progress: &mut dyn Progress,
 ) -> Result<Finished, RunError> {
     finish_by(job, prepared, |target, input, state| {
-        writer::write_to(sink, target, input, state)
+        writer::write_to(sink, target, input, state, progress)
     })
 }
 
@@ -236,7 +255,12 @@ impl Finished {
     /// changed during the run.
     pub fn result(&self) -> Result<(), RunError> {
         if let Some(e) = &self.stop {
-            return Err(RunError::new(ErrorKind::Stopped, &writer::stop_error(e)));
+            let kind = if matches!(e, WriteError::Cancelled) {
+                ErrorKind::Cancelled
+            } else {
+                ErrorKind::Stopped
+            };
+            return Err(RunError::new(kind, &writer::stop_error(e)));
         }
         if !self.outcome.catalog_unchanged {
             return Err(RunError::changed(

@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use args::{Command, RunOptions, USAGE, parse_args};
 use lr2lc_core::labels::LabelMode;
 use lr2lc_core::report_file::{self, Kind, ReportTarget};
-use lr2lc_core::{Job, finish, prepare};
+use lr2lc_core::{Job, NoProgress, finish, prepare};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -103,7 +103,7 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
         allow_xmp: options.allow_xmp,
         overwrite_develop: options.overwrite_develop,
     };
-    let prepared = prepare(&job)?;
+    let prepared = prepare(&job, &mut NoProgress)?;
     if let (Some(target), Some(given)) = (&targets.script, &options.script) {
         report_file::write_as(Kind::Script, target, &prepared.script())
             .with_context(|| format!("cannot write script to {}", given.display()))?;
@@ -113,7 +113,7 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
     }
     // Printed before writing, which can take a while.
     print!("{}", prepared.catalog_summary(&job));
-    let finished = finish(&job, prepared)?;
+    let finished = finish(&job, prepared, &mut NoProgress)?;
     print!("{}", finished.writer_summary);
 
     if let (Some(target), Some(given)) = (&targets.report, &options.report) {
