@@ -458,14 +458,23 @@ White balance is written only when the mode is known. A Kelvin hint becomes
 Temperature and tint themselves are never written, and neither is any value
 of an unmapped field: those are collected and reported by name.
 
-Deriving the scale of a stored temperature needs the original file. That
-probe is not implemented yet and never runs implicitly:
-`--probe-white-balance` exists as an explicit opt-in, but a run given it
-stops with exit code 2 before the catalog is opened or anything is written.
-Without it lr2lc never opens an original photo. The `develop` area therefore
-counts the converted photos whose white balance holds an absolute or
-incremental temperature/tint pair in `white_balance_not_carried`; only the
-number is reported, never a value or a photo id.
+White balance follows LightCraft's own Lightroom import. A named mode
+(As Shot, Auto, Daylight, …) is carried by the mode alone; Lightroom's stored
+numbers for it are not written. A custom white balance carries its numbers:
+a relative pair (`IncrementalTemperature`/`IncrementalTint`, stored for
+JPEG, TIFF and other rendered files) is converted to LightCraft's relative
+scale (0.8 mired per step around 6500 K) and written. A Kelvin pair
+(`Temperature`/`Tint`, stored for raws and DNG) is written as is only when
+LightCraft edits the photo in Kelvin: after the import lr2lc asks
+`photo.inspect`, and only a raw developed from its sensor data with
+`wb.scale` `kelvin` qualifies (DNG files and cameras LightCraft knows a
+Kelvin scale for). On any other photo the Kelvin value would mean something
+else, so it is not carried and only counted. lr2lc never opens an original
+photo for this; `--probe-white-balance` stays refused with exit code 2. The
+`develop` area counts `white_balance_custom` (converted photos with a custom
+pair), `white_balance_to_check` (dry run: Kelvin pairs whose transfer
+LightCraft decides), `white_balance_written` and `white_balance_not_carried`
+(applied run); only numbers, never a value or a photo id.
 
 Tone curves and crop go in the same `develop.merge`. The 2012 curve fields
 become `curve.master`, `curve.red`, `curve.green` and `curve.blue` as arrays
@@ -522,12 +531,13 @@ hash:
 The dry run plans the same commands. The summary has one line
 `develop: photos with settings N, commands planned N, written N, unmapped
 fields N (N listed), changed and not applied N, overwritten N, photos with
-camera profile N, photos with masks N, photos with spots N, white balance not
-carried N`, and `report.json`
+camera profile N, photos with masks N, photos with spots N, custom white
+balance N (to check N, written N, not carried N)`, and `report.json`
 carries the same numbers in its top-level `develop` area (`photos`, `planned`,
 `written`, `unmapped`, `unmapped_count`, `not_applied`, `overwritten`,
 `camera_profiles`, `camera_profiles_count`, `photos_with_profile`, `masks`,
-`spots`, `white_balance_not_carried`). `written` is 0 in a
+`spots`, `white_balance_custom`, `white_balance_to_check`,
+`white_balance_written`, `white_balance_not_carried`). `written` is 0 in a
 dry run.
 `unmapped` lists at most 20 distinct field names, sorted; `unmapped_count`
 is the full count. `camera_profiles` maps each profile name to the number of

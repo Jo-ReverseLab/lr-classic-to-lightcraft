@@ -9,6 +9,13 @@ The first release is 0.1.0.
 
 ### Added
 
+- Custom white balance is carried over (#9). A relative pair (JPEG, TIFF and
+  other rendered files) is converted to LightCraft's relative scale and
+  written. A Kelvin pair (raw, DNG) is written only when LightCraft reports
+  through `photo.inspect` that it edits the photo in Kelvin; otherwise it is
+  counted as not carried. New report fields `develop.white_balance_custom`,
+  `white_balance_to_check` and `white_balance_written`; the summary line
+  shows all four counts. No original file is opened.
 - `keywords.trimmed` in the report and the summary: keywords whose name
   starts or ends with white space. LightCraft trims keyword names, so such a
   keyword arrives without the spaces; this is now reported instead of
@@ -19,6 +26,11 @@ The first release is 0.1.0.
 
 ### Changed
 
+- A named white-balance mode (As Shot, Auto, Daylight, …) no longer counts
+  as `white_balance_not_carried`: the mode carries it, as in LightCraft's own
+  Lightroom import. `Temperature`, `Tint` and the `Incremental*` names no
+  longer appear in `develop.unmapped`; white balance has its own counters
+  (#9).
 - `--label-set auto` now does what Lightroom shows: it detects the active
   label set (English or German, whichever names label more photos) and maps
   only that set's names to colours. A name of the other set, such as `Red`

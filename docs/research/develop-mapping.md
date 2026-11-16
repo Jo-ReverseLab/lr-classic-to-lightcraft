@@ -1111,6 +1111,28 @@ only the WB mode is mapped, and `Temperature`/`Tint` are reported as not
 carried. Nothing is written to the originals either way; the probe never runs
 implicitly.
 
+**Update 2026-11-16 (#9): no probe needed.** LightCraft 0.21's own Lightroom
+importer (`crates/engine/src/crs.rs:44-56`, `:250-307`) and `photo.inspect`
+settle the scale without opening an original:
+
+- A named mode (As Shot, Auto, Daylight, …) is carried by `wb.mode` alone; its
+  stored numbers are dropped, as in LightCraft's importer.
+- Custom with `IncrementalTemperature`/`IncrementalTint` (rendered files):
+  `wb.temp = 1e6 / (1e6/6500 − 0.8 · R)` with `R` clamped to ±100, `wb.tint`
+  as stored; written with `develop.set` (which sets mode `custom`).
+- Custom with `Temperature`/`Tint`: after the import, `photo.inspect` returns
+  the whole photo record. When `kind` is `raw`, `preview_only` is absent and
+  `develop.wb.scale` is `kelvin` (set by LightCraft's import defaults for DNG
+  and for cameras with measured matrices or Kelvin presets,
+  `crates/catalog/src/model.rs:365-380`, `:509-518`), the pair is written
+  as is; `develop.set` normalises the scale. Otherwise it is counted as not
+  carried. A missing original is never probed by LightCraft and therefore
+  never qualifies.
+
+`--probe-white-balance` stays refused. On a real catalog of about 25,000
+photos, 10,484 JPEGs and 7,877 raws are As Shot; only about 70 photos hold a
+custom white balance.
+
 ---
 
 ## 9. Implementation plan P6-1…P6-7

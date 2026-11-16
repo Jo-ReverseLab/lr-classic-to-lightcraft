@@ -183,6 +183,19 @@ pub enum Step {
         /// Nested settings object of `develop.merge`.
         settings: Value,
     },
+    /// Write a custom white balance of one photo (`develop.set` with
+    /// `wb.temp` and `wb.tint`), after its other develop steps. With
+    /// `check_kelvin` the values are Kelvin and are written only when
+    /// `photo.inspect` shows that LightCraft edits the photo on a Kelvin
+    /// scale; otherwise they are already on LightCraft's scale.
+    DevelopWhiteBalance {
+        /// Lightroom global id of the photo.
+        global_id: String,
+        /// `wb.temp` and/or `wb.tint`.
+        values: BTreeMap<String, f64>,
+        /// Ask LightCraft for the photo's scale first.
+        check_kelvin: bool,
+    },
     /// Group photos into a stack (`library.select`, then `stack.group`
     /// with `collapsed: false`); the first photo is the top.
     GroupStack {
@@ -324,10 +337,13 @@ pub struct Plan {
     develop_masks: usize,
     /// Converted photos with at least one spot.
     develop_spots: usize,
-    /// Converted photos whose white balance holds a temperature or tint
-    /// (absolute or incremental) that was not carried over. Only counted,
-    /// never named or valued.
-    develop_white_balance_not_carried: usize,
+    /// Converted photos with a custom white balance (temperature or tint
+    /// stored with mode `custom`). Only counted, never named or valued.
+    develop_white_balance_custom: usize,
+    /// Planned white-balance writes of a Kelvin value: whether they are
+    /// carried depends on LightCraft's scale for the photo, which only the
+    /// applied run can ask.
+    develop_white_balance_to_check: usize,
 }
 
 impl Plan {
@@ -543,10 +559,15 @@ impl Plan {
         self.develop_spots
     }
 
-    /// Converted photos whose white balance holds a temperature or tint
-    /// (absolute or incremental) that was not carried over.
-    pub fn develop_white_balance_not_carried(&self) -> usize {
-        self.develop_white_balance_not_carried
+    /// Converted photos with a custom white balance.
+    pub fn develop_white_balance_custom(&self) -> usize {
+        self.develop_white_balance_custom
+    }
+
+    /// Planned Kelvin white-balance writes that depend on LightCraft's scale
+    /// for the photo.
+    pub fn develop_white_balance_to_check(&self) -> usize {
+        self.develop_white_balance_to_check
     }
 
     /// The plan as a script: one JSON line per step, each an
@@ -659,6 +680,18 @@ impl Plan {
                     selected = Some(global_id);
                     push("library.select", select_params(&id));
                     push("develop.merge", json!({"settings": settings}));
+                }
+                // A Kelvin value depends on LightCraft's scale for the photo,
+                // which a script cannot ask; only `--apply` writes it.
+                Step::DevelopWhiteBalance {
+                    check_kelvin: true, ..
+                } => {}
+                Step::DevelopWhiteBalance {
+                    global_id, values, ..
+                } => {
+                    selected = None;
+                    let id = photo_ref(state, global_id);
+                    push("develop.set", json!({"values": values, "ids": [id]}));
                 }
             }
         }
@@ -1036,7 +1069,7 @@ fn plan_photos(
                 *out.develop_unmapped.entry(name.clone()).or_default() += 1;
             }
             if develop.white_balance.hint != WhiteBalanceHint::None {
-                out.develop_white_balance_not_carried += 1;
+                out.develop_white_balance_custom += 1;
             }
         }
         let keywords = input
@@ -1188,7 +1221,54 @@ fn plan_develop(
             settings,
         });
     }
+    if let Some((values, check_kelvin)) = white_balance_values(develop) {
+        if check_kelvin {
+            out.develop_white_balance_to_check += 1;
+        }
+        out.steps.push(Step::DevelopWhiteBalance {
+            global_id: global_id.to_string(),
+            values,
+            check_kelvin,
+        });
+    }
     out.develop_planned += 1;
+}
+
+/// LightCraft's reference temperature: on a relative scale, 6500 K means
+/// "as shot".
+const RELATIVE_REFERENCE_KELVIN: f64 = 6500.0;
+
+/// Mired per step of Lightroom's `IncrementalTemperature`, as in
+/// LightCraft's own mapper.
+const MIRED_PER_STEP: f64 = 0.8;
+
+/// The `develop.set` values of a custom white balance and whether they are
+/// Kelvin values that need LightCraft's scale check. A relative temperature
+/// (-100..100) becomes LightCraft's relative Kelvin: a mired shift of 0.8
+/// per step around 6500 K. Tints are taken as stored.
+fn white_balance_values(develop: &Develop) -> Option<(BTreeMap<String, f64>, bool)> {
+    let wb = &develop.white_balance;
+    let (temperature, check_kelvin) = match wb.hint {
+        WhiteBalanceHint::None => return None,
+        WhiteBalanceHint::Relative => (wb.temperature.map(relative_to_kelvin), false),
+        WhiteBalanceHint::Kelvin => (wb.temperature, false),
+        WhiteBalanceHint::Undecidable => (wb.temperature, true),
+    };
+    let mut values = BTreeMap::new();
+    if let Some(temperature) = temperature {
+        values.insert("wb.temp".to_owned(), temperature);
+    }
+    if let Some(tint) = wb.tint {
+        values.insert("wb.tint".to_owned(), tint);
+    }
+    (!values.is_empty()).then_some((values, check_kelvin))
+}
+
+/// Lightroom's relative temperature (-100..100) as LightCraft's relative
+/// Kelvin value.
+fn relative_to_kelvin(steps: f64) -> f64 {
+    let steps = steps.clamp(-100.0, 100.0);
+    1e6 / (1e6 / RELATIVE_REFERENCE_KELVIN - MIRED_PER_STEP * steps)
 }
 
 /// Whether the settings hold anything the writer can send. The source hash,
@@ -1197,6 +1277,7 @@ fn has_develop_content(develop: &Develop) -> bool {
     !develop.controls.is_empty()
         || !develop.partial.is_empty()
         || develop.white_balance.mode.is_some()
+        || develop.white_balance.hint != WhiteBalanceHint::None
         || !curves_are_empty(&develop.curves)
         || develop.crop.is_some()
         || !develop.masks.is_empty()
@@ -1209,7 +1290,7 @@ fn has_develop_content(develop: &Develop) -> bool {
 /// `wb.scale: "kelvin"`. The tone curves (delivered by P6-3) become
 /// `curve.master` and the three channel lists, and the crop (also P6-3)
 /// becomes `crop.geometry` with its rectangle and angle. Temperature and tint
-/// never appear: they stay in `unmapped` only.
+/// never appear here: they travel in [`Step::DevelopWhiteBalance`].
 fn develop_settings(develop: &Develop) -> Option<Value> {
     let mut settings = Map::new();
     for (path, value) in &develop.partial {

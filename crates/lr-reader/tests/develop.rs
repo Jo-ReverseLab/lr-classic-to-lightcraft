@@ -273,18 +273,18 @@ fn white_balance_modes_are_normalised() {
             Some("custom"),
             "photo {id} stores {stored:?}"
         );
-        assert_eq!(d.white_balance.hint, WhiteBalanceHint::None);
+        assert_ne!(d.white_balance.hint, WhiteBalanceHint::None);
     }
 }
 
 #[test]
-fn temperature_and_tint_are_reported_not_mapped() {
+fn custom_temperature_and_tint_are_kept_aside_not_mapped() {
     let dir = tempfile::tempdir().unwrap();
     let cat = dev::write_white_balance_catalog_with_files(dir.path()).unwrap();
     let (data, _) = read(&cat);
 
     let d = develop(&data, e::WB_ABSOLUTE_PHOTO);
-    assert_eq!(d.white_balance.mode.as_deref(), Some("cloudy"));
+    assert_eq!(d.white_balance.mode.as_deref(), Some("custom"));
     assert_eq!(
         d.white_balance.hint,
         WhiteBalanceHint::Undecidable,
@@ -294,7 +294,7 @@ fn temperature_and_tint_are_reported_not_mapped() {
         d.controls.is_empty(),
         "no probe for temperature is released"
     );
-    assert_eq!(d.unmapped, names(&e::WB_UNMAPPED_ABSOLUTE));
+    assert!(d.unmapped.is_empty(), "{:?}", d.unmapped);
 }
 
 #[test]
@@ -304,10 +304,10 @@ fn incremental_temperature_and_tint_are_relative() {
     let (data, _) = read(&cat);
 
     let d = develop(&data, e::WB_RELATIVE_PHOTO);
-    assert_eq!(d.white_balance.mode.as_deref(), Some("shade"));
+    assert_eq!(d.white_balance.mode.as_deref(), Some("custom"));
     assert_eq!(d.white_balance.hint, WhiteBalanceHint::Relative);
     assert!(d.controls.is_empty());
-    assert_eq!(d.unmapped, names(&e::WB_UNMAPPED_RELATIVE));
+    assert!(d.unmapped.is_empty(), "{:?}", d.unmapped);
 }
 
 #[test]

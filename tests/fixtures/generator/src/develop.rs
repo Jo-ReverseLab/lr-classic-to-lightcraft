@@ -110,16 +110,20 @@ pub mod edge {
     pub const WB_UNKNOWN_PHOTO: i64 = 11;
     /// A row without any white-balance field.
     pub const WB_NONE_PHOTO: i64 = 12;
-    /// Photo 4 also stores a Kelvin/tint pair: reported, never mapped.
-    pub const WB_ABSOLUTE_PHOTO: i64 = 4;
+    /// The `Custom` photo also stores a Kelvin/tint pair: carried only when
+    /// LightCraft edits the photo in Kelvin.
+    pub const WB_ABSOLUTE_PHOTO: i64 = WB_CUSTOM_PHOTO;
     pub const WB_TEMPERATURE: f64 = 5500.0;
     pub const WB_TINT: f64 = 10.0;
-    /// Photo 5 also stores the incremental pair: relative scale hint.
-    pub const WB_RELATIVE_PHOTO: i64 = 5;
+    /// The invented mode (read as `custom`) also stores the incremental pair:
+    /// relative scale, always carried.
+    pub const WB_RELATIVE_PHOTO: i64 = WB_UNKNOWN_PHOTO;
     pub const WB_INCREMENTAL_TEMPERATURE: f64 = -20.0;
     pub const WB_INCREMENTAL_TINT: f64 = 5.0;
-    pub const WB_UNMAPPED_ABSOLUTE: [&str; 2] = ["Temperature", "Tint"];
-    pub const WB_UNMAPPED_RELATIVE: [&str; 2] = ["IncrementalTemperature", "IncrementalTint"];
+    /// A named mode (`Cloudy`) with a Kelvin/tint pair and one (`Shade`) with
+    /// an incremental pair: the mode carries them, the numbers are dropped.
+    pub const WB_NAMED_ABSOLUTE_PHOTO: i64 = 4;
+    pub const WB_NAMED_RELATIVE_PHOTO: i64 = 5;
 
     /// Balance fixture: one row for every photo of the small fixture.
     pub const BALANCE_PHOTOS: i64 = 20;
@@ -687,17 +691,18 @@ pub fn write_merge_catalog_with_files(dir: &Path) -> Result<PathBuf> {
 }
 
 /// Every named white-balance mode, one custom name, no white-balance fields at
-/// all, and one Kelvin/tint and one incremental pair.
+/// all, and a Kelvin/tint and an incremental pair, each once with a named
+/// mode and once with a custom one.
 pub fn write_white_balance_catalog_with_files(dir: &Path) -> Result<PathBuf> {
     let mut rows: Vec<(i64, String)> = Vec::new();
     for (photo, stored, _expected) in edge::WB_MODES {
         let mut s = settings().text("WhiteBalance", stored);
-        if photo == edge::WB_ABSOLUTE_PHOTO {
+        if photo == edge::WB_NAMED_ABSOLUTE_PHOTO {
             s = s
                 .number("Temperature", edge::WB_TEMPERATURE)
                 .number("Tint", edge::WB_TINT);
         }
-        if photo == edge::WB_RELATIVE_PHOTO {
+        if photo == edge::WB_NAMED_RELATIVE_PHOTO {
             s = s
                 .number("IncrementalTemperature", edge::WB_INCREMENTAL_TEMPERATURE)
                 .number("IncrementalTint", edge::WB_INCREMENTAL_TINT);
@@ -706,11 +711,19 @@ pub fn write_white_balance_catalog_with_files(dir: &Path) -> Result<PathBuf> {
     }
     rows.push((
         edge::WB_CUSTOM_PHOTO,
-        settings().text("WhiteBalance", "Custom").build(),
+        settings()
+            .text("WhiteBalance", "Custom")
+            .number("Temperature", edge::WB_TEMPERATURE)
+            .number("Tint", edge::WB_TINT)
+            .build(),
     ));
     rows.push((
         edge::WB_UNKNOWN_PHOTO,
-        settings().text("WhiteBalance", "Zyx-Odd").build(),
+        settings()
+            .text("WhiteBalance", "Zyx-Odd")
+            .number("IncrementalTemperature", edge::WB_INCREMENTAL_TEMPERATURE)
+            .number("IncrementalTint", edge::WB_INCREMENTAL_TINT)
+            .build(),
     ));
     // A row without any white-balance field: the hint must be None.
     rows.push((

@@ -58,10 +58,29 @@ pub struct DevelopJson {
     pub masks: usize,
     /// Converted photos with at least one spot.
     pub spots: usize,
-    /// Converted photos whose white balance holds a temperature or tint
-    /// (absolute or incremental) that was not carried over. Only the count,
-    /// never a value or a photo id.
+    /// Converted photos with a custom white balance (temperature or tint
+    /// with mode `custom`). A named mode such as As Shot is carried by the
+    /// mode alone and not counted. Only the count, never a value or a photo
+    /// id.
+    pub white_balance_custom: usize,
+    /// Dry run: planned Kelvin white balances whose transfer depends on
+    /// LightCraft's scale for the photo, which only `--apply` can ask.
+    /// Always 0 in an applied run.
+    pub white_balance_to_check: usize,
+    /// Applied run: photos whose custom white balance was written.
+    pub white_balance_written: usize,
+    /// Applied run: photos whose Kelvin white balance was not written
+    /// because LightCraft edits them on a relative scale.
     pub white_balance_not_carried: usize,
+}
+
+/// The white-balance counts of the `develop` section.
+#[derive(Debug, Clone, Copy, Default)]
+struct WhiteBalanceCounts {
+    custom: usize,
+    to_check: usize,
+    written: usize,
+    not_carried: usize,
 }
 
 /// At most this many unmapped field names are listed in the report.
@@ -83,7 +102,11 @@ pub fn planned_develop(plan: &Plan) -> DevelopJson {
         plan.develop_photos_with_profile(),
         plan.develop_masks(),
         plan.develop_spots(),
-        plan.develop_white_balance_not_carried(),
+        WhiteBalanceCounts {
+            custom: plan.develop_white_balance_custom(),
+            to_check: plan.develop_white_balance_to_check(),
+            ..WhiteBalanceCounts::default()
+        },
     )
 }
 
@@ -100,7 +123,12 @@ pub fn applied_develop(s: &ApplySummary) -> DevelopJson {
         s.develop_photos_with_profile,
         s.develop_masks,
         s.develop_spots,
-        s.develop_white_balance_not_carried,
+        WhiteBalanceCounts {
+            custom: s.develop_white_balance_custom,
+            to_check: 0,
+            written: s.develop_white_balance_written,
+            not_carried: s.develop_white_balance_not_carried,
+        },
     )
 }
 
@@ -116,7 +144,7 @@ fn develop_json(
     photos_with_profile: usize,
     masks: usize,
     spots: usize,
-    white_balance_not_carried: usize,
+    wb: WhiteBalanceCounts,
 ) -> DevelopJson {
     DevelopJson {
         photos,
@@ -136,7 +164,10 @@ fn develop_json(
         photos_with_profile,
         masks,
         spots,
-        white_balance_not_carried,
+        white_balance_custom: wb.custom,
+        white_balance_to_check: wb.to_check,
+        white_balance_written: wb.written,
+        white_balance_not_carried: wb.not_carried,
     }
 }
 
@@ -148,7 +179,7 @@ fn develop_line(out: &mut String, d: &DevelopJson) {
         "develop: photos with settings {}, commands planned {}, written {}, \
          unmapped fields {} ({} listed), changed and not applied {}, overwritten {}, \
          photos with camera profile {}, photos with masks {}, photos with spots {}, \
-         white balance not carried {}",
+         custom white balance {} (to check {}, written {}, not carried {})",
         d.photos,
         d.planned,
         d.written,
@@ -159,6 +190,9 @@ fn develop_line(out: &mut String, d: &DevelopJson) {
         d.photos_with_profile,
         d.masks,
         d.spots,
+        d.white_balance_custom,
+        d.white_balance_to_check,
+        d.white_balance_written,
         d.white_balance_not_carried
     );
 }
@@ -378,7 +412,9 @@ pub fn planned(plan: &Plan) -> PlannedJson {
             Step::QuickAdd { gids } => out.quick_add += gids.len(),
             Step::CreateSmart { .. } => out.smart_albums += 1,
             // Counted in the develop section, not in `planned`.
-            Step::DevelopSet { .. } | Step::DevelopMerge { .. } => {}
+            Step::DevelopSet { .. }
+            | Step::DevelopMerge { .. }
+            | Step::DevelopWhiteBalance { .. } => {}
         }
     }
     out
@@ -839,13 +875,15 @@ mod tests {
     }
 
     #[test]
-    fn white_balance_count_is_reported_and_ends_the_summary_line() {
+    fn white_balance_counts_are_reported_and_end_the_summary_line() {
         let mut absolute = Develop::default();
         absolute.white_balance.hint = WhiteBalanceHint::Undecidable;
+        absolute.white_balance.temperature = Some(5000.0);
         let mut relative = Develop::default();
         relative.white_balance.hint = WhiteBalanceHint::Relative;
+        relative.white_balance.temperature = Some(10.0);
         let plan = plan_of(vec![
-            Photo::new("a.jpg", 1, Rating::default())
+            Photo::new("a.dng", 1, Rating::default())
                 .with_global_id("a")
                 .with_develop(absolute),
             Photo::new("b.jpg", 2, Rating::default())
@@ -855,18 +893,23 @@ mod tests {
         ]);
 
         let d = planned_develop(&plan);
-        assert_eq!(d.white_balance_not_carried, 2);
-        assert_eq!(
-            serde_json::to_value(&d).unwrap()["white_balance_not_carried"],
-            2
-        );
+        assert_eq!(d.white_balance_custom, 2);
+        assert_eq!(d.white_balance_to_check, 1);
+        assert_eq!(d.white_balance_written, 0);
+        assert_eq!(d.white_balance_not_carried, 0);
+        let v = serde_json::to_value(&d).unwrap();
+        assert_eq!(v["white_balance_custom"], 2);
+        assert_eq!(v["white_balance_to_check"], 1);
 
         let text = planned_summary(&plan);
         let line = text
             .lines()
             .find(|line| line.starts_with("develop:"))
             .expect("one develop line");
-        assert!(line.ends_with(", white balance not carried 2"), "{line}");
+        assert!(
+            line.ends_with(", custom white balance 2 (to check 1, written 0, not carried 0)"),
+            "{line}"
+        );
     }
 
     #[test]

@@ -918,8 +918,10 @@ fn map_table(
         .fields
         .iter()
         .any(|(name, _)| name.as_deref().is_some_and(|n| n.ends_with("2012")));
-    let mut has_absolute_temperature = false;
-    let mut has_incremental_temperature = false;
+    // (temperature, tint) as stored: `Temperature`/`Tint` and the
+    // `Incremental*` pair.
+    let mut absolute: (Option<f64>, Option<f64>) = (None, None);
+    let mut incremental: (Option<f64>, Option<f64>) = (None, None);
     let mut master_2012 = None;
     let mut red_2012 = None;
     let mut green_2012 = None;
@@ -1006,16 +1008,19 @@ fn map_table(
                 }
                 _ => push_unmapped(&mut develop.unmapped, name),
             },
-            "Temperature" | "Tint" => {
-                has_absolute_temperature = true;
-                // Without probing the original file the scale is unknown, so
-                // the value cannot be carried.
-                push_unmapped(&mut develop.unmapped, name);
-            }
-            "IncrementalTemperature" | "IncrementalTint" => {
-                has_incremental_temperature = true;
-                push_unmapped(&mut develop.unmapped, name);
-            }
+            // Kept aside: whether they are carried depends on the mode (read
+            // after the loop) and, for Kelvin values, on LightCraft's scale
+            // for the photo. The report counts them in its own white-balance
+            // fields, not as unmapped names.
+            "Temperature" | "Tint" | "IncrementalTemperature" | "IncrementalTint" => match value {
+                LuaValue::Number(number) => match name {
+                    "Temperature" => absolute.0 = Some(*number),
+                    "Tint" => absolute.1 = Some(*number),
+                    "IncrementalTemperature" => incremental.0 = Some(*number),
+                    _ => incremental.1 = Some(*number),
+                },
+                _ => push_unmapped(&mut develop.unmapped, name),
+            },
             "ToneCurvePV2012" => {
                 has_2012_curve = true;
                 master_2012 = curve_points(value)?;
@@ -1077,13 +1082,26 @@ fn map_table(
         }
     }
 
-    develop.white_balance.hint = if has_incremental_temperature {
-        WhiteBalanceHint::Relative
-    } else if has_absolute_temperature {
-        WhiteBalanceHint::Undecidable
+    // Only a custom white balance carries its numbers; a named mode is
+    // carried by the mode (see `WhiteBalanceHint`). Without a stored mode
+    // the numbers count as custom, as in LightCraft's own mapper.
+    let custom = develop
+        .white_balance
+        .mode
+        .as_deref()
+        .is_none_or(|mode| mode == "custom");
+    let (hint, (temperature, tint)) = if !custom {
+        (WhiteBalanceHint::None, (None, None))
+    } else if incremental != (None, None) {
+        (WhiteBalanceHint::Relative, incremental)
+    } else if absolute != (None, None) {
+        (WhiteBalanceHint::Undecidable, absolute)
     } else {
-        WhiteBalanceHint::None
+        (WhiteBalanceHint::None, (None, None))
     };
+    develop.white_balance.hint = hint;
+    develop.white_balance.temperature = temperature;
+    develop.white_balance.tint = tint;
     develop.curves = curves_from_parts(
         master_2012,
         red_2012,
@@ -2002,17 +2020,48 @@ mod tests {
     fn white_balance_hints() {
         let absolute = parse("s = { Temperature = 5500, Tint = 10 }");
         assert_eq!(absolute.white_balance.hint, WhiteBalanceHint::Undecidable);
-        assert_eq!(absolute.unmapped, ["Temperature", "Tint"]);
+        assert_eq!(absolute.white_balance.temperature, Some(5500.0));
+        assert_eq!(absolute.white_balance.tint, Some(10.0));
+        assert!(absolute.unmapped.is_empty(), "{:?}", absolute.unmapped);
 
-        let relative = parse("s = { IncrementalTemperature = -20, IncrementalTint = 5 }");
-        assert_eq!(relative.white_balance.hint, WhiteBalanceHint::Relative);
-        assert_eq!(
-            relative.unmapped,
-            ["IncrementalTemperature", "IncrementalTint"]
+        let relative = parse(
+            "s = { WhiteBalance = \"Custom\", IncrementalTemperature = -20, \
+                   IncrementalTint = 5 }",
         );
+        assert_eq!(relative.white_balance.hint, WhiteBalanceHint::Relative);
+        assert_eq!(relative.white_balance.temperature, Some(-20.0));
+        assert_eq!(relative.white_balance.tint, Some(5.0));
+        assert!(relative.unmapped.is_empty(), "{:?}", relative.unmapped);
 
         let none = parse("s = { Exposure2012 = 1 }");
         assert_eq!(none.white_balance.hint, WhiteBalanceHint::None);
+    }
+
+    #[test]
+    fn a_named_white_balance_mode_carries_no_numbers() {
+        for text in [
+            "s = { WhiteBalance = \"As Shot\", Temperature = 5200, Tint = 3 }",
+            "s = { WhiteBalance = \"As Shot\", IncrementalTemperature = 0, IncrementalTint = 0 }",
+            "s = { WhiteBalance = \"Daylight\", Temperature = 5500, Tint = 10 }",
+        ] {
+            let develop = parse(text);
+            assert_eq!(develop.white_balance.hint, WhiteBalanceHint::None, "{text}");
+            assert_eq!(develop.white_balance.temperature, None, "{text}");
+            assert_eq!(develop.white_balance.tint, None, "{text}");
+            assert!(
+                develop.unmapped.is_empty(),
+                "{text}: {:?}",
+                develop.unmapped
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_numeric_white_balance_value_is_unmapped() {
+        let develop = parse("s = { Temperature = \"warm\", Tint = 4 }");
+        assert_eq!(develop.white_balance.hint, WhiteBalanceHint::Undecidable);
+        assert_eq!(develop.white_balance.temperature, None);
+        assert_eq!(develop.unmapped, ["Temperature"]);
     }
 
     #[test]

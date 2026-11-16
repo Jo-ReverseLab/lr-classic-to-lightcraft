@@ -529,6 +529,9 @@
     "photos_with_profile": 0,
     "masks": 0,
     "spots": 0,
+    "white_balance_custom": 0,
+    "white_balance_to_check": 0,
+    "white_balance_written": 0,
     "white_balance_not_carried": 0
   },
   "writer": {

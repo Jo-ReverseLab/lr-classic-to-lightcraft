@@ -14,15 +14,16 @@
 //! - `not_applied`: known photos whose settings changed in Lightroom and were
 //!   left alone because `--overwrite-develop` was not given;
 //! - `overwritten`: photos written because `--overwrite-develop` was given;
-//! - `white_balance_not_carried` (P6-4): converted photos whose
-//!   `Temperature`/`Tint` pair was not carried over (see
-//!   `apply_develop_white_balance_cli.rs`; only the count, never a value).
+//! - `white_balance_custom`, `white_balance_to_check`,
+//!   `white_balance_written`, `white_balance_not_carried` (#9): custom white
+//!   balances (see `apply_develop_white_balance_cli.rs`; only counts, never a
+//!   value).
 //!
 //! The readable summary contains one line:
 //! `develop: photos with settings N, commands planned N, written N, unmapped
 //! fields N (N listed), changed and not applied N, overwritten N, photos with
-//! camera profile N, photos with masks N, photos with spots N, white balance
-//! not carried N`.
+//! camera profile N, photos with masks N, photos with spots N, custom white
+//! balance N (to check N, written N, not carried N)`.
 //!
 //! Always: the catalog is byte-identical after every run, a dry run connects
 //! to nothing and writes no mapping file, a second run sends no `develop.*`
@@ -410,7 +411,7 @@ fn unmapped_fields_are_listed_by_name_only_and_capped_at_twenty() {
 }
 
 #[test]
-fn temperature_and_tint_are_reported_but_never_written() {
+fn a_named_mode_writes_only_the_mode_and_never_its_stored_numbers() {
     let photos = tempfile::tempdir().unwrap();
     let catalog = dev::write_white_balance_catalog_with_files(photos.path()).unwrap();
     let s = Setup::with_catalog(catalog, photos);
@@ -425,35 +426,38 @@ fn temperature_and_tint_are_reported_but_never_written() {
         .iter()
         .filter_map(Value::as_str)
         .collect();
-    assert!(unmapped.contains(&"Temperature"), "{unmapped:?}");
-    assert!(unmapped.contains(&"Tint"), "{unmapped:?}");
+    assert!(
+        !unmapped
+            .iter()
+            .any(|n| n.contains("Temperature") || n.contains("Tint")),
+        "white balance has its own counters: {unmapped:?}"
+    );
 
+    let ids = s.lightcraft_ids();
+    let named = ids[&e::WB_NAMED_ABSOLUTE_PHOTO];
     for (command, params) in develop_commands(&fake.commands(), 0) {
         let text = params.to_string();
         assert!(
             !text.contains("Temperature") && !text.contains("Tint"),
-            "{command} must not carry temperature or tint: {text}"
-        );
-        assert!(
-            !text.contains("5500") && !text.contains("-20"),
-            "{command} must not carry the stored values: {text}"
+            "{command} must not carry Lightroom field names: {text}"
         );
         assert!(
             !text.contains("\"scale\""),
             "no Kelvin hint in this fixture: {text}"
         );
+        if command == "develop.set" && params["ids"] == serde_json::json!([named]) {
+            panic!("the named mode must not write a temperature: {text}");
+        }
     }
 
-    // The undecidable absolute pair still writes its known mode, nothing else.
-    let ids = s.lightcraft_ids();
-    let photo = ids[&e::WB_ABSOLUTE_PHOTO];
+    // The named mode with a stored Kelvin pair writes its mode, nothing else.
     let merge = develop_commands(&fake.commands(), 0)
         .into_iter()
         .find(|(c, p)| {
             c == "develop.merge" && p["settings"]["wb"]["mode"] == serde_json::json!("cloudy")
         })
         .map(|(_, p)| p)
-        .unwrap_or_else(|| panic!("no merge for photo {photo}"));
+        .unwrap_or_else(|| panic!("no merge for photo {named}"));
     assert_eq!(
         merge,
         serde_json::json!({"settings": {"wb": {"mode": "cloudy"}}})

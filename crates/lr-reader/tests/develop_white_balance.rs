@@ -4,11 +4,12 @@
 //! - `WhiteBalance` is normalised to LightCraft's `wb.mode` spelling
 //!   (`asShot`, `auto`, `daylight`, `cloudy`, `shade`, `tungsten`,
 //!   `fluorescent`, `flash`, `custom`); the stored spelling is not kept.
-//! - `Temperature`/`Tint` are never mapped: they do not appear in `controls`
-//!   or `partial`, only as names in `Develop::unmapped`.
-//! - `IncrementalTemperature`/`IncrementalTint` set
-//!   `WhiteBalanceHint::Relative`; an absolute pair sets
-//!   `WhiteBalanceHint::Undecidable`; without such a pair the hint is `None`.
+//! - A named mode carries the white balance: its stored temperature and tint
+//!   are dropped and the hint is `None`.
+//! - With mode `custom`, `IncrementalTemperature`/`IncrementalTint` set
+//!   `WhiteBalanceHint::Relative` and an absolute pair sets
+//!   `WhiteBalanceHint::Undecidable`; the values are kept in
+//!   `Develop::white_balance`, never in `controls`, `partial` or `unmapped`.
 //!   (The report counts these photos; see the CLI tests.)
 //! - A mode without a temperature stays `None`: nothing is invented.
 //! - Reading never opens an original photo, even when the placeholder files
@@ -61,10 +62,6 @@ fn develop(data: &PhotoData, id: i64) -> &Develop {
         .unwrap_or_else(|| panic!("photo {id} has no development settings"))
 }
 
-fn names(list: &[&str]) -> Vec<String> {
-    list.iter().map(|s| (*s).to_owned()).collect()
-}
-
 #[test]
 fn every_stored_mode_becomes_the_lightcraft_spelling() {
     let dir = tempfile::tempdir().unwrap();
@@ -78,20 +75,17 @@ fn every_stored_mode_becomes_the_lightcraft_spelling() {
             Some(expected),
             "photo {id} stores {stored:?}"
         );
-        if id == e::WB_ABSOLUTE_PHOTO {
-            assert_eq!(d.white_balance.hint, WhiteBalanceHint::Undecidable);
-            assert_eq!(d.unmapped, names(&e::WB_UNMAPPED_ABSOLUTE));
-            continue;
-        }
-        if id == e::WB_RELATIVE_PHOTO {
-            assert_eq!(d.white_balance.hint, WhiteBalanceHint::Relative);
-            assert_eq!(d.unmapped, names(&e::WB_UNMAPPED_RELATIVE));
-            continue;
-        }
+        // A named mode carries the white balance; stored numbers (photos 4
+        // and 5) are dropped, as in LightCraft's own import.
         assert_eq!(
             d.white_balance.hint,
             WhiteBalanceHint::None,
-            "photo {id}: a mode alone is not a temperature"
+            "photo {id}: a named mode carries no temperature"
+        );
+        assert_eq!(
+            (d.white_balance.temperature, d.white_balance.tint),
+            (None, None),
+            "photo {id}"
         );
         assert!(
             d.controls.is_empty() && d.partial.is_empty(),
@@ -108,66 +102,62 @@ fn every_stored_mode_becomes_the_lightcraft_spelling() {
     for id in [e::WB_CUSTOM_PHOTO, e::WB_UNKNOWN_PHOTO] {
         let d = develop(&data, id);
         assert_eq!(d.white_balance.mode.as_deref(), Some("custom"));
-        assert_eq!(d.white_balance.hint, WhiteBalanceHint::None);
         assert!(d.controls.is_empty() && d.partial.is_empty());
         assert!(d.unmapped.is_empty());
     }
 }
 
 #[test]
-fn an_absolute_pair_is_unmapped_but_never_reaches_controls_or_partial() {
+fn a_custom_kelvin_pair_is_kept_for_the_lightcraft_scale_check() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_white_balance_catalog_with_files(dir.path()).unwrap();
     let (data, _) = read(&cat);
     let d = develop(&data, e::WB_ABSOLUTE_PHOTO);
 
-    assert_eq!(d.white_balance.mode.as_deref(), Some("cloudy"));
+    assert_eq!(d.white_balance.mode.as_deref(), Some("custom"));
     assert_eq!(
         d.white_balance.hint,
         WhiteBalanceHint::Undecidable,
-        "a Kelvin value without an as-shot reference cannot be converted"
+        "a Kelvin value is carried only when LightCraft edits the photo in Kelvin"
     );
+    assert_eq!(d.white_balance.temperature, Some(e::WB_TEMPERATURE));
+    assert_eq!(d.white_balance.tint, Some(e::WB_TINT));
     assert!(
-        d.controls.is_empty(),
-        "temperature and tint are not controls: {:?}",
-        d.controls
+        d.controls.is_empty() && d.partial.is_empty(),
+        "temperature and tint are neither controls nor merge values"
     );
-    assert!(
-        d.partial.is_empty(),
-        "temperature and tint are not merge values: {:?}",
-        d.partial
-    );
-    assert_eq!(d.unmapped, names(&e::WB_UNMAPPED_ABSOLUTE));
-
-    // Only names are reported, never the stored numbers.
-    for name in &d.unmapped {
-        let number = if name == "Temperature" {
-            e::WB_TEMPERATURE
-        } else {
-            e::WB_TINT
-        }
-        .to_string();
-        assert!(
-            !name.contains(&number),
-            "{name} leaks the stored value {number}"
-        );
-    }
+    assert!(d.unmapped.is_empty(), "{:?}", d.unmapped);
 }
 
 #[test]
-fn an_incremental_pair_hints_relative_and_stays_unmapped() {
+fn a_custom_incremental_pair_is_relative() {
     let dir = tempfile::tempdir().unwrap();
     let cat = write_white_balance_catalog_with_files(dir.path()).unwrap();
     let (data, _) = read(&cat);
     let d = develop(&data, e::WB_RELATIVE_PHOTO);
 
-    assert_eq!(d.white_balance.mode.as_deref(), Some("shade"));
+    assert_eq!(d.white_balance.mode.as_deref(), Some("custom"));
     assert_eq!(d.white_balance.hint, WhiteBalanceHint::Relative);
-    assert!(
-        d.controls.is_empty() && d.partial.is_empty(),
-        "relative values are not mapped without the probe"
+    assert_eq!(
+        d.white_balance.temperature,
+        Some(e::WB_INCREMENTAL_TEMPERATURE)
     );
-    assert_eq!(d.unmapped, names(&e::WB_UNMAPPED_RELATIVE));
+    assert_eq!(d.white_balance.tint, Some(e::WB_INCREMENTAL_TINT));
+    assert!(d.controls.is_empty() && d.partial.is_empty());
+    assert!(d.unmapped.is_empty(), "{:?}", d.unmapped);
+}
+
+#[test]
+fn a_named_mode_drops_its_stored_numbers() {
+    let dir = tempfile::tempdir().unwrap();
+    let cat = write_white_balance_catalog_with_files(dir.path()).unwrap();
+    let (data, _) = read(&cat);
+    for id in [e::WB_NAMED_ABSOLUTE_PHOTO, e::WB_NAMED_RELATIVE_PHOTO] {
+        let d = develop(&data, id);
+        assert_eq!(d.white_balance.hint, WhiteBalanceHint::None, "photo {id}");
+        assert_eq!(d.white_balance.temperature, None, "photo {id}");
+        assert!(d.unmapped.is_empty(), "photo {id}: {:?}", d.unmapped);
+    }
 }
 
 #[test]

@@ -68,23 +68,37 @@ pub struct WhiteBalance {
     /// LightCraft's `wb.mode` spelling (`asShot`, `auto`, `custom`, …), if the
     /// catalog stores a mode. The stored Lightroom spelling is not kept.
     pub mode: Option<String>,
-    /// What a later phase would need to express the stored temperature.
+    /// Which scale [`Self::temperature`] and [`Self::tint`] are on.
     pub hint: WhiteBalanceHint,
+    /// The stored temperature of a custom white balance: Kelvin for
+    /// [`WhiteBalanceHint::Undecidable`], Lightroom's relative
+    /// `IncrementalTemperature` (-100..100) for [`WhiteBalanceHint::Relative`].
+    /// `None` when the hint is `None`.
+    pub temperature: Option<f64>,
+    /// The stored tint of a custom white balance (`Tint` or
+    /// `IncrementalTint`, by the hint). `None` when the hint is `None`.
+    pub tint: Option<f64>,
 }
 
 /// What the catalog says about the stored temperature and tint.
+///
+/// Only a custom white balance (mode `custom`, or no mode stored) carries
+/// its numbers. A named mode (`asShot`, `auto`, `daylight`, …) is carried by
+/// the mode alone, as in LightCraft's own Lightroom import: its stored
+/// numbers are Lightroom's rendering of that mode, and the hint is `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WhiteBalanceHint {
-    /// The row holds no temperature or tint.
+    /// No custom temperature or tint to carry.
     #[default]
     None,
     /// The value is an absolute Kelvin value and needs no conversion.
     Kelvin,
-    /// The value is on the relative scale (`Incremental*` fields).
+    /// The value is on the relative scale (`Incremental*` fields of a
+    /// rendered file such as a JPEG).
     Relative,
-    /// The value is an absolute Kelvin value but the catalog holds no
-    /// as-shot reference, so it cannot be converted without probing the
-    /// original file.
+    /// The value is an absolute Kelvin value (`Temperature`, `Tint` of a raw
+    /// or DNG). It is carried only when LightCraft edits the photo on a
+    /// Kelvin scale, which only LightCraft can tell after the import.
     Undecidable,
 }
 

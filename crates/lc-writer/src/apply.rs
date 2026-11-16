@@ -244,8 +244,15 @@ pub struct ApplySummary {
     pub develop_masks: usize,
     /// Converted photos with at least one spot.
     pub develop_spots: usize,
-    /// Converted photos whose white balance holds a temperature or tint
-    /// (absolute or incremental) that was not carried over. Only counted.
+    /// Converted photos with a custom white balance (temperature or tint
+    /// stored with mode `custom`). Only counted.
+    pub develop_white_balance_custom: usize,
+    /// Photos whose custom white balance was written in this run.
+    pub develop_white_balance_written: usize,
+    /// Photos whose Kelvin white balance was not written in this run because
+    /// LightCraft edits them on a relative scale (a raw of a camera without
+    /// a Kelvin scale, a raw rendered from its preview, or a file LightCraft
+    /// could not read). The mode is still carried.
     pub develop_white_balance_not_carried: usize,
     /// `removed_photos.len()`, for the report.
     pub photos_removed: usize,
@@ -359,7 +366,7 @@ pub fn apply_partial(
             develop_photos_with_profile: plan.develop_photos_with_profile(),
             develop_masks: plan.develop_masks(),
             develop_spots: plan.develop_spots(),
-            develop_white_balance_not_carried: plan.develop_white_balance_not_carried(),
+            develop_white_balance_custom: plan.develop_white_balance_custom(),
             ..ApplySummary::default()
         },
         recorded: plan.recorded_fields_map(),
@@ -644,6 +651,17 @@ impl Run<'_> {
                 self.enter_photo(global_id)?;
                 if self.current.as_ref().is_some_and(|c| c.ok) {
                     self.develop_merge(global_id, settings)?;
+                }
+                Ok(())
+            }
+            Step::DevelopWhiteBalance {
+                global_id,
+                values,
+                check_kelvin,
+            } => {
+                self.enter_photo(global_id)?;
+                if self.current.as_ref().is_some_and(|c| c.ok) {
+                    self.develop_white_balance(global_id, values, *check_kelvin)?;
                 }
                 Ok(())
             }
@@ -1758,6 +1776,54 @@ impl Run<'_> {
         self.develop_outcome(lightroom_id, "develop.merge", result)
     }
 
+    /// Writes a custom white balance with `develop.set`. A Kelvin value
+    /// (`check_kelvin`) is written only when `photo.inspect` shows that
+    /// LightCraft edits the photo on a Kelvin scale; otherwise it is counted
+    /// as not carried and the photo keeps the rest of its settings.
+    fn develop_white_balance(
+        &mut self,
+        global_id: &str,
+        values: &BTreeMap<String, f64>,
+        check_kelvin: bool,
+    ) -> Result<(), WriteError> {
+        let Some(entry) = self.state.photo(global_id) else {
+            self.fail_current();
+            return Ok(());
+        };
+        let lightroom_id = entry.lightroom_id;
+        let id = entry.lightcraft_id.clone();
+        if check_kelvin {
+            let inspect = match self.client.execute("photo.inspect", json!({"id": id})) {
+                Ok(Outcome::Applied(value)) => value,
+                // A read is never "not saved"; take it as a refusal.
+                Ok(Outcome::AppliedNotSaved(_)) => {
+                    self.reject_develop(lightroom_id, "photo.inspect");
+                    return Ok(());
+                }
+                Err(WriteError::Command { command, .. }) => {
+                    self.reject_develop(lightroom_id, &command);
+                    return Ok(());
+                }
+                Err(e) => return Err(e),
+            };
+            if !edits_in_kelvin(&inspect) {
+                self.summary.develop_white_balance_not_carried += 1;
+                return Ok(());
+            }
+        }
+        if let Some(c) = &mut self.current {
+            c.develop_pending = true;
+        }
+        let result = self
+            .client
+            .execute("develop.set", json!({"values": values, "ids": [id]}));
+        self.develop_outcome(lightroom_id, "develop.set", result)?;
+        if self.current.as_ref().is_some_and(|c| c.ok) {
+            self.summary.develop_white_balance_written += 1;
+        }
+        Ok(())
+    }
+
     /// Handles a develop command's reply like the field updates: a rejected or
     /// unsaved command leaves the photo incomplete and is sent again by the
     /// next run; the hash is not recorded then.
@@ -2188,6 +2254,17 @@ fn collect_keywords(
 
 fn list_error() -> WriteError {
     WriteError::Protocol("keyword.list answered in an unknown format".into())
+}
+
+/// Whether LightCraft edits the inspected photo's white balance in Kelvin:
+/// a raw developed from its sensor data (not from its embedded preview)
+/// whose import defaults set `wb.scale` to `kelvin`. LightCraft sets that
+/// scale for DNG files and for cameras it knows a Kelvin scale for; every
+/// other photo is edited relative to its as-shot look.
+fn edits_in_kelvin(inspect: &Value) -> bool {
+    inspect.get("kind").and_then(Value::as_str) == Some("raw")
+        && inspect.get("preview_only").is_none_or(Value::is_null)
+        && inspect.pointer("/develop/wb/scale").and_then(Value::as_str) == Some("kelvin")
 }
 
 #[cfg(test)]

@@ -100,6 +100,8 @@ fn white_balance_holds_an_optional_mode_and_a_hint() {
     let wb = WhiteBalance {
         mode: None,
         hint: WhiteBalanceHint::None,
+        temperature: None,
+        tint: None,
     };
     assert!(wb.mode.is_none());
     assert_eq!(wb.hint, WhiteBalanceHint::None);
@@ -107,9 +109,15 @@ fn white_balance_holds_an_optional_mode_and_a_hint() {
     let custom = WhiteBalance {
         mode: Some("custom".to_owned()),
         hint: WhiteBalanceHint::Undecidable,
+        temperature: Some(4800.0),
+        tint: Some(-5.0),
     };
     assert_eq!(custom.mode.as_deref(), Some("custom"));
     assert_eq!(custom.hint, WhiteBalanceHint::Undecidable);
+    assert_eq!(
+        (custom.temperature, custom.tint),
+        (Some(4800.0), Some(-5.0))
+    );
 }
 
 #[test]

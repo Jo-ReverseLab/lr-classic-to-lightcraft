@@ -159,7 +159,10 @@ rendering value.
 | `develop.photos_with_profile` | integer | always | converted photos with a non-empty profile name |
 | `develop.masks` | integer | always | converted photos with at least one mask (local correction) |
 | `develop.spots` | integer | always | converted photos with at least one spot (heal/clone/remove/fill) |
-| `develop.white_balance_not_carried` | integer | always | converted photos with a temperature or tint pair that was not carried over |
+| `develop.white_balance_custom` | integer | always | converted photos with a custom white balance (temperature or tint with mode `custom`); a named mode is carried by the mode and not counted |
+| `develop.white_balance_to_check` | integer | always | dry run: planned Kelvin white balances whose transfer depends on LightCraft's scale for the photo; 0 in an applied run |
+| `develop.white_balance_written` | integer | always | applied run: photos whose custom white balance was written; 0 in a dry run |
+| `develop.white_balance_not_carried` | integer | always | applied run: photos whose Kelvin white balance was not written because LightCraft edits them on a relative scale; 0 in a dry run |
 
 **Guarantee.** A camera profile name is reported byte for byte and only when
 it is non-empty; it is never a rendering value and never triggers a develop

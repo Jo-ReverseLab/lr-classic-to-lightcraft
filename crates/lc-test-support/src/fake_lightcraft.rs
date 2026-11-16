@@ -256,6 +256,14 @@ pub struct Config {
     /// library answers it as a duplicate with reason `content`, like the real
     /// app (which hashes the bytes). Paths not listed have unique content.
     pub file_contents: BTreeMap<String, String>,
+    /// `photo.inspect` of a photo whose path contains one of these texts
+    /// answers like a raw LightCraft edits in Kelvin (`kind: "raw"`,
+    /// `develop.wb.scale: "kelvin"`). Every other photo answers like a
+    /// rendered file (`kind: "image"`, no scale).
+    pub kelvin_raw_for: Vec<String>,
+    /// Like [`Self::kelvin_raw_for`], but also with `preview_only` set: the
+    /// raw is rendered from its embedded preview.
+    pub preview_only_for: Vec<String>,
 }
 
 impl Config {
@@ -288,6 +296,8 @@ impl Config {
             summary_broken: false,
             ignore_deleted_filter: false,
             file_contents: BTreeMap::new(),
+            kelvin_raw_for: Vec::new(),
+            preview_only_for: Vec::new(),
         }
     }
 }
@@ -719,17 +729,36 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                 .values()
                 .find(|st| st.photos.contains(&id))
                 .map(|st| json!({"id": st.id, "photos": st.photos, "collapsed": st.collapsed}));
-            Ok(json!({
+            let path = lib
+                .photos
+                .iter()
+                .find(|(_, v)| **v == id)
+                .map(|(p, _)| p.as_str())
+                .unwrap_or_default();
+            let matches = |list: &[String]| list.iter().any(|t| path.contains(t.as_str()));
+            let preview_only = matches(&config.preview_only_for);
+            let kelvin = preview_only || matches(&config.kelvin_raw_for);
+            let mut wb = json!({"mode": "asShot", "temp": 6500, "tint": 0});
+            if kelvin {
+                wb["scale"] = json!("kelvin");
+            }
+            let mut reply = json!({
                 "id": id,
+                "kind": if kelvin { "raw" } else { "image" },
                 "albums": albums,
                 "stack": stack,
+                "develop": {"wb": wb},
                 "meta": {
                     "caption": seed.caption,
                     "copyright": seed.copyright,
                     "creator": seed.creator,
                     "keywords": seed.keywords,
                 },
-            }))
+            });
+            if preview_only {
+                reply["preview_only"] = json!("embedded preview");
+            }
+            Ok(reply)
         }
         "stack.group" => stack_group(config, lib, params),
         "keyword.list" => Ok(keyword_list(&config.keyword_list, &lib.keywords)),
