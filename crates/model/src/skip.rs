@@ -250,6 +250,24 @@ pub struct Skipped {
     pub subject: Subject,
 }
 
+impl SkipCode {
+    /// Whether the code marks a failure of the writer (something that
+    /// should have been done), not a deliberate skip.
+    pub fn is_failure(self) -> bool {
+        matches!(
+            self,
+            SkipCode::NoLightcraftId
+                | SkipCode::ParentNotCreated
+                | SkipCode::ParentFailed
+                | SkipCode::NoIdReturned
+                | SkipCode::AppliedNotSaved
+                | SkipCode::ImportFailed
+                | SkipCode::Rejected
+                | SkipCode::SameContent
+        )
+    }
+}
+
 impl Skipped {
     /// Creates a skip entry. An empty reason is replaced by "unspecified".
     pub fn new(code: SkipCode, reason: impl Into<String>) -> Self {

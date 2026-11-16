@@ -36,6 +36,12 @@ const CATALOG_DAMAGED: Option<&str> = Some(
 
 /// The guidance for `code`.
 pub fn guidance(code: SkipCode) -> Guidance {
+    let g = text(code);
+    debug_assert_eq!(g.status == Status::Error, code.is_failure(), "{code:?}");
+    g
+}
+
+fn text(code: SkipCode) -> Guidance {
     use SkipCode as C;
     match code {
         C::NoRootFolder | C::RootFolderNoPath | C::FileRowNotFound | C::FolderRowNotFound => {

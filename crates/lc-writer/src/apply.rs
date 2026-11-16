@@ -78,7 +78,7 @@
 
 use crate::albums::{Decision, Existing, Node, parse_album_list};
 use crate::control::{CommandSink, Outcome, WriteError};
-use crate::entries::{StepOutcome, step_entries};
+use crate::entries::{StepOutcome, stage_of, step_entries};
 use crate::live::read_live_with;
 use crate::plan::{
     Areas, Conflict, MovedPhoto, RemovedPhoto, RenamedKeyword, Step, WriteInput, group_params,
@@ -88,7 +88,8 @@ use crate::plan::{
 use crate::progress::{NoProgress, Phase, Progress};
 use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, hex_hash, keyword_text};
 use model::{
-    Collection, CollectionKind, Entry, Keyword, Photo, SkipCode, Skipped, SmartCollection,
+    Area, Collection, CollectionKind, Entry, Keyword, Photo, SkipCode, Skipped, SmartCollection,
+    Status,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -510,7 +511,8 @@ struct Current {
 /// See [`Run::tally`].
 #[derive(Clone, Copy)]
 struct Tally {
-    failures: usize,
+    /// The lengths of [`Run::failure_lists`].
+    lists: [usize; 11],
     /// The photo being written has failed; its further steps are not sent.
     unfinished: bool,
     existing: usize,
@@ -630,7 +632,9 @@ impl Run<'_> {
             let before = self.tally();
             self.step(step)?;
             let after = self.tally();
-            if after.failures == before.failures && !after.unfinished {
+            if after.lists != before.lists {
+                self.report_failures(&before, step);
+            } else if !after.unfinished {
                 let outcome = if after.existing > before.existing {
                     StepOutcome::Existing
                 } else if after.not_carried > before.not_carried {
@@ -651,23 +655,60 @@ impl Run<'_> {
 
     /// Counters that tell how the last step ended.
     fn tally(&self) -> Tally {
-        let s = &self.summary;
         let unfinished = self.current.as_ref().is_some_and(|c| !c.ok);
         Tally {
-            failures: s.photos_skipped.len()
-                + s.photos_incomplete.len()
-                + s.keywords_not_created.len()
-                + s.collections_skipped.len()
-                + s.collections_incomplete.len()
-                + s.members_skipped.len()
-                + s.stacks_skipped.len()
-                + s.stacks_incomplete.len()
-                + s.quick_skipped.len()
-                + s.quick_incomplete.len()
-                + s.smart_skipped.len(),
+            lists: self.failure_lists().map(|(list, _, _)| list.len()),
             unfinished,
-            existing: s.photos_existing,
-            not_carried: s.develop_white_balance_not_carried,
+            existing: self.summary.photos_existing,
+            not_carried: self.summary.develop_white_balance_not_carried,
+        }
+    }
+
+    /// The lists a step's failure or skip lands in: the list, its area and
+    /// whether every entry of it is a failure.
+    fn failure_lists(&self) -> [(&[Skipped], Area, bool); 11] {
+        let s = &self.summary;
+        [
+            (&s.keywords_not_created, Area::Keywords, false),
+            (&s.photos_skipped, Area::Photos, false),
+            (&s.photos_incomplete, Area::Photos, true),
+            (&s.collections_skipped, Area::Collections, false),
+            (&s.collections_incomplete, Area::Collections, true),
+            (&s.members_skipped, Area::Collections, false),
+            (&s.stacks_skipped, Area::Stacks, false),
+            (&s.stacks_incomplete, Area::Stacks, true),
+            (&s.quick_skipped, Area::Stacks, false),
+            (&s.quick_incomplete, Area::Stacks, true),
+            (&s.smart_skipped, Area::Collections, false),
+        ]
+    }
+
+    /// Reports the skips and failures a step added, as they happen. The
+    /// final log describes them again with the guidance of their code.
+    fn report_failures(&mut self, before: &Tally, step: &Step) {
+        let stage = stage_of(step);
+        let mut found = Vec::new();
+        for ((list, area, failed), was) in self.failure_lists().into_iter().zip(before.lists) {
+            for skipped in list.iter().skip(was) {
+                let status = if failed || skipped.code.is_failure() {
+                    Status::Error
+                } else {
+                    Status::Skipped
+                };
+                found.push(
+                    Entry::new(
+                        status,
+                        area,
+                        stage,
+                        skipped.subject.clone(),
+                        skipped.reason.clone(),
+                    )
+                    .code(skipped.code.as_str()),
+                );
+            }
+        }
+        for entry in found {
+            self.progress.entry(&entry);
         }
     }
 
