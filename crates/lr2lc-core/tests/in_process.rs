@@ -187,8 +187,12 @@ fn the_log_names_files_unless_anonymized() {
         .unwrap()
         .to_string_lossy()
         .into_owned();
-    let text = report["entries"].to_string();
-    assert!(!text.contains(&catalog_dir), "no path in an anonymized log");
+    for e in report["entries"].as_array().unwrap() {
+        for key in ["item", "message", "reason"] {
+            let text = e[key].as_str().unwrap_or("");
+            assert!(!text.contains(&catalog_dir), "no path in an anonymized log");
+        }
+    }
     for e in report["entries"].as_array().unwrap() {
         assert!(e.get("source").is_none() && e.get("result").is_none());
         if let Some(id) = e["photo"].as_i64() {
@@ -197,7 +201,12 @@ fn the_log_names_files_unless_anonymized() {
     }
     let named: serde_json::Value = serde_json::from_str(&done.report_json()).unwrap();
     assert_eq!(named["anonymized"], false);
-    assert!(named["entries"].to_string().contains(&catalog_dir));
+    // Compare the parsed values: JSON escapes Windows backslashes.
+    assert!(named["entries"].as_array().unwrap().iter().any(|e| {
+        e["source"]
+            .as_str()
+            .is_some_and(|s| s.contains(&catalog_dir))
+    }));
 }
 
 #[test]
