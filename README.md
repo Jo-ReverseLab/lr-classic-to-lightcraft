@@ -53,7 +53,8 @@ CI runs formatting, lint and tests on Linux, macOS and Windows (pull requests on
 | `--map OLD=NEW` | Replace a path prefix, repeatable |
 | `--skip AREAS` | Leave parts of the catalog out (comma-separated, see below) |
 | `--label-set SET` | Names of the colour labels: `en`, `de`, `auto` (default) or a JSON file |
-| `--report FILE` | Write `report.json` |
+| `--report FILE` | Write `report.json`, with a run log |
+| `--anonymize` | Leave every name, path and value of the catalog out of `report.json` |
 | `--script FILE` | Write the planned commands as JSON lines |
 
 Each option is described below.
@@ -448,6 +449,36 @@ read, and lr2lc stops with exit code 2 if:
 - `FILE` already exists and is not an earlier lr2lc report (a JSON object
   with the key `tool_version`). An earlier report is overwritten; any other
   file, such as a photo, is left untouched.
+
+### Run log
+
+`report.json` ends with the run log: `entry_counts` (entries per status)
+and `entries`, one entry per thing that was done, adjusted, skipped, in
+conflict or failed, in run order. The summary counts them in a line
+`log: adjusted N, conflict N, error N, skipped N, transferred N`.
+
+| Status | Meaning |
+| --- | --- |
+| `transferred` | Done as in Lightroom (in a dry run: would be done) |
+| `adjusted` | Done, but changed on purpose to fit LightCraft (for example a relative white balance converted to LightCraft's scale) |
+| `skipped` | Deliberately not done: not supported yet, not selected (`--skip`), or nothing to do; has a code and a reason |
+| `conflict` | Changed in Lightroom and in LightCraft since the last import; LightCraft's state is kept |
+| `error` | Should have been done but failed; has a code, a reason and a recommendation |
+
+Each entry has `status`, `area` (`folders`, `photos`, `keywords`,
+`ratings`, `labels`, `flags`, `metadata`, `collections`, `stacks`,
+`virtual-copies`, `develop`), `stage` (`read`, `keywords`, `photos`,
+`organize`), `item` (a file, keyword or album name), `message`, and where
+they apply `code` (the skip code), `reason`, `recommendation`, `source`
+(the value in Lightroom), `result` (the value in LightCraft) and `photo`
+(the photo's Lightroom id). Messages, reasons and recommendations never
+contain a name, a path or a value; those are only in `item`, `source` and
+`result`.
+
+The report holds names, paths and values by default. `--anonymize` leaves
+them out: `item` becomes an id such as `photo 7` or `collection 3`,
+`source` and `result` are dropped, and `anonymized` is `true`. Use it before
+sharing a report. The readable summary never holds a name, path or value.
 
 ### Writer plan in the dry run
 

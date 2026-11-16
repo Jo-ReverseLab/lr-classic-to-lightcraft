@@ -95,6 +95,7 @@ impl Setup {
         args.extend([
             OsStr::new("--library"),
             self.library.as_os_str(),
+            OsStr::new("--anonymize"),
             OsStr::new("--report"),
         ]);
         let report = self.report();
@@ -215,6 +216,7 @@ fn apply_without_library_is_a_usage_error_and_reads_nothing() {
             OsStr::new("--apply"),
             OsStr::new("--port"),
             OsStr::new(&port),
+            OsStr::new("--anonymize"),
             OsStr::new("--report"),
             report.as_os_str(),
         ],

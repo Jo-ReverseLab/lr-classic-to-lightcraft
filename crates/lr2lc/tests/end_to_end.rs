@@ -72,12 +72,13 @@ impl Setup {
     fn run(&self, port: u16, extra: &[&str]) -> Output {
         let port_text = port.to_string();
         let report = self.report();
-        let args: [&OsStr; 7] = [
+        let args: [&OsStr; 8] = [
             self.catalog.as_os_str(),
             OsStr::new("--library"),
             self.library.as_os_str(),
             OsStr::new("--port"),
             OsStr::new(&port_text),
+            OsStr::new("--anonymize"),
             OsStr::new("--report"),
             report.as_os_str(),
         ];

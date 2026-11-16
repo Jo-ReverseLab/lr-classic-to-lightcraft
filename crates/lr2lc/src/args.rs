@@ -16,7 +16,10 @@ The catalog is opened read-only and original photos are never touched.
 Options:
   --map OLD=NEW    Replace the path prefix OLD with NEW (repeatable),
                    e.g. when photos moved to another disk or computer
-  --report FILE    Write a machine-readable report (JSON) to FILE
+  --report FILE    Write a machine-readable report (JSON) to FILE, with a
+                   log entry per photo, keyword and album (names included)
+  --anonymize      Leave every name, path and value of the catalog out of
+                   the report
   --label-set SET  Names of the colour labels: en, de, auto (default) or a
                    JSON file mapping each name to red, yellow, green,
                    blue or purple
@@ -72,6 +75,8 @@ pub struct RunOptions {
     pub probe_white_balance: bool,
     /// The parts of the catalog to write (`--skip` leaves some out).
     pub areas: Areas,
+    /// Leave names, paths and values out of the report.
+    pub anonymize: bool,
 }
 
 /// The default control port of the LightCraft app.
@@ -92,12 +97,14 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
     let mut overwrite_develop = false;
     let mut probe_white_balance = false;
     let mut areas: Option<Areas> = None;
+    let mut anonymize = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("-h" | "--help") => return Ok(Command::Help),
             Some("-V" | "--version") => return Ok(Command::Version),
             Some("--apply") => apply = true,
             Some("--allow-xmp") => allow_xmp = true,
+            Some("--anonymize") => anonymize = true,
             Some("--overwrite-develop") => overwrite_develop = true,
             Some("--probe-white-balance") => probe_white_balance = true,
             Some("--library") => {
@@ -187,6 +194,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
         overwrite_develop,
         probe_white_balance,
         areas: areas.unwrap_or_default(),
+        anonymize,
     }))
 }
 

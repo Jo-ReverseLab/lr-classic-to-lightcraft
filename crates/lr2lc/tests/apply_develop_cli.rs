@@ -85,6 +85,7 @@ impl Setup {
             self.library.as_os_str().to_owned(),
             OsString::from("--port"),
             OsString::from(port_text),
+            OsString::from("--anonymize"),
             OsString::from("--report"),
             report.as_os_str().to_owned(),
         ];

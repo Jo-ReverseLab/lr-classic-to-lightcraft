@@ -1,0 +1,445 @@
+//! The run log: one entry per thing that was done, adjusted, skipped, in
+//! conflict or failed, gathered from the reader, the plan and the run, with
+//! names looked up. An anonymized log keeps ids, codes and texts but drops
+//! every name, path and value.
+
+use crate::dry_run::{Names, Outcome};
+use crate::guidance::guidance;
+use lc_writer::apply::ApplySummary;
+use lc_writer::entries::{StepOutcome, step_entries};
+use lc_writer::plan::{Conflict, Plan, WriteInput};
+use model::{Area, Entry, Report, SkipCode, Skipped, Stage, Status, Subject};
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+/// One entry of `report.json`'s `entries`.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LogEntry {
+    pub status: &'static str,
+    pub area: &'static str,
+    pub stage: &'static str,
+    /// What the entry is about: a file, keyword or album name, or an id
+    /// such as `photo 7` when anonymized or unknown.
+    pub item: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recommendation: Option<&'static str>,
+    /// The value in Lightroom; never in an anonymized log.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The value in LightCraft; never in an anonymized log.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    /// The photo's Lightroom id, when the entry is about one photo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub photo: Option<i64>,
+}
+
+/// A log entry before names are looked up, with its recommendation.
+#[derive(Debug, Clone)]
+pub struct RawEntry {
+    pub entry: Entry,
+    pub recommendation: Option<&'static str>,
+}
+
+/// The run log before it is written: entries by id, and the names to show.
+#[derive(Debug, Clone, Default)]
+pub struct Log {
+    pub entries: Vec<RawEntry>,
+    names: Names,
+    by_gid: BTreeMap<String, (i64, PathBuf)>,
+}
+
+impl Log {
+    /// The entries with names looked up, or with every name, path and value
+    /// left out when `anonymize` is set.
+    pub fn render(&self, anonymize: bool) -> Vec<LogEntry> {
+        let namer = Namer {
+            names: &self.names,
+            by_gid: &self.by_gid,
+            anonymize,
+        };
+        self.entries
+            .iter()
+            .map(|raw| namer.entry(raw.entry.clone(), raw.recommendation))
+            .collect()
+    }
+}
+
+/// Looks names up for entries.
+struct Namer<'a> {
+    names: &'a Names,
+    by_gid: &'a BTreeMap<String, (i64, PathBuf)>,
+    anonymize: bool,
+}
+
+impl Namer<'_> {
+    fn photo_name(&self, id: i64, path: Option<&PathBuf>) -> String {
+        if self.anonymize {
+            return format!("photo {id}");
+        }
+        path.or_else(|| self.names.photos.get(&id))
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("photo {id}"))
+    }
+
+    /// The finished log entry for `entry`.
+    fn entry(&self, entry: Entry, recommendation: Option<&'static str>) -> LogEntry {
+        let (item, photo) = match &entry.subject {
+            Subject::Photo(id) => (self.photo_name(*id, None), Some(*id)),
+            Subject::PhotoGlobal(gid) => match self.by_gid.get(gid.as_str()) {
+                Some((id, path)) => (self.photo_name(*id, Some(path)), Some(*id)),
+                None => ("photo".to_owned(), None),
+            },
+            Subject::Keyword(path) if !self.anonymize => (path.replace('|', " › "), None),
+            Subject::Keyword(_) => ("keyword".to_owned(), None),
+            Subject::Collection(id) if !self.anonymize => (
+                entry
+                    .item
+                    .clone()
+                    .or_else(|| self.names.collections.get(id).cloned())
+                    .unwrap_or_else(|| format!("collection {id}")),
+                None,
+            ),
+            Subject::Collection(id) => (format!("collection {id}"), None),
+            Subject::Stack(id) => (format!("stack {id}"), None),
+            Subject::Folder(path) if !self.anonymize => (path.clone(), None),
+            Subject::Folder(_) => ("folder".to_owned(), None),
+            // An area left out is named by its area name, which is no
+            // catalog data.
+            Subject::None => (
+                entry
+                    .item
+                    .clone()
+                    .filter(|_| !self.anonymize || entry.code == Some("not_selected"))
+                    .unwrap_or_default(),
+                None,
+            ),
+        };
+        let private = |value: Option<String>| value.filter(|_| !self.anonymize);
+        LogEntry {
+            status: entry.status.as_str(),
+            area: entry.area.as_str(),
+            stage: entry.stage.as_str(),
+            item,
+            message: entry.message,
+            code: entry.code,
+            reason: entry.reason,
+            recommendation,
+            source: private(entry.source),
+            result: private(entry.result),
+            photo,
+        }
+    }
+}
+
+/// The entry for one skip, with the guidance of its code. `failed` marks a
+/// writer failure (an incomplete element) as an error.
+fn skip(skipped: &Skipped, area: Area, stage: Stage, failed: bool) -> RawEntry {
+    let g = guidance(skipped.code);
+    let status = if failed { Status::Error } else { g.status };
+    let area = if skipped.code == SkipCode::VirtualCopy {
+        Area::VirtualCopies
+    } else {
+        area
+    };
+    let entry = Entry::new(status, area, stage, skipped.subject.clone(), g.message)
+        .code(skipped.code.as_str())
+        .reason(skipped.reason.clone());
+    raw(entry, g.recommendation)
+}
+
+fn raw(entry: Entry, recommendation: Option<&'static str>) -> RawEntry {
+    RawEntry {
+        entry,
+        recommendation,
+    }
+}
+
+/// What the log is built from.
+pub struct Sources<'a> {
+    pub outcome: &'a Outcome,
+    pub input: &'a WriteInput,
+    pub plan: &'a Plan,
+    /// The run's summary, when it wrote; `None` in a dry run.
+    pub applied: Option<&'a ApplySummary>,
+    pub not_selected: &'a [&'static str],
+}
+
+/// The whole log, in run order: reading, areas left out, the steps, then
+/// what the writer skipped, failed or found in conflict.
+pub fn build(sources: &Sources<'_>, names: Names) -> Log {
+    let by_gid = sources
+        .input
+        .photos
+        .iter()
+        .filter_map(|p| Some((p.global_id.clone()?, (p.lightroom_id, p.path.clone()))))
+        .collect();
+    Log {
+        entries: entries(sources),
+        names,
+        by_gid,
+    }
+}
+
+fn entries(sources: &Sources<'_>) -> Vec<RawEntry> {
+    let mut out = Vec::new();
+    let o = sources.outcome;
+    let read: [(&Report, Area); 9] = [
+        (&o.folders, Area::Folders),
+        (&o.photos, Area::Photos),
+        (&o.keywords, Area::Keywords),
+        (&o.keyword_assignments, Area::Keywords),
+        (&o.keyword_synonyms, Area::Keywords),
+        (&o.collections, Area::Collections),
+        (&o.collection_members, Area::Collections),
+        (&o.stacks, Area::Stacks),
+        (&o.stack_members, Area::Stacks),
+    ];
+    for (report, area) in read {
+        for skipped in report.skipped_items() {
+            out.push(skip(skipped, area, Stage::Read, false));
+        }
+    }
+    for name in sources.not_selected {
+        let entry = Entry::new(
+            Status::Skipped,
+            area_of(name),
+            Stage::Read,
+            Subject::None,
+            "Not selected for this run",
+        )
+        .code("not_selected")
+        .item(*name);
+        out.push(raw(entry, None));
+    }
+
+    let plan = sources.plan;
+    match sources.applied {
+        None => {
+            for step in &plan.steps {
+                for entry in step_entries(step, StepOutcome::Planned) {
+                    out.push(raw(entry, None));
+                }
+            }
+            let lists: [(&[Skipped], Area, Stage); 6] = [
+                (plan.keyword_skips(), Area::Keywords, Stage::Keywords),
+                (plan.photo_skips(), Area::Photos, Stage::Photos),
+                (plan.member_skips(), Area::Collections, Stage::Organize),
+                (plan.stack_skips(), Area::Stacks, Stage::Organize),
+                (plan.quick_skips(), Area::Stacks, Stage::Organize),
+                (plan.smart_skips(), Area::Collections, Stage::Organize),
+            ];
+            for (list, area, stage) in lists {
+                for skipped in list {
+                    out.push(skip(skipped, area, stage, false));
+                }
+            }
+            conflicts(&mut out, plan.conflicts());
+        }
+        Some(s) => {
+            for entry in &s.entries {
+                out.push(raw(entry.clone(), None));
+            }
+            let lists: [(&[Skipped], Area, Stage, bool); 11] = [
+                (
+                    &s.keywords_not_created,
+                    Area::Keywords,
+                    Stage::Keywords,
+                    false,
+                ),
+                (&s.photos_skipped, Area::Photos, Stage::Photos, false),
+                (&s.photos_incomplete, Area::Photos, Stage::Photos, true),
+                (
+                    &s.collections_skipped,
+                    Area::Collections,
+                    Stage::Organize,
+                    false,
+                ),
+                (
+                    &s.collections_incomplete,
+                    Area::Collections,
+                    Stage::Organize,
+                    true,
+                ),
+                (
+                    &s.members_skipped,
+                    Area::Collections,
+                    Stage::Organize,
+                    false,
+                ),
+                (&s.stacks_skipped, Area::Stacks, Stage::Organize, false),
+                (&s.stacks_incomplete, Area::Stacks, Stage::Organize, true),
+                (&s.quick_skipped, Area::Stacks, Stage::Organize, false),
+                (&s.quick_incomplete, Area::Stacks, Stage::Organize, true),
+                (&s.smart_skipped, Area::Collections, Stage::Organize, false),
+            ];
+            for (list, area, stage, failed) in lists {
+                for skipped in list {
+                    out.push(skip(skipped, area, stage, failed));
+                }
+            }
+            conflicts(&mut out, &s.conflicts);
+        }
+    }
+
+    for gid in plan.develop_not_applied_ids() {
+        let entry = Entry::new(
+            Status::Conflict,
+            Area::Develop,
+            Stage::Photos,
+            Subject::PhotoGlobal(gid.clone()),
+            "Development settings changed in Lightroom since the last import",
+        )
+        .code("develop_changed")
+        .reason("The development settings in LightCraft are kept; lr2lc never overwrites them silently.");
+        out.push(raw(
+            entry,
+            Some("Turn on “Overwrite photos changed in Lightroom” (--overwrite-develop) to write the Lightroom settings."),
+        ));
+    }
+    if !sources.not_selected.contains(&"develop") {
+        for photo in &sources.input.photos {
+            let Some(develop) = &photo.develop else {
+                continue;
+            };
+            if develop.unmapped.is_empty() {
+                continue;
+            }
+            let mut fields = develop.unmapped.clone();
+            fields.sort();
+            fields.dedup();
+            let entry = Entry::new(
+                Status::Skipped,
+                Area::Develop,
+                Stage::Photos,
+                Subject::Photo(photo.lightroom_id),
+                format!(
+                    "{} not carried over",
+                    lc_writer::entries::counted(fields.len(), "development field")
+                ),
+            )
+            .code("develop_unmapped")
+            .reason(format!(
+                "LightCraft has no exact equivalent for: {}.",
+                fields.join(", ")
+            ));
+            out.push(raw(entry, None));
+        }
+    }
+    for removed in plan.removed_photos() {
+        let entry = Entry::new(
+            Status::Skipped,
+            Area::Photos,
+            Stage::Photos,
+            Subject::Photo(removed.photo),
+            "No longer in Lightroom; kept in LightCraft",
+        )
+        .code("photo_removed");
+        out.push(raw(entry, None));
+    }
+    for moved in plan.moved_photos() {
+        let entry = Entry::new(
+            Status::Skipped,
+            Area::Photos,
+            Stage::Photos,
+            Subject::Photo(moved.photo),
+            "File moved in Lightroom; not imported again",
+        )
+        .code("photo_moved");
+        out.push(raw(
+            entry,
+            Some("Relink the photo in LightCraft (Find Missing Photos) if its file moved."),
+        ));
+    }
+    for renamed in plan.renamed_keywords() {
+        let entry = Entry::new(
+            Status::Skipped,
+            Area::Keywords,
+            Stage::Keywords,
+            Subject::None,
+            format!(
+                "Keyword {} renamed in Lightroom; not renamed in LightCraft",
+                renamed.keyword
+            ),
+        )
+        .code("keyword_renamed");
+        out.push(raw(
+            entry,
+            Some("Rename the keyword in LightCraft if needed."),
+        ));
+    }
+    out
+}
+
+fn conflicts(out: &mut Vec<RawEntry>, list: &[Conflict]) {
+    for c in list {
+        let area = match c.field.as_str() {
+            "rating" => Area::Ratings,
+            "flag" => Area::Flags,
+            "label" => Area::Labels,
+            _ => Area::Metadata,
+        };
+        let entry = Entry::new(
+            Status::Conflict,
+            area,
+            Stage::Photos,
+            Subject::Photo(c.photo),
+            format!(
+                "{} changed in Lightroom and in LightCraft",
+                field_name(&c.field)
+            ),
+        )
+        .code("field_conflict")
+        .reason("Both sides changed since the last import. lr2lc keeps the value in LightCraft.")
+        .source(c.lightroom.clone())
+        .result(c.lightcraft.clone());
+        out.push(raw(
+            entry,
+            Some("Change it in LightCraft by hand if the Lightroom value should win."),
+        ));
+    }
+}
+
+fn field_name(field: &str) -> &'static str {
+    match field {
+        "rating" => "Star rating",
+        "flag" => "Flag",
+        "label" => "Color label",
+        "title" => "Title",
+        "caption" => "Caption",
+        "copyright" => "Copyright",
+        "creator" => "Creator",
+        _ => "Field",
+    }
+}
+
+fn area_of(name: &str) -> Area {
+    match name {
+        "keywords" => Area::Keywords,
+        "ratings" => Area::Ratings,
+        "labels" => Area::Labels,
+        "flags" => Area::Flags,
+        "texts" => Area::Metadata,
+        "collections" => Area::Collections,
+        "stacks" => Area::Stacks,
+        "virtual-copies" => Area::VirtualCopies,
+        _ => Area::Develop,
+    }
+}
+
+/// Counts per status, for the report and the summary.
+pub fn counts(entries: &[RawEntry]) -> BTreeMap<&'static str, usize> {
+    let mut out: BTreeMap<&'static str, usize> =
+        Status::ALL.iter().map(|s| (s.as_str(), 0)).collect();
+    for e in entries {
+        *out.entry(e.entry.status.as_str()).or_insert(0) += 1;
+    }
+    out
+}

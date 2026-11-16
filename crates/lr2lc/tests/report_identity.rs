@@ -51,7 +51,12 @@ fn assert_refused(cwd: &Path, cat: &Path, target: &Path, guard: &Path, word: &st
     let guard_before = fs::read(guard).unwrap();
     let out = run(
         cwd,
-        &[cat.as_os_str(), OsStr::new("--report"), target.as_os_str()],
+        &[
+            cat.as_os_str(),
+            OsStr::new("--anonymize"),
+            OsStr::new("--report"),
+            target.as_os_str(),
+        ],
     );
     assert_eq!(out.status.code(), Some(2), "stderr: {}", stderr(&out));
     assert!(stderr(&out).contains(word), "stderr: {}", stderr(&out));
@@ -79,7 +84,12 @@ fn hard_link_to_photo_as_report_is_refused_as_exists() {
     assert_refused(dir.path(), &cat, &link, &link, "exists");
     let out = run(
         dir.path(),
-        &[cat.as_os_str(), OsStr::new("--report"), link.as_os_str()],
+        &[
+            cat.as_os_str(),
+            OsStr::new("--anonymize"),
+            OsStr::new("--report"),
+            link.as_os_str(),
+        ],
     );
     assert!(
         !stderr(&out).contains("catalog"),

@@ -9,6 +9,13 @@ The first release is 0.1.0.
 
 ### Added
 
+- Run log in `report.json` (`entries`, `entry_counts`, `anonymized`): one
+  entry per photo, keyword, album and field that was transferred, adjusted,
+  skipped, in conflict or failed, with area, item name, message, code,
+  reason, recommendation and the Lightroom and LightCraft values. The
+  summary counts them in a `log:` line. Live entries reach front ends
+  through `Progress::entry`.
+- `--anonymize` leaves every name, path and value out of the report.
 - `--skip AREAS` leaves parts of the catalog out: keywords, ratings,
   labels, flags, texts, collections, stacks, virtual-copies, develop. A part
   left out sends nothing and is not compared; its fields keep their last
@@ -39,6 +46,9 @@ The first release is 0.1.0.
 
 ### Changed
 
+- `report.json` now holds names, paths and values in its run log by
+  default (owner decision); `--anonymize` restores a report without them.
+  The other sections stay free of names and values.
 - The conversion now lives in a library crate, `lr2lc-core` (`Job`,
   `prepare`, `finish`, typed `RunError`), shared by the command line and a
   coming GUI. Output, report and exit codes are unchanged.

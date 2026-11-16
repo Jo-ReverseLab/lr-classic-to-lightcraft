@@ -30,6 +30,7 @@ fn setup() -> Setup {
         allow_xmp: false,
         overwrite_develop: false,
         areas: lr2lc_core::Areas::ALL,
+        anonymize: false,
     };
     Setup {
         _photos: photos,
@@ -46,7 +47,8 @@ fn state_text(job: &Job) -> String {
 /// The report without the parts that differ between two runs by design.
 fn numbers(report: &str) -> serde_json::Value {
     let mut value: serde_json::Value = serde_json::from_str(report).unwrap();
-    value.as_object_mut().unwrap().remove("catalog");
+    // The entries name each run's own temporary files.
+    value.as_object_mut().unwrap().remove("entries");
     value
 }
 
@@ -155,4 +157,45 @@ fn areas_left_out_are_named_in_report_and_summary() {
     let done = finish(&setup.job, prepared, &mut NoProgress).unwrap();
     let report: serde_json::Value = serde_json::from_str(&done.report_json()).unwrap();
     assert!(report.get("not_selected").is_none());
+}
+
+#[test]
+fn the_log_names_files_unless_anonymized() {
+    let mut setup = setup();
+    setup.job.apply = false;
+    let prepared = prepare(&setup.job, &mut NoProgress).unwrap();
+    let done = finish(&setup.job, prepared, &mut NoProgress).unwrap();
+
+    let named = done.log.render(false);
+    let imports: Vec<_> = named
+        .iter()
+        .filter(|e| e.message == "Will be imported as a reference")
+        .collect();
+    assert!(!imports.is_empty());
+    for e in &imports {
+        assert!(e.item.contains('.'), "a file name: {:?}", e.item);
+        assert!(e.source.as_deref().is_some_and(|s| s.ends_with(&e.item)));
+        assert!(e.photo.is_some());
+    }
+
+    let report: serde_json::Value = serde_json::from_str(&done.report_json_as(true)).unwrap();
+    assert_eq!(report["anonymized"], true);
+    let catalog_dir = setup
+        .job
+        .catalog
+        .parent()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let text = report["entries"].to_string();
+    assert!(!text.contains(&catalog_dir), "no path in an anonymized log");
+    for e in report["entries"].as_array().unwrap() {
+        assert!(e.get("source").is_none() && e.get("result").is_none());
+        if let Some(id) = e["photo"].as_i64() {
+            assert_eq!(e["item"], format!("photo {id}"));
+        }
+    }
+    let named: serde_json::Value = serde_json::from_str(&done.report_json()).unwrap();
+    assert_eq!(named["anonymized"], false);
+    assert!(named["entries"].to_string().contains(&catalog_dir));
 }

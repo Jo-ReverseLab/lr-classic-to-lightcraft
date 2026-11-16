@@ -58,16 +58,31 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 /// A field that changed differently on both sides since the last import:
-/// nothing is written for it. Only the photo's Lightroom id and the field
-/// name are carried, never a value.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// nothing is written for it. The report's `writer` section carries only the
+/// photo's Lightroom id and the field name; the two values are kept for the
+/// run log, which can be anonymized, and are not part of equality.
+#[derive(Debug, Clone, Serialize)]
 pub struct Conflict {
     /// The photo's id in the Lightroom catalog.
     pub photo: i64,
     /// `rating`, `flag`, `label`, `title`, `caption`, `copyright` or
     /// `creator`.
     pub field: String,
+    /// The value in Lightroom.
+    #[serde(skip)]
+    pub lightroom: String,
+    /// The value in LightCraft, which is kept.
+    #[serde(skip)]
+    pub lightcraft: String,
 }
+
+impl PartialEq for Conflict {
+    fn eq(&self, other: &Self) -> bool {
+        self.photo == other.photo && self.field == other.field
+    }
+}
+
+impl Eq for Conflict {}
 
 /// A recorded photo that is no longer in the Lightroom model. Only the
 /// photo's Lightroom id is carried, never a path or a file name; nothing is
@@ -454,6 +469,8 @@ pub struct Plan {
     /// Known photos whose development settings changed in Lightroom and were
     /// left alone because `overwrite_develop` was not given.
     develop_not_applied: usize,
+    /// Global ids of the photos counted in `develop_not_applied`.
+    develop_not_applied_ids: Vec<String>,
     /// Photos written because `overwrite_develop` was given.
     develop_overwritten: usize,
     /// Names of catalog fields that could not be carried over, each with
@@ -657,6 +674,12 @@ impl Plan {
     /// left alone because `overwrite_develop` was not given.
     pub fn develop_not_applied(&self) -> usize {
         self.develop_not_applied
+    }
+
+    /// Global ids of the known photos whose development settings changed in
+    /// Lightroom and were left alone.
+    pub fn develop_not_applied_ids(&self) -> &[String] {
+        &self.develop_not_applied_ids
     }
 
     /// Photos written because `overwrite_develop` was given.
@@ -1351,6 +1374,7 @@ fn plan_develop(
             Some(_) => {
                 if !overwrite {
                     out.develop_not_applied += 1;
+                    out.develop_not_applied_ids.push(global_id.to_string());
                     return;
                 }
                 out.develop_overwritten += 1;
@@ -2026,19 +2050,22 @@ fn reconcile(
 ) -> (Vec<(&'static str, Value)>, PhotoFields) {
     let mut changes = Vec::new();
     let mut recorded = old.clone();
-    let mut conflict = |field: &str| {
+    let mut conflict = |field: &str, lightroom: String, lightcraft: String| {
         conflicts.push(Conflict {
             photo,
             field: field.to_string(),
+            lightroom,
+            lightcraft,
         })
     };
+    let shown = |value: &Option<String>| value.clone().unwrap_or_default();
 
     let decision = decide(&old.rating, &new.rating, &live.rating);
     if decision == Decision::Write {
         changes.push(("photo.rate", json!({"rating": new.rating})));
     }
     if decision == Decision::Conflict {
-        conflict("rating");
+        conflict("rating", new.rating.to_string(), live.rating.to_string());
     } else {
         recorded.rating = new.rating;
     }
@@ -2048,7 +2075,7 @@ fn reconcile(
         changes.push(("photo.flag", json!({"flag": new.flag})));
     }
     if decision == Decision::Conflict {
-        conflict("flag");
+        conflict("flag", new.flag.clone(), live.flag.clone());
     } else {
         recorded.flag = new.flag.clone();
     }
@@ -2059,7 +2086,7 @@ fn reconcile(
         changes.push(("photo.label", json!({"label": label})));
     }
     if decision == Decision::Conflict {
-        conflict("label");
+        conflict("label", shown(&new.label), shown(&live.label));
     } else {
         recorded.label = new.label.clone();
     }
@@ -2079,7 +2106,7 @@ fn reconcile(
                 Decision::Nothing | Decision::AlreadyEqual => {
                     recorded.$field = new.$field.clone();
                 }
-                Decision::Conflict => conflict($name),
+                Decision::Conflict => conflict($name, shown(&new.$field), shown(&live.$field)),
             }
         }};
     }

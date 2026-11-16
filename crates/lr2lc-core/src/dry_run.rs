@@ -83,6 +83,17 @@ pub struct Converted {
     /// in `smart` (untranslatable, or their parent is not a collection
     /// set), ascending.
     pub smart_untranslatable_ids: Vec<i64>,
+    /// Names for the run log.
+    pub names: Names,
+}
+
+/// Names of what the catalog holds, for the run log: file paths of the
+/// photos as Lightroom records them and collection names, by Lightroom id.
+/// Private data; an anonymized report never shows them.
+#[derive(Debug, Clone, Default)]
+pub struct Names {
+    pub photos: BTreeMap<i64, std::path::PathBuf>,
+    pub collections: BTreeMap<i64, String>,
 }
 
 /// Counts over the converted stacks.
@@ -280,6 +291,10 @@ pub fn run_with(
         // Map each photo, refusing mappings that would climb out of the new
         // prefix via `..` (reported, path left unchanged and photo dropped).
         let mut mapped_photos: Vec<Photo> = Vec::with_capacity(photo_data.photos.len());
+        let mut names = Names::default();
+        for p in &photo_data.photos {
+            names.photos.insert(p.lightroom_id, p.path.clone());
+        }
         for mut p in photo_data.photos {
             p.path = match mappings.classify(&p.path) {
                 MappedPath::Mapped(new) => new,
@@ -348,6 +363,12 @@ pub fn run_with(
         // longer rewrites the report by reason text. The convertible ones go
         // to the writer; the rest are reported as untranslatable ids.
         let smart = collection_data.convertible_smart.clone();
+        for c in &collection_data.collections {
+            names.collections.insert(c.lightroom_id, c.name.clone());
+        }
+        for s in &collection_data.smart_collections {
+            names.collections.insert(s.lightroom_id, s.name.clone());
+        }
         let smart_untranslatable_ids: Vec<i64> = collection_data
             .smart_ids
             .iter()
@@ -411,6 +432,7 @@ pub fn run_with(
                 quick: collection_data.quick,
                 smart,
                 smart_untranslatable_ids,
+                names,
             },
         )
     };

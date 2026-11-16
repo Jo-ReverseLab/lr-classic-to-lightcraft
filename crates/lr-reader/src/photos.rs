@@ -5,7 +5,7 @@ use crate::catalog::{Catalog, ReadError, TextCell, text_cell, value_or_blob};
 use crate::develop::{StoredGeometry, parse_develop_with_geometry};
 use crate::folders::join_folder_path;
 use crate::xmp::{Unreadable, title_from_blob};
-use model::{Develop, Flag, Photo, Rating, Report, SkipCode, Skipped};
+use model::{Develop, Flag, Photo, Rating, Report, SkipCode, Skipped, Subject};
 use rusqlite::types::Value;
 use std::collections::{BTreeMap, HashSet};
 
@@ -396,7 +396,7 @@ fn photo_from_row(
     converted: &mut HashSet<i64>,
 ) -> Result<Photo, Skipped> {
     let id = row.image_id;
-    let skip = |code, reason: String| Skipped::new(code, reason);
+    let skip = |code, reason: String| Skipped::new(code, reason).about(Subject::Photo(id));
     let master = row.master;
     if let Some(master) = master
         && !converted.contains(&master)

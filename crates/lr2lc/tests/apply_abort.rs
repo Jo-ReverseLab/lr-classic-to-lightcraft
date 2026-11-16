@@ -79,7 +79,11 @@ impl Setup {
             OsStr::new("--apply"),
         ];
         if with_report {
-            args.extend([OsStr::new("--report"), report.as_os_str()]);
+            args.extend([
+                OsStr::new("--anonymize"),
+                OsStr::new("--report"),
+                report.as_os_str(),
+            ]);
         }
         Command::new(env!("CARGO_BIN_EXE_lr2lc"))
             .current_dir(self.work.path())
@@ -361,7 +365,12 @@ fn dry_run_has_no_aborted_field() {
     let report = s.report();
     let o = Command::new(env!("CARGO_BIN_EXE_lr2lc"))
         .current_dir(s.work.path())
-        .args([s.catalog.as_path(), Path::new("--report"), report.as_path()])
+        .args([
+            s.catalog.as_path(),
+            Path::new("--anonymize"),
+            Path::new("--report"),
+            report.as_path(),
+        ])
         .output()
         .unwrap();
     assert_eq!(code(&o), Some(0), "{}", stderr(&o));

@@ -46,6 +46,7 @@ fn go(catalog: &std::path::Path, work: &std::path::Path, port: u16, apply: bool)
         library.as_os_str(),
         OsStr::new("--port"),
         OsStr::new(&port_text),
+        OsStr::new("--anonymize"),
         OsStr::new("--report"),
         report.as_os_str(),
     ];

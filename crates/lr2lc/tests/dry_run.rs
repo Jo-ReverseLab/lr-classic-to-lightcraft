@@ -131,7 +131,12 @@ fn report_file_has_documented_structure_and_balance() {
     let report = cwd.path().join("report.json");
     let out = run(
         cwd.path(),
-        &[cat.as_os_str(), os("--report"), report.as_os_str()],
+        &[
+            cat.as_os_str(),
+            os("--anonymize"),
+            os("--report"),
+            report.as_os_str(),
+        ],
     );
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
     let v: serde_json::Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
@@ -177,7 +182,12 @@ fn report_does_not_leak_paths() {
     let report = cwd.path().join("report.json");
     run(
         cwd.path(),
-        &[cat.as_os_str(), os("--report"), report.as_os_str()],
+        &[
+            cat.as_os_str(),
+            os("--anonymize"),
+            os("--report"),
+            report.as_os_str(),
+        ],
     );
     let text = fs::read_to_string(&report).unwrap();
     assert!(!text.contains(small::MACOS_ROOT_DIR), "report: {text}");
@@ -204,7 +214,12 @@ fn catalog_checksum_is_unchanged() {
     let report = cwd.path().join("r.json");
     run(
         cwd.path(),
-        &[cat.as_os_str(), os("--report"), report.as_os_str()],
+        &[
+            cat.as_os_str(),
+            os("--anonymize"),
+            os("--report"),
+            report.as_os_str(),
+        ],
     );
     assert_eq!(before, lr_reader_checksum(&cat));
     drop(dir);
@@ -236,6 +251,7 @@ fn apply_without_library_fails_and_writes_nothing() {
         &[
             cat.as_os_str(),
             os("--apply"),
+            os("--anonymize"),
             os("--report"),
             report.as_os_str(),
         ],
@@ -373,7 +389,12 @@ fn skipped_reasons_in_report_do_not_name_paths() {
     let report = cwd.path().join("report.json");
     run(
         cwd.path(),
-        &[cat.as_os_str(), os("--report"), report.as_os_str()],
+        &[
+            cat.as_os_str(),
+            os("--anonymize"),
+            os("--report"),
+            report.as_os_str(),
+        ],
     );
     let v: serde_json::Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
     for s in v["photos"]["skipped"].as_array().unwrap() {
@@ -425,6 +446,7 @@ fn map_with_empty_target_writes_no_report_file() {
             cat.as_os_str(),
             os("--map"),
             os("/x="),
+            os("--anonymize"),
             os("--report"),
             report.as_os_str(),
         ],

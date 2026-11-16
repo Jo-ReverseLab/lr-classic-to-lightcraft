@@ -23,6 +23,7 @@ fn run_report(cat: &Path) -> (String, serde_json::Value, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_lr2lc"))
         .current_dir(cwd.path())
         .arg(cat)
+        .arg("--anonymize")
         .arg("--report")
         .arg(&report)
         .output()

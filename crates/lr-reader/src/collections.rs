@@ -16,7 +16,7 @@ use crate::catalog::{Catalog, ReadError};
 use crate::smart::parse_smart_rules;
 use model::{
     Collection, CollectionKind, Photo, QuickCollection, Report, SkipCode, Skipped, SmartCollection,
-    SmartRules,
+    SmartRules, Subject,
 };
 use rusqlite::types::ValueRef;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -160,7 +160,9 @@ impl Catalog {
                 }
                 // Own skips are part of the status; the second arm only
                 // keeps the books balanced should that ever change.
-                (_, Err(skip)) | (Err(skip), Ok(())) => data.report.push_skipped(skip.clone()),
+                (_, Err(skip)) | (Err(skip), Ok(())) => data
+                    .report
+                    .push_skipped(skip.clone().about(Subject::Collection(id))),
             }
         }
         // Book every smart collection with its final verdict. Those with
@@ -173,7 +175,9 @@ impl Catalog {
                     data.report.converted();
                     data.convertible_smart.push(s.clone());
                 }
-                Err(skipped) => data.report.push_skipped(skipped),
+                Err(skipped) => data
+                    .report
+                    .push_skipped(skipped.about(Subject::Collection(s.lightroom_id))),
             }
         }
         for &id in &data.smart_ids {
@@ -181,7 +185,7 @@ impl Catalog {
                 continue;
             }
             data.report
-                .push_skipped(smart_reason(id, data.smart.get(&id)));
+                .push_skipped(smart_reason(id, data.smart.get(&id)).about(Subject::Collection(id)));
         }
         let converted: HashSet<i64> = photos.iter().map(|p| p.lightroom_id).collect();
         let mut seen: HashSet<(i64, i64)> = HashSet::new();
@@ -214,7 +218,10 @@ impl Catalog {
                     }
                     data.members.converted();
                 }
-                Err(skip) => data.members.push_skipped(skip),
+                Err(skip) => data.members.push_skipped(match image {
+                    Some(p) => skip.about(Subject::Photo(p)),
+                    None => skip,
+                }),
             }
         }
         Ok(data)

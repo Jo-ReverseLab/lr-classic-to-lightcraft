@@ -78,6 +78,7 @@
 
 use crate::albums::{Decision, Existing, Node, parse_album_list};
 use crate::control::{CommandSink, Outcome, WriteError};
+use crate::entries::{StepOutcome, step_entries};
 use crate::live::read_live_with;
 use crate::plan::{
     Areas, Conflict, MovedPhoto, RemovedPhoto, RenamedKeyword, Step, WriteInput, group_params,
@@ -86,7 +87,9 @@ use crate::plan::{
 };
 use crate::progress::{NoProgress, Phase, Progress};
 use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, hex_hash, keyword_text};
-use model::{Collection, CollectionKind, Keyword, Photo, SkipCode, Skipped, SmartCollection};
+use model::{
+    Collection, CollectionKind, Entry, Keyword, Photo, SkipCode, Skipped, SmartCollection,
+};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -261,6 +264,9 @@ pub struct ApplySummary {
     pub photos_moved: usize,
     /// `renamed_keywords.len()`, for the report.
     pub keywords_renamed: usize,
+    /// One log entry per finished step, in run order (failures are in the
+    /// skip and incomplete lists).
+    pub entries: Vec<Entry>,
 }
 
 /// A run that stopped: the error and what was done up to it.
@@ -501,6 +507,16 @@ struct Current {
     develop_pending: bool,
 }
 
+/// See [`Run::tally`].
+#[derive(Clone, Copy)]
+struct Tally {
+    failures: usize,
+    /// The photo being written has failed; its further steps are not sent.
+    unfinished: bool,
+    existing: usize,
+    not_carried: usize,
+}
+
 struct Run<'a> {
     client: &'a mut dyn CommandSink,
     areas: Areas,
@@ -611,11 +627,48 @@ impl Run<'_> {
                 return Err(WriteError::Cancelled);
             }
             self.progress.advance(done);
+            let before = self.tally();
             self.step(step)?;
+            let after = self.tally();
+            if after.failures == before.failures && !after.unfinished {
+                let outcome = if after.existing > before.existing {
+                    StepOutcome::Existing
+                } else if after.not_carried > before.not_carried {
+                    StepOutcome::NotCarried
+                } else {
+                    StepOutcome::Done
+                };
+                for entry in step_entries(step, outcome) {
+                    self.progress.entry(&entry);
+                    self.summary.entries.push(entry);
+                }
+            }
         }
         self.progress.advance(steps.len());
         self.finish_photo()?;
         self.record_converged()
+    }
+
+    /// Counters that tell how the last step ended.
+    fn tally(&self) -> Tally {
+        let s = &self.summary;
+        let unfinished = self.current.as_ref().is_some_and(|c| !c.ok);
+        Tally {
+            failures: s.photos_skipped.len()
+                + s.photos_incomplete.len()
+                + s.keywords_not_created.len()
+                + s.collections_skipped.len()
+                + s.collections_incomplete.len()
+                + s.members_skipped.len()
+                + s.stacks_skipped.len()
+                + s.stacks_incomplete.len()
+                + s.quick_skipped.len()
+                + s.quick_incomplete.len()
+                + s.smart_skipped.len(),
+            unfinished,
+            existing: s.photos_existing,
+            not_carried: s.develop_white_balance_not_carried,
+        }
     }
 
     /// Whether `step` begins a new unit: anything but a further step of the

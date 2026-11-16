@@ -68,6 +68,7 @@ impl Setup {
             self.library.as_os_str(),
             OsStr::new("--port"),
             OsStr::new(&port_text),
+            OsStr::new("--anonymize"),
             OsStr::new("--report"),
             report.as_os_str(),
         ];
@@ -94,7 +95,11 @@ impl Setup {
             .arg(&self.catalog)
             .args(["--library".as_ref(), self.library.as_os_str()])
             .args(["--port", port_text.as_str()])
-            .args(["--report".as_ref(), report.as_os_str()])
+            .args([
+                "--anonymize".as_ref(),
+                "--report".as_ref(),
+                report.as_os_str(),
+            ])
             .args(["--script".as_ref(), script.as_os_str()])
             .output()
             .unwrap()

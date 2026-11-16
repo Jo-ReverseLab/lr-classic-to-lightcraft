@@ -29,6 +29,7 @@ pub const AREAS: [&str; 9] = [
 pub fn dry_run(catalog: &Path, report: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_lr2lc"))
         .arg(catalog)
+        .arg("--anonymize")
         .arg("--report")
         .arg(report)
         .output()

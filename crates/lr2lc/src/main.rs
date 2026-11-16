@@ -113,6 +113,7 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
         allow_xmp: options.allow_xmp,
         overwrite_develop: options.overwrite_develop,
         areas: options.areas,
+        anonymize: options.anonymize,
     };
     let prepared = prepare(&job, &mut NoProgress)?;
     if let (Some(target), Some(given)) = (&targets.script, &options.script) {
@@ -157,6 +158,7 @@ mod tests {
             overwrite_develop: false,
             probe_white_balance: false,
             areas: lr2lc_core::Areas::ALL,
+            anonymize: false,
         }
     }
 

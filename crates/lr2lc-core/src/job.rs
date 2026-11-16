@@ -3,8 +3,9 @@
 //! (with `apply` and a library) or keeps the plan, and [`Finished`] holds
 //! everything a front end shows or saves afterwards.
 
-use crate::dry_run::{self, Outcome};
+use crate::dry_run::{self, Names, Outcome};
 use crate::labels::LabelMode;
+use crate::log::{self, Log};
 use crate::output;
 use crate::writer::{self, DevelopJson, WriterJson};
 use lc_writer::apply::{Aborted, ApplySummary};
@@ -15,6 +16,7 @@ use lc_writer::state::State;
 use model::PathMappings;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 /// What to convert and where to write it.
@@ -33,6 +35,8 @@ pub struct Job {
     pub overwrite_develop: bool,
     /// The parts of the catalog to write; everything by default.
     pub areas: Areas,
+    /// Leave every name, path and value of the catalog out of `report.json`.
+    pub anonymize: bool,
 }
 
 impl Job {
@@ -95,6 +99,8 @@ pub struct Prepared {
     pub input: WriteInput,
     pub state: State,
     pub plan: Plan,
+    /// Names for the run log.
+    pub names: Names,
 }
 
 /// Reads the catalog, loads the mapping file and plans the writer commands,
@@ -109,6 +115,7 @@ pub fn prepare(job: &Job, progress: &mut dyn Progress) -> Result<Prepared, RunEr
             };
             RunError::new(kind, &e)
         })?;
+    let names = std::mem::take(&mut outcome.converted.names);
     let mut input = writer::input(std::mem::take(&mut outcome.converted));
     input.overwrite_develop = job.overwrite_develop;
     input.areas = job.areas;
@@ -122,6 +129,7 @@ pub fn prepare(job: &Job, progress: &mut dyn Progress) -> Result<Prepared, RunEr
         input,
         state,
         plan,
+        names,
     })
 }
 
@@ -158,7 +166,10 @@ pub struct Finished {
     pub develop: DevelopJson,
     /// Why writing stopped, if it did.
     pub stop: Option<WriteError>,
+    /// The run log, with names; rendered anonymized on request.
+    pub log: Log,
     dry_run: bool,
+    anonymize: bool,
     not_selected: Vec<&'static str>,
 }
 
@@ -198,7 +209,9 @@ fn finish_by(
         input,
         state,
         plan,
+        names,
     } = prepared;
+    let mut applied = None;
     let (writer_summary, writer, develop, stop) = match job.writes_to() {
         Some(library) => {
             if !outcome.catalog_unchanged {
@@ -217,12 +230,14 @@ fn finish_by(
                 Ok(summary) => (summary, None),
                 Err(aborted) => (*aborted.summary, Some(aborted.error)),
             };
-            (
+            let texts = (
                 writer::applied_summary(&summary),
                 writer::applied_json(&summary, stop.as_ref()),
                 writer::applied_develop(&summary),
                 stop,
-            )
+            );
+            applied = Some(summary);
+            texts
         }
         None => (
             writer::planned_summary(&plan),
@@ -232,7 +247,18 @@ fn finish_by(
         ),
     };
     let not_selected = job.areas.not_selected();
-    let writer_summary = if not_selected.is_empty() {
+    let log = log::build(
+        &log::Sources {
+            outcome: &outcome,
+            input: &input,
+            plan: &plan,
+            applied: applied.as_ref(),
+            not_selected: &not_selected,
+        },
+        names,
+    );
+    let counts = log::counts(&log.entries);
+    let mut writer_summary = if not_selected.is_empty() {
         writer_summary
     } else {
         format!(
@@ -240,6 +266,15 @@ fn finish_by(
             not_selected.join(", ")
         )
     };
+    let _ = writeln!(
+        writer_summary,
+        "log: {}",
+        counts
+            .iter()
+            .map(|(status, n)| format!("{status} {n}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     // Check again after writing: the catalog must still be unchanged.
     outcome.catalog_unchanged = outcome.catalog_unchanged
         && lr_reader::checksum(&job.catalog).ok() == Some(outcome.catalog_checksum);
@@ -249,20 +284,34 @@ fn finish_by(
         writer,
         develop,
         stop,
+        log,
         dry_run: !job.apply,
+        anonymize: job.anonymize,
         not_selected,
     })
 }
 
 impl Finished {
-    /// `report.json` of this run.
+    /// `report.json` of this run, anonymized when the job says so.
     pub fn report_json(&self) -> String {
+        self.report_json_as(self.anonymize)
+    }
+
+    /// `report.json` of this run, with every name, path and value of the
+    /// catalog left out when `anonymize` is set.
+    pub fn report_json_as(&self, anonymize: bool) -> String {
+        let entries = self.log.render(anonymize);
         output::report_json_with(
             &self.outcome,
             self.dry_run,
             Some(&self.writer),
             &self.develop,
             &self.not_selected,
+            Some(output::LogJson {
+                anonymized: anonymize,
+                entry_counts: log::counts(&self.log.entries),
+                entries: &entries,
+            }),
         )
     }
 

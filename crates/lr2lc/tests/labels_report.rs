@@ -74,6 +74,7 @@ fn run(cat: &Path, extra: &[&str]) -> Run {
         .current_dir(cwd.path())
         .arg(cat)
         .args(extra)
+        .arg("--anonymize")
         .arg("--report")
         .arg(&report)
         .output()

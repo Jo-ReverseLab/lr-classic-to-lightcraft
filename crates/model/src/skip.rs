@@ -5,6 +5,7 @@
 //! arises (reader or writer), never derived from the text afterwards. A code
 //! is a fixed snake_case key and never contains a value from the catalog.
 
+use crate::entry::Subject;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -244,6 +245,9 @@ pub struct Skipped {
     pub reason: String,
     /// Why the element was skipped, for tools.
     pub code: SkipCode,
+    /// What was skipped, by id; [`Subject::None`] where the skip site does
+    /// not name it.
+    pub subject: Subject,
 }
 
 impl Skipped {
@@ -255,7 +259,17 @@ impl Skipped {
         } else {
             reason
         };
-        Skipped { reason, code }
+        Skipped {
+            reason,
+            code,
+            subject: Subject::None,
+        }
+    }
+
+    /// Names what was skipped.
+    pub fn about(mut self, subject: Subject) -> Self {
+        self.subject = subject;
+        self
     }
 }
 

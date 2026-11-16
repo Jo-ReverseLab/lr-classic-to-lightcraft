@@ -154,6 +154,8 @@ fn conflict(photo: i64, field: &str) -> Conflict {
     Conflict {
         photo,
         field: field.to_string(),
+        lightroom: String::new(),
+        lightcraft: String::new(),
     }
 }
 
@@ -259,8 +261,11 @@ fn d_a_field_changed_on_both_sides_is_a_conflict_and_not_written() {
         updates(&p),
         vec![("photo.flag".to_string(), json!({"flag": "pick"}))]
     );
-    // Nothing in the report may carry a value.
-    let text = format!("{:?}", p.conflicts());
+    // The report's conflict list carries no value; the values are only for
+    // the run log, which can be anonymized.
+    let text = serde_json::to_string(p.conflicts()).unwrap();
+    assert_eq!(p.conflicts()[1].lightroom, "Lightroom title");
+    assert_eq!(p.conflicts()[1].lightcraft, "LightCraft title");
     for secret in ["Lightroom title", "LightCraft title", "pick", "5"] {
         assert!(!text.contains(secret), "{text}");
     }

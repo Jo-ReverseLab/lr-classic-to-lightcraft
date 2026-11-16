@@ -77,6 +77,7 @@ impl Setup {
             self.library.as_os_str(),
             OsStr::new("--port"),
             OsStr::new(&port_text),
+            OsStr::new("--anonymize"),
             OsStr::new("--report"),
             report.as_os_str(),
         ];

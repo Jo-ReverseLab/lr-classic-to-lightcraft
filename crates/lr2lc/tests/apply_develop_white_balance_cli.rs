@@ -80,6 +80,7 @@ impl Setup {
             catalog.as_os_str().to_owned(),
             OsString::from("--library"),
             self.library.as_os_str().to_owned(),
+            OsString::from("--anonymize"),
             OsString::from("--report"),
             self.report_path().into_os_string(),
         ];
@@ -370,9 +371,11 @@ fn the_dry_run_counts_custom_white_balances_and_leaks_no_value() {
         !raw.contains(&e::WB_TEMPERATURE.to_string()),
         "the report leaks the stored temperature"
     );
+    // The counters name no photo; the log may, by id.
+    let develop = d.to_string();
     for id in [e::WB_ABSOLUTE_PHOTO, e::WB_RELATIVE_PHOTO] {
         assert!(
-            !raw.contains(&format!("photo {id}")),
+            !develop.contains(&format!("photo {id}")),
             "the counter must not name photo {id}"
         );
     }

@@ -70,7 +70,12 @@ fn report_of(cat: &Path) -> (String, serde_json::Value, String) {
     let report = cwd.path().join("report.json");
     let out = run(
         cwd.path(),
-        &[cat.as_os_str(), "--report".as_ref(), report.as_os_str()],
+        &[
+            cat.as_os_str(),
+            "--anonymize".as_ref(),
+            "--report".as_ref(),
+            report.as_os_str(),
+        ],
     );
     assert_eq!(
         out.status.code(),

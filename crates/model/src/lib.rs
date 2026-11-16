@@ -18,6 +18,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 pub mod develop;
+pub mod entry;
 pub mod label;
 pub mod mapping;
 pub mod skip;
@@ -27,6 +28,7 @@ pub use develop::{
     BrushStroke, CropGeometry, CurvePoint, Curves, Develop, Mask, MaskComponent, MaskOp, MaskShape,
     MergeValue, Point, Spot, SpotMode, WhiteBalance, WhiteBalanceHint,
 };
+pub use entry::{Area, Entry, Stage, Status, Subject};
 pub use label::{ColorLabel, LabelSet};
 pub use mapping::{MappedPath, PathMapping, PathMappings};
 pub use skip::{SkipCode, Skipped};

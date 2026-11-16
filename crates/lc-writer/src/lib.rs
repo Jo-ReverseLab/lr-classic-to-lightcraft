@@ -13,6 +13,7 @@
 mod albums;
 pub mod apply;
 pub mod control;
+pub mod entries;
 pub mod live;
 pub mod plan;
 pub mod progress;

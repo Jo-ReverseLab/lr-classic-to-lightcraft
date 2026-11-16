@@ -411,6 +411,7 @@ fn dry_run(catalog: &Path) -> Run {
     let out = Command::new(env!("CARGO_BIN_EXE_lr2lc"))
         .current_dir(cwd.path())
         .arg(catalog)
+        .arg("--anonymize")
         .arg("--report")
         .arg(&report)
         .output()
@@ -450,6 +451,7 @@ fn fake_run(catalog: &Path, apply: bool, tweak: impl FnOnce(&mut Config)) -> Run
         .arg(&library)
         .arg("--port")
         .arg(fake.port().to_string())
+        .arg("--anonymize")
         .arg("--report")
         .arg(&report);
     if apply {

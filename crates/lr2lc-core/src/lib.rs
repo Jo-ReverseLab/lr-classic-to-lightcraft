@@ -14,8 +14,10 @@
 #![forbid(unsafe_code)]
 
 pub mod dry_run;
+mod guidance;
 mod job;
 pub mod labels;
+pub mod log;
 pub mod output;
 pub mod report_file;
 pub mod writer;

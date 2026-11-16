@@ -57,7 +57,15 @@ fn find_photo(dir: &Path) -> Option<PathBuf> {
 /// protected file `guard` unchanged.
 fn assert_refused(cwd: &Path, cat: &Path, target: &OsStr, guard: &Path, word: &str) {
     let before = fs::read(guard).unwrap();
-    let out = run(cwd, &[cat.as_os_str(), OsStr::new("--report"), target]);
+    let out = run(
+        cwd,
+        &[
+            cat.as_os_str(),
+            OsStr::new("--anonymize"),
+            OsStr::new("--report"),
+            target,
+        ],
+    );
     assert_eq!(out.status.code(), Some(2), "stderr: {}", stderr(&out));
     assert!(stderr(&out).contains(word), "stderr: {}", stderr(&out));
     assert_eq!(fs::read(guard).unwrap(), before, "file was modified");
@@ -153,7 +161,12 @@ fn new_report_path_is_written() {
     let report = dir.path().join("new-report.json");
     let out = run(
         dir.path(),
-        &[cat.as_os_str(), OsStr::new("--report"), report.as_os_str()],
+        &[
+            cat.as_os_str(),
+            OsStr::new("--anonymize"),
+            OsStr::new("--report"),
+            report.as_os_str(),
+        ],
     );
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
     let v: serde_json::Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
@@ -164,7 +177,12 @@ fn new_report_path_is_written() {
 fn earlier_report_is_overwritten_by_second_run() {
     let (dir, cat) = with_files();
     let report = dir.path().join("report.json");
-    let args = [cat.as_os_str(), OsStr::new("--report"), report.as_os_str()];
+    let args = [
+        cat.as_os_str(),
+        OsStr::new("--anonymize"),
+        OsStr::new("--report"),
+        report.as_os_str(),
+    ];
     assert_eq!(run(dir.path(), &args).status.code(), Some(0));
     // Corrupt the content but keep it a valid earlier report.
     fs::write(&report, br#"{"tool_version": "old", "marker": true}"#).unwrap();

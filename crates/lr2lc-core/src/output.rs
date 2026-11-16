@@ -39,6 +39,21 @@ pub struct ReportJson<'a> {
     /// everything was selected.
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub not_selected: &'a [&'static str],
+    /// The run log.
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub log: Option<LogJson<'a>>,
+}
+
+/// The run log in `report.json`.
+#[derive(Debug, Serialize)]
+pub struct LogJson<'a> {
+    /// Whether names, paths and values were left out (`--anonymize`).
+    pub anonymized: bool,
+    /// Entries per status: `transferred`, `adjusted`, `skipped`,
+    /// `conflict`, `error`.
+    pub entry_counts: BTreeMap<&'static str, usize>,
+    /// One entry per thing done, adjusted, skipped, in conflict or failed.
+    pub entries: &'a [crate::log::LogEntry],
 }
 
 /// Counts of one kind of element.
@@ -225,7 +240,7 @@ impl<'a> AreaJson<'a> {
 /// Builds the JSON report of a dry run without writer section.
 #[cfg(test)]
 pub fn report_json(outcome: &Outcome) -> String {
-    report_json_with(outcome, true, None, &DevelopJson::default(), &[])
+    report_json_with(outcome, true, None, &DevelopJson::default(), &[], None)
 }
 
 /// Builds the JSON report of a run.
@@ -235,6 +250,7 @@ pub fn report_json_with(
     writer: Option<&WriterJson>,
     develop: &DevelopJson,
     not_selected: &[&'static str],
+    log: Option<LogJson<'_>>,
 ) -> String {
     let json = ReportJson {
         tool_version: env!("CARGO_PKG_VERSION"),
@@ -279,6 +295,7 @@ pub fn report_json_with(
         develop,
         writer,
         not_selected,
+        log,
     };
     // Provably infallible: every map in the report has string keys and every
     // value is a plain number, string, bool or list, which serde_json always

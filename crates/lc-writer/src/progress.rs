@@ -27,6 +27,8 @@ pub enum Phase {
 pub trait Progress {
     fn phase(&mut self, _phase: Phase, _total: usize) {}
     fn advance(&mut self, _done: usize) {}
+    /// A step finished; called with its log entry as it happens.
+    fn entry(&mut self, _entry: &model::Entry) {}
     fn cancelled(&self) -> bool {
         false
     }

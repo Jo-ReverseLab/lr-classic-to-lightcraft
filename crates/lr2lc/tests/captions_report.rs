@@ -26,6 +26,7 @@ fn run(cat: &Path, extra: &[&str]) -> (String, String, Value, String) {
         .current_dir(cwd.path())
         .arg(cat)
         .args(extra)
+        .arg("--anonymize")
         .arg("--report")
         .arg(&report)
         .output()

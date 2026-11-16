@@ -12,7 +12,7 @@
 
 use crate::catalog::{Catalog, ReadError, TextCell, text_cell};
 use crate::collections::{as_id, is_nonzero};
-use model::{Photo, Report, SkipCode, Skipped, Stack};
+use model::{Photo, Report, SkipCode, Skipped, Stack, Subject};
 use rusqlite::types::ValueRef;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -207,14 +207,20 @@ fn build(
             data.members.read();
         }
         if kept.len() < 2 {
-            data.report.skip(
-                SkipCode::TooFewPhotos,
-                format!("stack {id}: fewer than two converted photos"),
+            data.report.push_skipped(
+                Skipped::new(
+                    SkipCode::TooFewPhotos,
+                    format!("stack {id}: fewer than two converted photos"),
+                )
+                .about(Subject::Stack(id)),
             );
             for p in pending {
-                data.members.skip(
-                    SkipCode::StackSkipped,
-                    format!("photo {p}: stack {id} is skipped"),
+                data.members.push_skipped(
+                    Skipped::new(
+                        SkipCode::StackSkipped,
+                        format!("photo {p}: stack {id} is skipped"),
+                    )
+                    .about(Subject::Photo(p)),
                 );
             }
         } else {

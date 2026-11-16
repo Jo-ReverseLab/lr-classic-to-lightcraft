@@ -570,5 +570,1576 @@
     "quick_skipped_by_code": {},
     "smart_skipped": [],
     "smart_skipped_by_code": {}
-  }
+  },
+  "anonymized": true,
+  "entry_counts": {
+    "adjusted": 0,
+    "conflict": 0,
+    "error": 0,
+    "skipped": 85,
+    "transferred": 97
+  },
+  "entries": [
+    {
+      "status": "skipped",
+      "area": "photos",
+      "stage": "read",
+      "item": "photo 2",
+      "message": "Video, not supported by LightCraft",
+      "code": "video",
+      "reason": "photo 2: video files are not supported by LightCraft",
+      "photo": 2
+    },
+    {
+      "status": "skipped",
+      "area": "photos",
+      "stage": "read",
+      "item": "photo 4",
+      "message": "Video, not supported by LightCraft",
+      "code": "video",
+      "reason": "photo 4: video files are not supported by LightCraft",
+      "photo": 4
+    },
+    {
+      "status": "skipped",
+      "area": "photos",
+      "stage": "read",
+      "item": "photo 5",
+      "message": "Video, not supported by LightCraft",
+      "code": "video",
+      "reason": "photo 5: video files are not supported by LightCraft",
+      "photo": 5
+    },
+    {
+      "status": "skipped",
+      "area": "virtual-copies",
+      "stage": "read",
+      "item": "photo 21",
+      "message": "Virtual copy not created: its master was not transferred",
+      "code": "virtual_copy",
+      "reason": "photo 21: virtual copy of photo 4 cannot be created, the master was not converted",
+      "recommendation": "Transfer the master photo first; the copy follows on the next run.",
+      "photo": 21
+    },
+    {
+      "status": "skipped",
+      "area": "photos",
+      "stage": "read",
+      "item": "photo 3",
+      "message": "Original missing, photo not transferred",
+      "code": "missing",
+      "reason": "photo 3: original file is missing",
+      "recommendation": "Connect the drive or add a path mapping, then run again. lr2lc does not yet transfer photos without an original as offline; LightCraft's own Lightroom import keeps them.",
+      "photo": 3
+    },
+    {
+      "status": "skipped",
+      "area": "photos",
+      "stage": "read",
+      "item": "photo 20",
+      "message": "Original missing, photo not transferred",
+      "code": "missing",
+      "reason": "photo 20: original file is missing",
+      "recommendation": "Connect the drive or add a path mapping, then run again. lr2lc does not yet transfer photos without an original as offline; LightCraft's own Lightroom import keeps them.",
+      "photo": 20
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Name is empty or invalid",
+      "code": "name_empty",
+      "reason": "keyword 12: name is empty",
+      "recommendation": "Rename it in Lightroom, then run again."
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword name contains “|”",
+      "code": "name_has_bar",
+      "reason": "keyword 14: name contains a vertical bar",
+      "recommendation": "LightCraft uses “|” to separate keyword levels. Rename the keyword in Lightroom, then run again."
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Name is empty or invalid",
+      "code": "name_empty",
+      "reason": "keyword 16: name is empty",
+      "recommendation": "Rename it in Lightroom, then run again."
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Parent was not transferred",
+      "code": "parent_skipped",
+      "reason": "keyword 17: parent keyword 16 is skipped"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Parent was not transferred",
+      "code": "parent_skipped",
+      "reason": "keyword 18: parent keyword 17 is skipped"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 2: photo 2 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 3: photo 3 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 4: photo 4 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 5: photo 5 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 20: photo 20 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 22: photo 2 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 23: photo 3 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 24: photo 4 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 25: photo 5 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword was not transferred",
+      "code": "assignment_keyword_skipped",
+      "reason": "assignment 31: keyword 14 is skipped"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword was not transferred",
+      "code": "assignment_keyword_skipped",
+      "reason": "assignment 32: keyword 16 is skipped"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 33: photo 2 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 34: photo 999 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 35: photo 20 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 36: photo 4 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword of a photo that was not transferred",
+      "code": "assignment_photo_skipped",
+      "reason": "assignment 37: photo 5 is skipped or unknown"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword was not transferred",
+      "code": "keyword_skipped",
+      "reason": "synonym 3: keyword 16 is skipped"
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Keyword cannot be resolved",
+      "code": "keyword_unknown",
+      "reason": "synonym 4: keyword 999 is unknown",
+      "recommendation": "The catalog has an inconsistent entry. Lightroom's catalog check (File › Optimize Catalog) may repair it."
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Name is empty or invalid",
+      "code": "name_empty",
+      "reason": "synonym 5: name is empty",
+      "recommendation": "Rename it in Lightroom, then run again."
+    },
+    {
+      "status": "skipped",
+      "area": "keywords",
+      "stage": "read",
+      "item": "",
+      "message": "Name is empty or invalid",
+      "code": "name_empty",
+      "reason": "synonym 6: name is empty",
+      "recommendation": "Rename it in Lightroom, then run again."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 16",
+      "message": "Collection type not supported",
+      "code": "collection_kind_unsupported",
+      "reason": "collection 16: collection type \"com.adobe.ag.webGallery\" is not converted",
+      "recommendation": "Prints, books, slideshows and web galleries are not transferred."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 17",
+      "message": "Collection type not supported",
+      "code": "collection_kind_unsupported",
+      "reason": "collection 17: collection type \"com.adobe.ag.print\" is not converted",
+      "recommendation": "Prints, books, slideshows and web galleries are not transferred."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 18",
+      "message": "Parent cannot be resolved",
+      "code": "parent_missing",
+      "reason": "collection 18: parent 9999 is missing",
+      "recommendation": "The catalog has an inconsistent entry. Lightroom's catalog check (File › Optimize Catalog) may repair it."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 19",
+      "message": "Parent cannot be resolved",
+      "code": "parent_not_set",
+      "reason": "collection 19: parent 4 is not a collection set",
+      "recommendation": "The catalog has an inconsistent entry. Lightroom's catalog check (File › Optimize Catalog) may repair it."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 20",
+      "message": "Parent was not transferred",
+      "code": "parent_skipped",
+      "reason": "collection 20: parent 13 is skipped"
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 21",
+      "message": "Parent cannot be resolved",
+      "code": "parent_not_set",
+      "reason": "collection 21: parent 18 is not a collection set",
+      "recommendation": "The catalog has an inconsistent entry. Lightroom's catalog check (File › Optimize Catalog) may repair it."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 22",
+      "message": "Parent was not transferred",
+      "code": "parent_skipped",
+      "reason": "collection 22: parent 21 is skipped"
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 23",
+      "message": "Parent cannot be resolved",
+      "code": "parent_cycle",
+      "reason": "collection 23: parent chain forms a cycle",
+      "recommendation": "The catalog has an inconsistent entry. Lightroom's catalog check (File › Optimize Catalog) may repair it."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 24",
+      "message": "Parent cannot be resolved",
+      "code": "parent_cycle",
+      "reason": "collection 24: parent chain forms a cycle",
+      "recommendation": "The catalog has an inconsistent entry. Lightroom's catalog check (File › Optimize Catalog) may repair it."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 25",
+      "message": "Parent cannot be resolved",
+      "code": "parent_cycle",
+      "reason": "collection 25: parent chain forms a cycle",
+      "recommendation": "The catalog has an inconsistent entry. Lightroom's catalog check (File › Optimize Catalog) may repair it."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 102",
+      "message": "Rule not supported yet",
+      "code": "smart_untranslatable",
+      "reason": "collection 102: smart collection is not converted (criterion \"pick\" has no exact LightCraft equivalent)",
+      "recommendation": "So far only rules based on star ratings become smart albums. The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 103",
+      "message": "Rule not supported yet",
+      "code": "smart_untranslatable",
+      "reason": "collection 103: smart collection is not converted (criterion \"labelColor\" has no exact LightCraft equivalent)",
+      "recommendation": "So far only rules based on star ratings become smart albums. The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 104",
+      "message": "Rule not supported yet",
+      "code": "smart_untranslatable",
+      "reason": "collection 104: smart collection is not converted (criterion \"keywords\" has no exact LightCraft equivalent)",
+      "recommendation": "So far only rules based on star ratings become smart albums. The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 105",
+      "message": "Rule not supported yet",
+      "code": "smart_untranslatable",
+      "reason": "collection 105: smart collection is not converted (criterion \"keywords\" has no exact LightCraft equivalent)",
+      "recommendation": "So far only rules based on star ratings become smart albums. The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 106",
+      "message": "Rule not supported yet",
+      "code": "smart_untranslatable",
+      "reason": "collection 106: smart collection is not converted (criterion \"captureTime\" has no exact LightCraft equivalent)",
+      "recommendation": "So far only rules based on star ratings become smart albums. The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 107",
+      "message": "Rule not supported yet",
+      "code": "smart_untranslatable",
+      "reason": "collection 107: smart collection is not converted (criterion \"touchTime\" has no exact LightCraft equivalent)",
+      "recommendation": "So far only rules based on star ratings become smart albums. The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 108",
+      "message": "Rule not supported yet",
+      "code": "smart_untranslatable",
+      "reason": "collection 108: smart collection is not converted (criterion \"fileFormat\" has no exact LightCraft equivalent)",
+      "recommendation": "So far only rules based on star ratings become smart albums. The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 109",
+      "message": "Rule not supported yet",
+      "code": "smart_untranslatable",
+      "reason": "collection 109: smart collection is not converted (criterion \"labelColor\" has no exact LightCraft equivalent)",
+      "recommendation": "So far only rules based on star ratings become smart albums. The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 110",
+      "message": "Rule not supported yet",
+      "code": "smart_untranslatable",
+      "reason": "collection 110: smart collection is not converted (criterion \"zyxCriterion\" has no exact LightCraft equivalent)",
+      "recommendation": "So far only rules based on star ratings become smart albums. The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 111",
+      "message": "Rule not supported yet",
+      "code": "smart_untranslatable",
+      "reason": "collection 111: smart collection is not converted (criterion \"rating\" has no exact LightCraft equivalent)",
+      "recommendation": "So far only rules based on star ratings become smart albums. The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 112",
+      "message": "Rule not supported yet",
+      "code": "smart_untranslatable",
+      "reason": "collection 112: smart collection is not converted (criterion \"keywords\" has no exact LightCraft equivalent)",
+      "recommendation": "So far only rules based on star ratings become smart albums. The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 113",
+      "message": "Smart collection rules cannot be read",
+      "code": "smart_no_criteria",
+      "reason": "collection 113: smart collection is not converted (no criteria)",
+      "recommendation": "The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 114",
+      "message": "Rule not supported yet",
+      "code": "smart_untranslatable",
+      "reason": "collection 114: smart collection is not converted (criterion \"pick\" has no exact LightCraft equivalent)",
+      "recommendation": "So far only rules based on star ratings become smart albums. The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 13",
+      "message": "Smart collection rules cannot be read",
+      "code": "smart_unreadable",
+      "reason": "collection 13: smart collection is not converted (unreadable rules)",
+      "recommendation": "The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 121",
+      "message": "Smart collection rules cannot be read",
+      "code": "smart_unreadable",
+      "reason": "collection 121: smart collection is not converted (unreadable rules)",
+      "recommendation": "The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 122",
+      "message": "Smart collection rules cannot be read",
+      "code": "smart_unreadable",
+      "reason": "collection 122: smart collection is not converted (unreadable rules)",
+      "recommendation": "The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 123",
+      "message": "Smart collection rules cannot be read",
+      "code": "smart_unreadable",
+      "reason": "collection 123: smart collection is not converted (unreadable rules)",
+      "recommendation": "The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 124",
+      "message": "Smart collection rules cannot be read",
+      "code": "smart_unreadable",
+      "reason": "collection 124: smart collection is not converted (unreadable rules)",
+      "recommendation": "The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 125",
+      "message": "Smart collection rules cannot be read",
+      "code": "smart_unreadable",
+      "reason": "collection 125: smart collection is not converted (unreadable rules)",
+      "recommendation": "The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 126",
+      "message": "Smart collection rules cannot be read",
+      "code": "smart_unreadable",
+      "reason": "collection 126: smart collection is not converted (unreadable rules)",
+      "recommendation": "The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 127",
+      "message": "Smart collection rules cannot be read",
+      "code": "smart_unreadable",
+      "reason": "collection 127: smart collection is not converted (unreadable rules)",
+      "recommendation": "The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 128",
+      "message": "Smart collection rules cannot be read",
+      "code": "smart_unreadable",
+      "reason": "collection 128: smart collection is not converted (unreadable rules)",
+      "recommendation": "The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "collection 129",
+      "message": "Smart collection rules cannot be read",
+      "code": "smart_unreadable",
+      "reason": "collection 129: smart collection is not converted (unreadable rules)",
+      "recommendation": "The collection stays unchanged in Lightroom."
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "photo 19",
+      "message": "A collection set holds no photos",
+      "code": "collection_is_set",
+      "reason": "photo 19: collection 3 is a collection set and holds no photos",
+      "photo": 19
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "photo 4",
+      "message": "Photo was not transferred",
+      "code": "photo_not_converted",
+      "reason": "photo 4: skipped or unknown photo, not added to collection 4",
+      "photo": 4
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "photo 5",
+      "message": "Photo was not transferred",
+      "code": "photo_not_converted",
+      "reason": "photo 5: skipped or unknown photo, not added to collection 4",
+      "photo": 5
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "photo 15",
+      "message": "Photo listed twice; added once",
+      "code": "duplicate_member",
+      "reason": "photo 15: duplicate member of collection 7",
+      "photo": 15
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "photo 20",
+      "message": "Photo was not transferred",
+      "code": "photo_not_converted",
+      "reason": "photo 20: skipped or unknown photo, not added to collection 8",
+      "photo": 20
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "photo 999",
+      "message": "Photo was not transferred",
+      "code": "photo_not_converted",
+      "reason": "photo 999: skipped or unknown photo, not added to collection 8",
+      "photo": 999
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "photo 1",
+      "message": "Member of a collection that was not transferred",
+      "code": "collection_skipped",
+      "reason": "photo 1: collection skipped (collection 13)",
+      "photo": 1
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "photo 20",
+      "message": "Photo was not transferred",
+      "code": "photo_not_converted",
+      "reason": "photo 20: skipped or unknown photo, not added to collection 14",
+      "photo": 20
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "photo 999",
+      "message": "Photo was not transferred",
+      "code": "photo_not_converted",
+      "reason": "photo 999: skipped or unknown photo, not added to collection 14",
+      "photo": 999
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "photo 4",
+      "message": "Member of a collection that was not transferred",
+      "code": "collection_skipped",
+      "reason": "photo 4: collection skipped (collection 16)",
+      "photo": 4
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "photo 5",
+      "message": "Member of a collection that was not transferred",
+      "code": "collection_skipped",
+      "reason": "photo 5: collection skipped (collection 18)",
+      "photo": 5
+    },
+    {
+      "status": "skipped",
+      "area": "collections",
+      "stage": "read",
+      "item": "photo 15",
+      "message": "Member of a collection that was not transferred",
+      "code": "collection_skipped",
+      "reason": "photo 15: collection skipped (collection 22)",
+      "photo": 15
+    },
+    {
+      "status": "skipped",
+      "area": "stacks",
+      "stage": "read",
+      "item": "stack 3",
+      "message": "Stack with fewer than two photos",
+      "code": "too_few_photos",
+      "reason": "stack 3: fewer than two converted photos"
+    },
+    {
+      "status": "skipped",
+      "area": "stacks",
+      "stage": "read",
+      "item": "stack 4",
+      "message": "Stack with fewer than two photos",
+      "code": "too_few_photos",
+      "reason": "stack 4: fewer than two converted photos"
+    },
+    {
+      "status": "skipped",
+      "area": "stacks",
+      "stage": "read",
+      "item": "photo 11",
+      "message": "Member of a stack that was not transferred",
+      "code": "stack_skipped",
+      "reason": "photo 11: stack 3 is skipped",
+      "photo": 11
+    },
+    {
+      "status": "skipped",
+      "area": "stacks",
+      "stage": "read",
+      "item": "",
+      "message": "Photo was not transferred",
+      "code": "photo_not_converted",
+      "reason": "photo 20: skipped or unknown photo, not added to stack 3"
+    },
+    {
+      "status": "skipped",
+      "area": "stacks",
+      "stage": "read",
+      "item": "photo 12",
+      "message": "Member of a stack that was not transferred",
+      "code": "stack_skipped",
+      "reason": "photo 12: stack 4 is skipped",
+      "photo": 12
+    },
+    {
+      "status": "skipped",
+      "area": "stacks",
+      "stage": "read",
+      "item": "",
+      "message": "Photo was not transferred",
+      "code": "photo_not_converted",
+      "reason": "photo 4: skipped or unknown photo, not added to stack 4"
+    },
+    {
+      "status": "skipped",
+      "area": "stacks",
+      "stage": "read",
+      "item": "",
+      "message": "Photo was not transferred",
+      "code": "photo_not_converted",
+      "reason": "photo 5: skipped or unknown photo, not added to stack 5"
+    },
+    {
+      "status": "skipped",
+      "area": "stacks",
+      "stage": "read",
+      "item": "",
+      "message": "Photo already in another stack",
+      "code": "already_in_stack",
+      "reason": "photo 16: already in stack 6"
+    },
+    {
+      "status": "skipped",
+      "area": "stacks",
+      "stage": "read",
+      "item": "",
+      "message": "Photo was not transferred",
+      "code": "photo_not_converted",
+      "reason": "photo 999: skipped or unknown photo, not added to stack 8"
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "keywords",
+      "item": "keyword",
+      "message": "Keyword will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "keywords",
+      "item": "keyword",
+      "message": "Keyword will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "keywords",
+      "item": "keyword",
+      "message": "Keyword will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "keywords",
+      "item": "keyword",
+      "message": "Keyword will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "keywords",
+      "item": "keyword",
+      "message": "Keyword will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "keywords",
+      "item": "keyword",
+      "message": "Keyword will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "keywords",
+      "item": "keyword",
+      "message": "Keyword will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "keywords",
+      "item": "keyword",
+      "message": "Keyword will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "keywords",
+      "item": "keyword",
+      "message": "Keyword will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "keywords",
+      "item": "keyword",
+      "message": "Keyword will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "keywords",
+      "item": "keyword",
+      "message": "Keyword will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "keywords",
+      "item": "keyword",
+      "message": "Keyword will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 1",
+      "message": "Will be imported as a reference",
+      "photo": 1
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 1",
+      "message": "2 keywords will be added",
+      "photo": 1
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 6",
+      "message": "Will be imported as a reference",
+      "photo": 6
+    },
+    {
+      "status": "transferred",
+      "area": "labels",
+      "stage": "photos",
+      "item": "photo 6",
+      "message": "Color label will be set",
+      "photo": 6
+    },
+    {
+      "status": "transferred",
+      "area": "metadata",
+      "stage": "photos",
+      "item": "photo 6",
+      "message": "Title will be set",
+      "photo": 6
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 6",
+      "message": "2 keywords will be added",
+      "photo": 6
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 7",
+      "message": "Will be imported as a reference",
+      "photo": 7
+    },
+    {
+      "status": "transferred",
+      "area": "labels",
+      "stage": "photos",
+      "item": "photo 7",
+      "message": "Color label will be set",
+      "photo": 7
+    },
+    {
+      "status": "transferred",
+      "area": "metadata",
+      "stage": "photos",
+      "item": "photo 7",
+      "message": "Title will be set",
+      "photo": 7
+    },
+    {
+      "status": "transferred",
+      "area": "metadata",
+      "stage": "photos",
+      "item": "photo 7",
+      "message": "Creator will be set",
+      "photo": 7
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 7",
+      "message": "2 keywords will be added",
+      "photo": 7
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 8",
+      "message": "Will be imported as a reference",
+      "photo": 8
+    },
+    {
+      "status": "transferred",
+      "area": "flags",
+      "stage": "photos",
+      "item": "photo 8",
+      "message": "Flag will be set",
+      "photo": 8
+    },
+    {
+      "status": "transferred",
+      "area": "labels",
+      "stage": "photos",
+      "item": "photo 8",
+      "message": "Color label will be set",
+      "photo": 8
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 8",
+      "message": "2 keywords will be added",
+      "photo": 8
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 9",
+      "message": "Will be imported as a reference",
+      "photo": 9
+    },
+    {
+      "status": "transferred",
+      "area": "ratings",
+      "stage": "photos",
+      "item": "photo 9",
+      "message": "Star rating will be set",
+      "photo": 9
+    },
+    {
+      "status": "transferred",
+      "area": "flags",
+      "stage": "photos",
+      "item": "photo 9",
+      "message": "Flag will be set",
+      "photo": 9
+    },
+    {
+      "status": "transferred",
+      "area": "labels",
+      "stage": "photos",
+      "item": "photo 9",
+      "message": "Color label will be set",
+      "photo": 9
+    },
+    {
+      "status": "transferred",
+      "area": "metadata",
+      "stage": "photos",
+      "item": "photo 9",
+      "message": "Caption will be set",
+      "photo": 9
+    },
+    {
+      "status": "transferred",
+      "area": "metadata",
+      "stage": "photos",
+      "item": "photo 9",
+      "message": "Copyright will be set",
+      "photo": 9
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 9",
+      "message": "2 keywords will be added",
+      "photo": 9
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 10",
+      "message": "Will be imported as a reference",
+      "photo": 10
+    },
+    {
+      "status": "transferred",
+      "area": "ratings",
+      "stage": "photos",
+      "item": "photo 10",
+      "message": "Star rating will be set",
+      "photo": 10
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 10",
+      "message": "2 keywords will be added",
+      "photo": 10
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 11",
+      "message": "Will be imported as a reference",
+      "photo": 11
+    },
+    {
+      "status": "transferred",
+      "area": "ratings",
+      "stage": "photos",
+      "item": "photo 11",
+      "message": "Star rating will be set",
+      "photo": 11
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 11",
+      "message": "1 keyword will be added",
+      "photo": 11
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 12",
+      "message": "Will be imported as a reference",
+      "photo": 12
+    },
+    {
+      "status": "transferred",
+      "area": "ratings",
+      "stage": "photos",
+      "item": "photo 12",
+      "message": "Star rating will be set",
+      "photo": 12
+    },
+    {
+      "status": "transferred",
+      "area": "metadata",
+      "stage": "photos",
+      "item": "photo 12",
+      "message": "Creator will be set",
+      "photo": 12
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 12",
+      "message": "1 keyword will be added",
+      "photo": 12
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 13",
+      "message": "Will be imported as a reference",
+      "photo": 13
+    },
+    {
+      "status": "transferred",
+      "area": "ratings",
+      "stage": "photos",
+      "item": "photo 13",
+      "message": "Star rating will be set",
+      "photo": 13
+    },
+    {
+      "status": "transferred",
+      "area": "metadata",
+      "stage": "photos",
+      "item": "photo 13",
+      "message": "Creator will be set",
+      "photo": 13
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 13",
+      "message": "1 keyword will be added",
+      "photo": 13
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 14",
+      "message": "Will be imported as a reference",
+      "photo": 14
+    },
+    {
+      "status": "transferred",
+      "area": "ratings",
+      "stage": "photos",
+      "item": "photo 14",
+      "message": "Star rating will be set",
+      "photo": 14
+    },
+    {
+      "status": "transferred",
+      "area": "metadata",
+      "stage": "photos",
+      "item": "photo 14",
+      "message": "Title will be set",
+      "photo": 14
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 14",
+      "message": "1 keyword will be added",
+      "photo": 14
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 15",
+      "message": "Will be imported as a reference",
+      "photo": 15
+    },
+    {
+      "status": "transferred",
+      "area": "ratings",
+      "stage": "photos",
+      "item": "photo 15",
+      "message": "Star rating will be set",
+      "photo": 15
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 15",
+      "message": "1 keyword will be added",
+      "photo": 15
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 16",
+      "message": "Will be imported as a reference",
+      "photo": 16
+    },
+    {
+      "status": "transferred",
+      "area": "ratings",
+      "stage": "photos",
+      "item": "photo 16",
+      "message": "Star rating will be set",
+      "photo": 16
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 16",
+      "message": "1 keyword will be added",
+      "photo": 16
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 17",
+      "message": "Will be imported as a reference",
+      "photo": 17
+    },
+    {
+      "status": "transferred",
+      "area": "ratings",
+      "stage": "photos",
+      "item": "photo 17",
+      "message": "Star rating will be set",
+      "photo": 17
+    },
+    {
+      "status": "transferred",
+      "area": "metadata",
+      "stage": "photos",
+      "item": "photo 17",
+      "message": "Title will be set",
+      "photo": 17
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 17",
+      "message": "1 keyword will be added",
+      "photo": 17
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 18",
+      "message": "Will be imported as a reference",
+      "photo": 18
+    },
+    {
+      "status": "transferred",
+      "area": "ratings",
+      "stage": "photos",
+      "item": "photo 18",
+      "message": "Star rating will be set",
+      "photo": 18
+    },
+    {
+      "status": "transferred",
+      "area": "metadata",
+      "stage": "photos",
+      "item": "photo 18",
+      "message": "Title will be set",
+      "photo": 18
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 18",
+      "message": "1 keyword will be added",
+      "photo": 18
+    },
+    {
+      "status": "transferred",
+      "area": "photos",
+      "stage": "photos",
+      "item": "photo 19",
+      "message": "Will be imported as a reference",
+      "photo": 19
+    },
+    {
+      "status": "transferred",
+      "area": "ratings",
+      "stage": "photos",
+      "item": "photo 19",
+      "message": "Star rating will be set",
+      "photo": 19
+    },
+    {
+      "status": "transferred",
+      "area": "keywords",
+      "stage": "photos",
+      "item": "photo 19",
+      "message": "1 keyword will be added",
+      "photo": 19
+    },
+    {
+      "status": "transferred",
+      "area": "stacks",
+      "stage": "organize",
+      "item": "stack 1",
+      "message": "Stack of 2 photos will be grouped"
+    },
+    {
+      "status": "transferred",
+      "area": "stacks",
+      "stage": "organize",
+      "item": "stack 2",
+      "message": "Stack of 3 photos will be grouped"
+    },
+    {
+      "status": "transferred",
+      "area": "stacks",
+      "stage": "organize",
+      "item": "stack 5",
+      "message": "Stack of 2 photos will be grouped"
+    },
+    {
+      "status": "transferred",
+      "area": "stacks",
+      "stage": "organize",
+      "item": "stack 6",
+      "message": "Stack of 2 photos will be grouped"
+    },
+    {
+      "status": "transferred",
+      "area": "stacks",
+      "stage": "organize",
+      "item": "stack 7",
+      "message": "Stack of 2 photos will be grouped"
+    },
+    {
+      "status": "transferred",
+      "area": "stacks",
+      "stage": "organize",
+      "item": "stack 8",
+      "message": "Stack of 2 photos will be grouped"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 1",
+      "message": "Album folder will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 2",
+      "message": "Album folder will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 3",
+      "message": "Album folder will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 6",
+      "message": "Album will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 8",
+      "message": "Album will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 9",
+      "message": "Album will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 7",
+      "message": "Album will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 10",
+      "message": "Album will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 5",
+      "message": "Album will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 11",
+      "message": "Album will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 12",
+      "message": "Album will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 4",
+      "message": "Album will be created"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 4",
+      "message": "1 photo will be added to the album"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 5",
+      "message": "3 photos will be added to the album"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 6",
+      "message": "4 photos will be added to the album"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 7",
+      "message": "2 photos will be added to the album"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 8",
+      "message": "1 photo will be added to the album"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 9",
+      "message": "1 photo will be added to the album"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 11",
+      "message": "1 photo will be added to the album"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 12",
+      "message": "1 photo will be added to the album"
+    },
+    {
+      "status": "transferred",
+      "area": "stacks",
+      "stage": "organize",
+      "item": "",
+      "message": "3 photos will be added to the Quick Collection"
+    },
+    {
+      "status": "transferred",
+      "area": "collections",
+      "stage": "organize",
+      "item": "collection 101",
+      "message": "Smart album will be created"
+    }
+  ]
 }
