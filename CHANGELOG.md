@@ -27,6 +27,9 @@ The first release is 0.1.0.
 - `develop.unmapped_photos` in the report: every development field that is
   not carried over, with the number of photos it affects. The existing
   `develop.unmapped` list stays capped at 20 names (#7).
+- Upright modes auto, level, vertical and full are carried over as
+  LightCraft's `geometry.upright`; LightCraft computes the correction itself,
+  as its own importer does. Guided Upright stays reported (#13).
 
 ### Changed
 
@@ -60,6 +63,9 @@ The first release is 0.1.0.
 - A request that crosses LightCraft's idle-close notice on the control port
   is sent once more on a new connection instead of being reported as
   rejected (#8).
+- `Upright*` fields are no longer reported as not carried for every photo:
+  with Upright off they have no effect, and version, preview, count and
+  digest fields are bookkeeping (#13).
 
 ## [0.1.0] - 2026-11-15
 

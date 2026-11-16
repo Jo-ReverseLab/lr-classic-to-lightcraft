@@ -448,8 +448,8 @@ identical).
 | `PerspectiveAspect` | `geometry.aspect` | 1:1 | `crs.rs:432` |
 | `PerspectiveX` | `geometry.offsetX` | 1:1 | `crs.rs:433` |
 | `PerspectiveY` | `geometry.offsetY` | 1:1 | `crs.rs:434` |
-| `PerspectiveUpright` | `geometry.upright` | number → off (0), auto (1), level (2), vertical (3), full (4), guided (5) | `crs.rs:435-445` |
-| `UprightTransform_*`, `UprightTransformCount`, `UprightCenterNorm*`, `UprightVersion` | — | saved matrices are not imported; reported (the mode is recalculated) | `xmp-interop.md:173`; `crs.rs:528-536` |
+| `PerspectiveUpright` | `geometry.upright` | lr2lc (#13): auto (1), level (2), vertical (3), full (4) via `develop.merge`; LightCraft analyses the photo itself. Off (0) or absent writes nothing. Guided (5) is reported as `PerspectiveUpright`: its guide lines (`UprightFourSegments_N`) would need converting to LightCraft's lens-corrected, oriented frame, unverified | `crs.rs:435-445` |
+| `UprightTransform_*`, `UprightCenterNorm*`, `UprightCenterMode`, `UprightFocalLength35mm`, `UprightFocalMode`, `UprightFourSegments_*` | — | Lightroom's computed result; reported only when Upright is on (the mode is recalculated). With Upright off they have no effect and are not reported. `UprightVersion`, `UprightPreview`, the counts and digests are bookkeeping and never reported | `xmp-interop.md:173`; `crs.rs:528-536` |
 | `CropLeft/Top/Right/Bottom` | `crop.geometry.rect` (`x0,y0,x1,y1`) | normalised edges of the stored image → rectangle in the oriented, rotated frame; aspect comes from `fileWidth`/`fileHeight` | `crs.rs:447-458`; `lightroom_catalog.rs:737-765` |
 | `CropAngle` | `crop.geometry.angle`, control `crop.angle` | degrees, sign flipped when the orientation mirrors | `crs.rs:456`; `lightroom_catalog.rs:754-757` |
 | missing `HasCrop` | — | inferred from any crop field | `lightroom_catalog.rs:700-705` |

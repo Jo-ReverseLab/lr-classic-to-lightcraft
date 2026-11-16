@@ -708,6 +708,48 @@ fn white_balance_mode(stored: &str) -> String {
     .to_owned()
 }
 
+/// Upright (`PerspectiveUpright`) and the `Upright*` fields Lightroom stores
+/// with it. Off (0 or absent): none of them has an effect and nothing is
+/// reported. Auto, level, vertical and full become LightCraft's
+/// `geometry.upright` mode, which LightCraft analyses itself, as its own
+/// importer does; Lightroom's computed result (`UprightTransform_*`, focal
+/// length, centre) is reported as not carried. Guided needs the guide lines
+/// in LightCraft's frame and stays reported with all its fields.
+/// Bookkeeping fields (version, preview flag, counts, digests) are never
+/// reported.
+fn read_upright(upright: Option<&LuaValue>, fields: &[&str], develop: &mut Develop) {
+    let mode = match upright {
+        None => return,
+        Some(LuaValue::Number(n)) if *n == 0.0 => return,
+        Some(LuaValue::Number(n)) if *n == 1.0 => Some("auto"),
+        Some(LuaValue::Number(n)) if *n == 2.0 => Some("level"),
+        Some(LuaValue::Number(n)) if *n == 3.0 => Some("vertical"),
+        Some(LuaValue::Number(n)) if *n == 4.0 => Some("full"),
+        Some(_) => None,
+    };
+    match mode {
+        Some(mode) => {
+            develop.partial.insert(
+                "geometry.upright".to_owned(),
+                MergeValue::Text(mode.to_owned()),
+            );
+        }
+        None => push_unmapped(&mut develop.unmapped, "PerspectiveUpright"),
+    }
+    for name in fields {
+        let bookkeeping = matches!(
+            *name,
+            "UprightVersion"
+                | "UprightPreview"
+                | "UprightTransformCount"
+                | "UprightFourSegmentsCount"
+        ) || name.ends_with("Digest");
+        if !bookkeeping {
+            push_unmapped(&mut develop.unmapped, name);
+        }
+    }
+}
+
 fn push_unmapped(unmapped: &mut Vec<String>, name: &str) {
     if !unmapped.iter().any(|known| known == name) {
         unmapped.push(name.to_owned());
@@ -929,6 +971,8 @@ fn map_table(
     let mut old_master = None;
     let mut has_2012_curve = false;
     let mut crop = RawCrop::default();
+    let mut upright: Option<&LuaValue> = None;
+    let mut upright_fields: Vec<&str> = Vec::new();
 
     for (name, value) in &table.fields {
         // The parser guarantees named top-level fields.
@@ -1070,6 +1114,10 @@ fn map_table(
             // Spot containers are read after the loop as well, so their
             // position in the settings text does not matter.
             "RetouchAreas" | "RetouchInfo" => {}
+            // Decided after the loop: the Upright fields only matter when
+            // Upright is on.
+            "PerspectiveUpright" => upright = Some(value),
+            _ if name.starts_with("Upright") => upright_fields.push(name),
             // Reported by name only; it never becomes a develop command.
             "CameraProfile" => match value {
                 LuaValue::Text(profile) if !profile.is_empty() => {
@@ -1102,6 +1150,7 @@ fn map_table(
     develop.white_balance.hint = hint;
     develop.white_balance.temperature = temperature;
     develop.white_balance.tint = tint;
+    read_upright(upright, &upright_fields, develop);
     develop.curves = curves_from_parts(
         master_2012,
         red_2012,
@@ -2095,6 +2144,54 @@ mod tests {
         let suppressed = parse("s = { Exposure2012 = 1, Exposure = 2, Contrast = 30 }");
         assert_eq!(suppressed.controls.len(), 1);
         assert_eq!(suppressed.controls.get("light.exposure"), Some(&1.0));
+    }
+
+    #[test]
+    fn upright_off_reports_nothing_and_a_mode_maps() {
+        let off = parse(
+            "s = { PerspectiveUpright = 0, UprightVersion = 6, UprightCenterMode = 0, \
+                   UprightFocalLength35mm = 35, UprightTransform_0 = \"1 0 0 0 1 0 0 0 1\" }",
+        );
+        assert!(off.unmapped.is_empty(), "{:?}", off.unmapped);
+        assert!(off.partial.is_empty());
+
+        let absent = parse("s = { UprightVersion = 6, UprightPreview = false }");
+        assert!(absent.unmapped.is_empty(), "{:?}", absent.unmapped);
+
+        let auto = parse(
+            "s = { PerspectiveUpright = 1, UprightVersion = 6, UprightTransformCount = 6, \
+                   UprightTransform_0 = \"1 0 0 0 1 0 0 0 1\", UprightFocalLength35mm = 35, \
+                   UprightDependentDigest = \"AB\" }",
+        );
+        assert_eq!(
+            auto.partial.get("geometry.upright"),
+            Some(&MergeValue::Text("auto".to_owned()))
+        );
+        assert_eq!(
+            auto.unmapped,
+            ["UprightTransform_0", "UprightFocalLength35mm"]
+        );
+
+        for (stored, mode) in [(2, "level"), (3, "vertical"), (4, "full")] {
+            let d = parse(&format!("s = {{ PerspectiveUpright = {stored} }}"));
+            assert_eq!(
+                d.partial.get("geometry.upright"),
+                Some(&MergeValue::Text(mode.to_owned()))
+            );
+        }
+    }
+
+    #[test]
+    fn guided_upright_stays_reported() {
+        let guided = parse(
+            "s = { PerspectiveUpright = 5, UprightFourSegmentsCount = 1, \
+                   UprightFourSegments_0 = \"0.1,0.1,0.1,0.9\" }",
+        );
+        assert!(guided.partial.is_empty());
+        assert_eq!(
+            guided.unmapped,
+            ["PerspectiveUpright", "UprightFourSegments_0"]
+        );
     }
 
     #[test]
