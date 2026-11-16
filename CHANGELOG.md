@@ -54,6 +54,14 @@ The first release is 0.1.0.
 
 ### Changed
 
+- Faster `--apply` on large catalogs: from 100 imports on, files are sent
+  to LightCraft in batches of 64 before the per-photo steps, and the mapping
+  file is saved at most once a second for records a later run finds again
+  by itself (imports, field values, keywords); non-repeatable records
+  (virtual copies, albums, stacks) are still saved at once, and every exit
+  saves. 752 photos: 111 s before, 47 s after.
+- `report.json` has `timing` after `--apply`: count and milliseconds per
+  LightCraft command.
 - `report.json` now holds names, paths and values in its run log by
   default (owner decision); `--anonymize` restores a report without them.
   The other sections stay free of names and values.

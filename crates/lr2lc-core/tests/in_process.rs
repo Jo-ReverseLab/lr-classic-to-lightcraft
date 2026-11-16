@@ -49,6 +49,7 @@ fn numbers(report: &str) -> serde_json::Value {
     let mut value: serde_json::Value = serde_json::from_str(report).unwrap();
     // The entries name each run's own temporary files.
     value.as_object_mut().unwrap().remove("entries");
+    value.as_object_mut().unwrap().remove("timing");
     value
 }
 

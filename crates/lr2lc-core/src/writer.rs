@@ -5,7 +5,7 @@ use crate::dry_run::Converted;
 use crate::output::group_reasons;
 use anyhow::{Context, Result};
 use lc_writer::apply::{Aborted, ApplySummary, apply_partial_with};
-use lc_writer::control::{CommandSink, ControlClient, WriteError, preflight};
+use lc_writer::control::{CommandSink, ControlClient, TimedSink, Timing, WriteError, preflight};
 use lc_writer::plan::{Conflict, MovedPhoto, Plan, RemovedPhoto, RenamedKeyword, Step, WriteInput};
 use lc_writer::progress::Progress;
 use lc_writer::state::{State, state_path};
@@ -731,9 +731,10 @@ pub fn write(
     input: &WriteInput,
     state: State,
     progress: &mut dyn Progress,
+    timing: &mut Timing,
 ) -> Result<ApplySummary, Aborted> {
     let mut client = ControlClient::connect(target.port).map_err(before_writing)?;
-    write_to(&mut client, target, input, state, progress)
+    write_to(&mut client, target, input, state, progress, timing)
 }
 
 /// Like [`write`], through `sink` instead of a new control-port
@@ -744,10 +745,15 @@ pub fn write_to(
     input: &WriteInput,
     mut state: State,
     progress: &mut dyn Progress,
+    timing: &mut Timing,
 ) -> Result<ApplySummary, Aborted> {
     let state_file = state_path(target.library);
-    preflight(sink, target.library, target.allow_xmp).map_err(before_writing)?;
-    apply_partial_with(sink, input, &mut state, &state_file, progress)
+    let mut sink = TimedSink::new(sink);
+    let result = preflight(&mut sink, target.library, target.allow_xmp)
+        .map_err(before_writing)
+        .and_then(|()| apply_partial_with(&mut sink, input, &mut state, &state_file, progress));
+    *timing = sink.timing;
+    result
 }
 
 /// A stop before anything was written: all numbers are 0.

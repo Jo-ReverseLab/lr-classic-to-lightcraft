@@ -39,9 +39,20 @@ pub struct ReportJson<'a> {
     /// everything was selected.
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub not_selected: &'a [&'static str],
+    /// Time spent in LightCraft per command (`--apply` only): count and
+    /// total milliseconds, most expensive first is up to the reader.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub timing: BTreeMap<&'a str, TimingJson>,
     /// The run log.
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub log: Option<LogJson<'a>>,
+}
+
+/// Time spent in one LightCraft command.
+#[derive(Debug, Serialize)]
+pub struct TimingJson {
+    pub count: usize,
+    pub ms: u64,
 }
 
 /// The run log in `report.json`.
@@ -240,7 +251,15 @@ impl<'a> AreaJson<'a> {
 /// Builds the JSON report of a dry run without writer section.
 #[cfg(test)]
 pub fn report_json(outcome: &Outcome) -> String {
-    report_json_with(outcome, true, None, &DevelopJson::default(), &[], None)
+    report_json_with(
+        outcome,
+        true,
+        None,
+        &DevelopJson::default(),
+        &[],
+        &Default::default(),
+        None,
+    )
 }
 
 /// Builds the JSON report of a run.
@@ -250,6 +269,7 @@ pub fn report_json_with(
     writer: Option<&WriterJson>,
     develop: &DevelopJson,
     not_selected: &[&'static str],
+    timing: &lc_writer::control::Timing,
     log: Option<LogJson<'_>>,
 ) -> String {
     let json = ReportJson {
@@ -295,6 +315,18 @@ pub fn report_json_with(
         develop,
         writer,
         not_selected,
+        timing: timing
+            .iter()
+            .map(|(name, (count, ms))| {
+                (
+                    name.as_str(),
+                    TimingJson {
+                        count: *count,
+                        ms: *ms,
+                    },
+                )
+            })
+            .collect(),
         log,
     };
     // Provably infallible: every map in the report has string keys and every

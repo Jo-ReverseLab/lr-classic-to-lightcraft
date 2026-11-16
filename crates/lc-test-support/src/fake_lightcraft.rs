@@ -815,9 +815,35 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
         "library.import" => {
             let expected = params.as_object().is_some_and(|m| m.len() == 2)
                 && params["mode"] == "add"
-                && params["paths"].as_array().is_some_and(|a| a.len() == 1);
+                && params["paths"].as_array().is_some_and(|a| !a.is_empty());
             if !expected {
                 return Err("unexpected import parameters".into());
+            }
+            let paths = params["paths"].as_array().ok_or("paths missing")?;
+            if paths.len() > 1 {
+                // A batch, as the real app answers it: ids in file order,
+                // duplicates and failures named by path.
+                if config.not_saved_creates {
+                    return Err("saved in memory but not written to disk: disk full".into());
+                }
+                let (mut imported, mut duplicates, mut failed) =
+                    (Vec::new(), Vec::new(), Vec::new());
+                for path in paths {
+                    let one = run(
+                        shared,
+                        lib,
+                        "library.import",
+                        &json!({"paths": [path], "mode": "add"}),
+                    )?;
+                    imported.extend(one["imported"].as_array().cloned().unwrap_or_default());
+                    duplicates.extend(one["duplicates"].as_array().cloned().unwrap_or_default());
+                    if one["failed"].as_u64().unwrap_or(0) > 0 {
+                        failed.push(json!([path, "cannot be read"]));
+                    }
+                }
+                return Ok(
+                    json!({"imported": imported, "duplicates": duplicates, "failed": failed}),
+                );
             }
             let path = params["paths"][0].as_str().ok_or("path is not text")?;
             if config

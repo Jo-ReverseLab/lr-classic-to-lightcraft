@@ -140,6 +140,46 @@ impl CommandSink for ControlClient {
     }
 }
 
+/// Time spent per command, for the report: count and total milliseconds.
+pub type Timing = std::collections::BTreeMap<String, (usize, u64)>;
+
+/// A sink that measures how long each command takes in `inner`.
+pub struct TimedSink<'a> {
+    inner: &'a mut dyn CommandSink,
+    pub timing: Timing,
+}
+
+impl<'a> TimedSink<'a> {
+    pub fn new(inner: &'a mut dyn CommandSink) -> Self {
+        TimedSink {
+            inner,
+            timing: Timing::new(),
+        }
+    }
+
+    fn note(&mut self, name: &str, started: std::time::Instant) {
+        let entry = self.timing.entry(name.to_owned()).or_insert((0, 0));
+        entry.0 += 1;
+        entry.1 += u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    }
+}
+
+impl CommandSink for TimedSink<'_> {
+    fn execute(&mut self, command: &str, params: Value) -> Result<Outcome, WriteError> {
+        let started = std::time::Instant::now();
+        let result = self.inner.execute(command, params);
+        self.note(command, started);
+        result
+    }
+
+    fn call(&mut self, method: &str, params: Value) -> Result<Outcome, WriteError> {
+        let started = std::time::Instant::now();
+        let result = self.inner.call(method, params);
+        self.note(method, started);
+        result
+    }
+}
+
 /// What a [`HostSink`] is asked to run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Request<'a> {

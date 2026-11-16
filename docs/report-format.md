@@ -61,6 +61,7 @@ matching skipped list.
 | `anonymized` | bool | always | `true` with `--anonymize`: entries hold no name, path or value |
 | `entry_counts` | object | always | entries per status: `adjusted`, `conflict`, `error`, `skipped`, `transferred` |
 | `entries` | array | always | the run log, see the README section “Run log”; each entry has `status`, `area`, `stage`, `item`, `message` and optionally `code`, `reason`, `recommendation`, `source`, `result`, `photo` |
+| `timing` | object | apply | per LightCraft command `{count, ms}`: how often it was sent and the total time waiting for its answers |
 | `not_selected` | array of strings | only with `--skip` | areas left out, in the order `keywords`, `ratings`, `labels`, `flags`, `texts`, `collections`, `stacks`, `virtual-copies`, `develop`; absent when nothing is left out |
 
 ## Areas

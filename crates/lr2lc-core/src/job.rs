@@ -9,7 +9,7 @@ use crate::log::{self, Log};
 use crate::output;
 use crate::writer::{self, DevelopJson, WriterJson};
 use lc_writer::apply::{Aborted, ApplySummary};
-use lc_writer::control::{CommandSink, WriteError};
+use lc_writer::control::{CommandSink, Timing, WriteError};
 use lc_writer::plan::{Areas, Plan, WriteInput};
 use lc_writer::progress::Progress;
 use lc_writer::state::State;
@@ -183,6 +183,8 @@ pub struct Finished {
     pub stop: Option<WriteError>,
     /// The run log, with names; rendered anonymized on request.
     pub log: Log,
+    /// Time per LightCraft command of this run (empty in a dry run).
+    pub timing: Timing,
     dry_run: bool,
     anonymize: bool,
     not_selected: Vec<&'static str>,
@@ -196,8 +198,8 @@ pub fn finish(
     prepared: Prepared,
     progress: &mut dyn Progress,
 ) -> Result<Finished, RunError> {
-    finish_by(job, prepared, |target, input, state| {
-        writer::write(target, input, state, progress)
+    finish_by(job, prepared, |target, input, state, timing| {
+        writer::write(target, input, state, progress, timing)
     })
 }
 
@@ -209,15 +211,20 @@ pub fn finish_with(
     sink: &mut dyn CommandSink,
     progress: &mut dyn Progress,
 ) -> Result<Finished, RunError> {
-    finish_by(job, prepared, |target, input, state| {
-        writer::write_to(sink, target, input, state, progress)
+    finish_by(job, prepared, |target, input, state, timing| {
+        writer::write_to(sink, target, input, state, progress, timing)
     })
 }
 
 fn finish_by(
     job: &Job,
     prepared: Prepared,
-    write: impl FnOnce(&writer::Target<'_>, &WriteInput, State) -> Result<ApplySummary, Aborted>,
+    write: impl FnOnce(
+        &writer::Target<'_>,
+        &WriteInput,
+        State,
+        &mut Timing,
+    ) -> Result<ApplySummary, Aborted>,
 ) -> Result<Finished, RunError> {
     let Prepared {
         mut outcome,
@@ -227,6 +234,7 @@ fn finish_by(
         names,
     } = prepared;
     let mut applied = None;
+    let mut timing = Timing::new();
     let (writer_summary, writer, develop, stop) = match job.writes_to() {
         Some(library) => {
             if !outcome.catalog_unchanged {
@@ -241,7 +249,7 @@ fn finish_by(
                 allow_xmp: job.allow_xmp,
             };
             // A run that stops still reports what it did (Principle 4).
-            let (summary, stop) = match write(&target, &input, state) {
+            let (summary, stop) = match write(&target, &input, state, &mut timing) {
                 Ok(summary) => (summary, None),
                 Err(aborted) => (*aborted.summary, Some(aborted.error)),
             };
@@ -300,6 +308,7 @@ fn finish_by(
         develop,
         stop,
         log,
+        timing,
         dry_run: !job.apply,
         anonymize: job.anonymize,
         not_selected,
@@ -322,6 +331,7 @@ impl Finished {
             Some(&self.writer),
             &self.develop,
             &self.not_selected,
+            &self.timing,
             Some(output::LogJson {
                 anonymized: anonymize,
                 entry_counts: log::counts(&self.log.entries),

@@ -353,6 +353,13 @@ pub fn apply_partial_with(
     let renamed = renamed_keywords(input, state).0;
     let mut run = Run {
         client,
+        prefetched: std::collections::HashMap::new(),
+        // The first save is never delayed: an unwritable mapping file must
+        // stop the run before more commands are sent.
+        last_save: std::time::Instant::now()
+            .checked_sub(SAVE_INTERVAL)
+            .unwrap_or_else(std::time::Instant::now),
+        unsaved: false,
         areas: input.areas,
         progress,
         state,
@@ -420,7 +427,17 @@ pub fn apply_partial_with(
         wanting: wanting(input, &plan.steps),
         smart_wanting: smart_wanting(input, &plan.steps),
     };
-    match run.steps(&plan.steps) {
+    let result = run.steps(&plan.steps);
+    // Whatever waited for its save is written now, on every exit.
+    let result = match (result, run.unsaved) {
+        (result, false) => result,
+        (Ok(()), true) => run.save_state(true),
+        (Err(e), true) => {
+            let _ = run.save_state(true);
+            Err(e)
+        }
+    };
+    match result {
         Ok(()) => Ok(run.summary),
         Err(error) => Err(Aborted {
             error,
@@ -519,8 +536,77 @@ struct Tally {
     not_carried: usize,
 }
 
+/// Imports are batched from this many files on.
+const IMPORT_BATCH_MIN: usize = 100;
+/// Files per batched `library.import`.
+const IMPORT_BATCH: usize = 64;
+/// The longest a record that can be found again waits for its save.
+const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// The per-file answers of a batched `library.import`, shaped like the
+/// answer to a single-file import. Files the answer does not account for
+/// (a count that does not add up, a failure without a path) get none.
+fn batch_answers(paths: &[String], result: &Value) -> Vec<(String, Value)> {
+    let list = |key: &str| result.get(key).and_then(Value::as_array).cloned();
+    let (Some(imported), duplicates) = (list("imported"), list("duplicates").unwrap_or_default())
+    else {
+        return Vec::new();
+    };
+    let failed = match result.get("failed") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Number(n)) if n.as_u64() == Some(0) => Vec::new(),
+        Some(Value::Array(items)) => items.clone(),
+        // A count without paths: which files failed is unknown.
+        Some(_) => return Vec::new(),
+    };
+    let failed_path = |path: &str| {
+        failed.iter().any(|f| {
+            f.as_str() == Some(path)
+                || f.get(0).and_then(Value::as_str) == Some(path)
+                || f.get("path").and_then(Value::as_str) == Some(path)
+        })
+    };
+    let duplicate = |path: &str| {
+        duplicates
+            .iter()
+            .find(|d| d.get("path").and_then(Value::as_str) == Some(path))
+    };
+    let fresh: Vec<&String> = paths
+        .iter()
+        .filter(|p| !failed_path(p) && duplicate(p).is_none())
+        .collect();
+    let mut out = Vec::new();
+    for path in paths {
+        if failed_path(path) {
+            out.push((
+                path.clone(),
+                json!({"imported": [], "duplicates": [], "failed": 1}),
+            ));
+        } else if let Some(d) = duplicate(path) {
+            out.push((
+                path.clone(),
+                json!({"imported": [], "duplicates": [d], "failed": 0}),
+            ));
+        }
+    }
+    // Ids come in file order; trust them only when every file is accounted for.
+    if fresh.len() == imported.len() {
+        for (path, id) in fresh.into_iter().zip(imported) {
+            out.push((
+                path.clone(),
+                json!({"imported": [id], "duplicates": [], "failed": 0}),
+            ));
+        }
+    }
+    out
+}
+
 struct Run<'a> {
     client: &'a mut dyn CommandSink,
+    /// Answers of batched imports, by file path.
+    prefetched: std::collections::HashMap<String, Value>,
+    last_save: std::time::Instant,
+    unsaved: bool,
     areas: Areas,
     progress: &'a mut dyn Progress,
     state: &'a mut State,
@@ -620,6 +706,7 @@ fn wanting(input: &WriteInput, steps: &[Step]) -> BTreeMap<CollectionKey, usize>
 impl Run<'_> {
     fn steps(&mut self, steps: &[Step]) -> Result<(), WriteError> {
         self.progress.phase(Phase::Writing, steps.len());
+        self.prefetch_imports(steps)?;
         for (done, step) in steps.iter().enumerate() {
             if self.progress.cancelled() && self.starts_unit(step) {
                 // The photo before has all its steps done; the fields of
@@ -651,6 +738,56 @@ impl Run<'_> {
         self.progress.advance(steps.len());
         self.finish_photo()?;
         self.record_converged()
+    }
+
+    /// Saves the mapping file. `force` saves now; otherwise at most once a
+    /// second, because the file grows with the library and writing it after
+    /// every photo dominates a large run. Only records that a later run can
+    /// find again by itself (imports, field values) may wait; the run saves
+    /// on every exit.
+    fn save_state(&mut self, force: bool) -> Result<(), WriteError> {
+        if !force && self.last_save.elapsed() < SAVE_INTERVAL {
+            self.unsaved = true;
+            return Ok(());
+        }
+        self.state.save(self.state_file)?;
+        self.unsaved = false;
+        self.last_save = std::time::Instant::now();
+        Ok(())
+    }
+
+    /// Sends the files of the plan's imports in batches before the steps
+    /// run; each import step then takes its answer from here. LightCraft
+    /// imports a batch several times faster than single files. Used only
+    /// for larger runs; an answer that does not account for every file
+    /// leaves the rest to single imports.
+    fn prefetch_imports(&mut self, steps: &[Step]) -> Result<(), WriteError> {
+        let paths: Vec<String> = steps
+            .iter()
+            .filter_map(|step| match step {
+                Step::Import { path, .. } => path.to_str().map(str::to_owned),
+                _ => None,
+            })
+            .collect();
+        if paths.len() < IMPORT_BATCH_MIN {
+            return Ok(());
+        }
+        for chunk in paths.chunks(IMPORT_BATCH) {
+            if self.progress.cancelled() {
+                break;
+            }
+            let params = json!({"paths": chunk, "mode": "add"});
+            let result = match self.client.execute("library.import", params) {
+                Ok(Outcome::Applied(result)) => result,
+                // Rejected or not saved: the single imports find out per file.
+                Ok(Outcome::AppliedNotSaved(_)) | Err(WriteError::Command { .. }) => continue,
+                Err(e) => return Err(e),
+            };
+            for (path, answer) in batch_answers(chunk, &result) {
+                self.prefetched.insert(path, answer);
+            }
+        }
+        Ok(())
     }
 
     /// Counters that tell how the last step ended.
@@ -954,7 +1091,7 @@ impl Run<'_> {
             rules: Some(rules),
         };
         self.state.record_collection(collection_id, entry);
-        self.state.save(self.state_file)?;
+        self.save_state(true)?;
         Ok(())
     }
 
@@ -1045,7 +1182,7 @@ impl Run<'_> {
         if !present.is_empty() {
             self.summary.quick_already += present.len();
             self.state.record_quick(present.into_iter().map(|(g, _)| g));
-            self.state.save(self.state_file)?;
+            self.save_state(true)?;
         }
         if missing.is_empty() {
             return Ok(());
@@ -1063,7 +1200,7 @@ impl Run<'_> {
         self.count_not_saved(&outcome);
         self.summary.quick_added += missing.len();
         self.state.record_quick(missing.into_iter().map(|(g, _)| g));
-        self.state.save(self.state_file)?;
+        self.save_state(true)?;
         Ok(())
     }
 
@@ -1254,7 +1391,7 @@ impl Run<'_> {
             rules: None,
         };
         self.state.record_collection(collection_id, entry);
-        self.state.save(self.state_file)?;
+        self.save_state(true)?;
         Ok(())
     }
 
@@ -1336,7 +1473,7 @@ impl Run<'_> {
                     }
                 }
                 self.state.record_collection(collection_id, entry);
-                self.state.save(self.state_file)?;
+                self.save_state(true)?;
                 Ok(())
             }
             Err(WriteError::Command { command, .. }) => {
@@ -1408,7 +1545,7 @@ impl Run<'_> {
         let mut members = sent.clone();
         members.extend(recorded.into_iter().filter(|g| !sent.contains(g)));
         self.state.record_stack(stack_id, members);
-        self.state.save(self.state_file)?;
+        self.save_state(true)?;
         Ok(())
     }
 
@@ -1447,7 +1584,7 @@ impl Run<'_> {
                 });
                 if let Some(keyword) = keyword {
                     self.state.record_keyword(&keyword);
-                    self.state.save(self.state_file)?;
+                    self.save_state(false)?;
                 }
                 Ok(())
             }
@@ -1504,7 +1641,11 @@ impl Run<'_> {
             return Ok(());
         };
         let sent_path = params["paths"][0].clone();
-        match self.client.execute("library.import", params) {
+        let answer = match sent_path.as_str().and_then(|p| self.prefetched.remove(p)) {
+            Some(answer) => Ok(Outcome::Applied(answer)),
+            None => self.client.execute("library.import", params),
+        };
+        match answer {
             Ok(Outcome::Applied(result)) => match import_id(&result, &sent_path) {
                 ImportResult::Imported(id) => {
                     self.summary.photos_imported += 1;
@@ -1578,7 +1719,9 @@ impl Run<'_> {
         self.state
             .record(global_id, lightroom_id, id, PhotoFields::imported_default());
         self.state.remember_path(global_id, path);
-        self.state.save(self.state_file)?;
+        // An import can be found again (LightCraft reports the file as a
+        // duplicate with its id), so this record may wait a moment.
+        self.save_state(false)?;
         Ok(())
     }
 
@@ -1635,7 +1778,7 @@ impl Run<'_> {
                         PhotoFields::imported_default(),
                     );
                     self.state.remember_path(global_id, &photo.path);
-                    self.state.save(self.state_file)?;
+                    self.save_state(true)?;
                     self.reset_copy(photo.lightroom_id, &id)?;
                 }
                 None => {
@@ -2177,7 +2320,7 @@ impl Run<'_> {
             self.state
                 .record_develop_hash(&current.global_id, develop_hash);
         }
-        self.state.save(self.state_file)?;
+        self.save_state(false)?;
         Ok(())
     }
 
@@ -2210,7 +2353,7 @@ impl Run<'_> {
             saved = true;
         }
         if saved {
-            self.state.save(self.state_file)?;
+            self.save_state(true)?;
         }
         Ok(())
     }
