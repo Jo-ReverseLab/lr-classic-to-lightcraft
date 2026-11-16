@@ -363,16 +363,24 @@ fn a_transfer_runs_on_its_thread_and_ends_in_the_log() {
 fn emoji_in_catalog_names_have_glyphs_in_every_font() {
     // Keyword and file names may hold emoji; every font the window uses
     // must draw them (the harness panics on a missing glyph).
-    let mut h = Harness::builder().with_size([400.0, 200.0]).build_ui(|ui| {
-        for font in [
-            egui::FontId::proportional(13.0),
-            egui::FontId::monospace(12.0),
-            theme::font(13.0, Some(theme::MEDIUM)),
-            theme::font(13.0, Some(theme::SEMIBOLD)),
-        ] {
-            ui.label(egui::RichText::new("Köln 🌅 Sonnenuntergang").font(font));
-        }
-    });
+    let mut h = Harness::builder().with_size([400.0, 200.0]).build_ui_state(
+        |ui, ready: &mut bool| {
+            if !*ready {
+                return;
+            }
+            for font in [
+                egui::FontId::proportional(13.0),
+                egui::FontId::monospace(12.0),
+                theme::font(13.0, Some(theme::MEDIUM)),
+                theme::font(13.0, Some(theme::SEMIBOLD)),
+            ] {
+                ui.label(egui::RichText::new("Köln 🌅 Sonnenuntergang").font(font));
+            }
+        },
+        false,
+    );
     theme::install_fonts(&h.ctx);
+    h.run_steps(1);
+    *h.state_mut() = true;
     h.run_steps(3);
 }
