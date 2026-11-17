@@ -107,6 +107,8 @@ pub enum Stage {
     Photos,
     /// Albums, stacks, the Quick Collection and smart albums.
     Organize,
+    /// Taking a cancelled run back.
+    Rollback,
 }
 
 impl Stage {
@@ -116,6 +118,7 @@ impl Stage {
             Stage::Keywords => "keywords",
             Stage::Photos => "photos",
             Stage::Organize => "organize",
+            Stage::Rollback => "rollback",
         }
     }
 }

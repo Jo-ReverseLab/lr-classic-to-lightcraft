@@ -68,6 +68,24 @@ pub struct LogJson<'a> {
     pub entry_counts: BTreeMap<&'static str, usize>,
     /// One entry per thing done, adjusted, skipped, in conflict or failed.
     pub entries: &'a [crate::log::LogEntry],
+    /// What taking the run back did (Cancel in the window); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rollback: Option<RollbackJson>,
+}
+
+/// The `rollback` section: counts only.
+#[derive(Debug, Clone, Serialize)]
+pub struct RollbackJson {
+    pub photos_removed: usize,
+    pub albums_removed: usize,
+    pub keywords_removed: usize,
+    pub stacks_ungrouped: usize,
+    pub members_restored: usize,
+    pub quick_removed: usize,
+    pub fields_restored: usize,
+    pub develop_not_reset: usize,
+    pub failed: usize,
+    pub mapping_restored: bool,
 }
 
 /// Counts of one kind of element.

@@ -56,6 +56,70 @@ pub struct Log {
 }
 
 impl Log {
+    /// Adds what taking the run back did: one entry per kind of change.
+    pub fn add_rollback(&mut self, r: &lc_writer::rollback::RollbackSummary) {
+        use lc_writer::entries::counted;
+        let mut push = |status, area, message: String, code, recommendation| {
+            let entry =
+                Entry::new(status, area, Stage::Rollback, Subject::None, message).code(code);
+            self.entries.push(raw(entry, recommendation));
+        };
+        for (n, area, what) in [
+            (r.photos_removed, Area::Photos, "photo"),
+            (r.albums_removed, Area::Collections, "album"),
+            (r.keywords_removed, Area::Keywords, "keyword"),
+            (r.stacks_ungrouped, Area::Stacks, "stack"),
+        ] {
+            if n > 0 {
+                push(
+                    Status::Adjusted,
+                    area,
+                    format!("Run cancelled: {} removed again", counted(n, what)),
+                    "rolled_back",
+                    None,
+                );
+            }
+        }
+        for (n, area, what) in [
+            (r.fields_restored, Area::Metadata, "field"),
+            (r.members_restored, Area::Collections, "album member"),
+            (r.quick_removed, Area::Stacks, "Quick Collection photo"),
+        ] {
+            if n > 0 {
+                push(
+                    Status::Adjusted,
+                    area,
+                    format!("Run cancelled: {} set back", counted(n, what)),
+                    "rolled_back",
+                    None,
+                );
+            }
+        }
+        if r.develop_not_reset > 0 {
+            push(
+                Status::Error,
+                Area::Develop,
+                format!(
+                    "Run cancelled: development settings of {} stay as written",
+                    counted(r.develop_not_reset, "photo")
+                ),
+                "develop_not_reset",
+                Some(
+                    "LightCraft cannot set them back over the control port. Use the photo's History in LightCraft if needed.",
+                ),
+            );
+        }
+        for command in &r.failed {
+            push(
+                Status::Error,
+                Area::Photos,
+                format!("Run cancelled: LightCraft refused `{command}` while taking the run back"),
+                "rollback_failed",
+                Some("Check the library in LightCraft; the rest was taken back."),
+            );
+        }
+    }
+
     /// A log without entries that names what `input` and `names` hold, for
     /// rendering entries as they arrive during a run.
     pub fn live(names: Names, input: &WriteInput) -> Log {

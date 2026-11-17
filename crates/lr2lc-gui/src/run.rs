@@ -24,6 +24,8 @@ pub enum Event {
     Planned(BTreeMap<Stage, usize>),
     /// A step finished while writing.
     Entry(Box<LogEntry>),
+    /// The run stopped and is being taken back (Cancel).
+    RollingBack,
     /// The run ended, successfully or not.
     Done(Box<RunResult>),
 }
@@ -62,6 +64,8 @@ impl RunResult {
 pub struct ChannelProgress {
     events: Sender<Event>,
     cancel: Arc<AtomicBool>,
+    /// Take the run back after it stopped.
+    roll_back: Arc<AtomicBool>,
     total: usize,
     /// Names entries as they arrive, once the catalog is read.
     live: Option<Log>,
@@ -72,9 +76,17 @@ impl ChannelProgress {
         ChannelProgress {
             events,
             cancel,
+            roll_back: Arc::new(AtomicBool::new(false)),
             total: 0,
             live: None,
         }
+    }
+}
+
+impl ChannelProgress {
+    /// Takes the run back once it stopped or ended (Cancel).
+    pub fn set_roll_back(&mut self, on: bool) {
+        self.roll_back.store(on, Ordering::Relaxed);
     }
 }
 
@@ -136,18 +148,34 @@ pub fn execute_as(
     let _ = progress
         .events
         .send(Event::Planned(prepared.stage_totals()));
-    let finished = match sink {
+    let mut sink = sink;
+    let finished = match sink.as_deref_mut() {
         Some(sink) => finish_with(job, prepared, sink, progress),
         None => finish(job, prepared, progress),
     };
-    let finished = match finished {
+    let mut finished = match finished {
         Ok(finished) => finished,
         Err(e) => return RunResult::failed(job.apply, e.kind, e.to_string()),
     };
+    // Cancel: take back what the run wrote, even if it reached its end.
+    let mut rollback_error = None;
+    if progress.roll_back.load(Ordering::Relaxed) && finished.can_roll_back() {
+        let _ = progress.events.send(Event::RollingBack);
+        if let Err(e) = finished.roll_back(job, sink) {
+            rollback_error = Some((e.kind, format!("taking the run back stopped: {e}")));
+        }
+    }
     let report_text = finished.report_json_as(false);
     let value: serde_json::Value = serde_json::from_str(&report_text).unwrap_or_default();
     let summary = Some(ScanSummary::from_report(&value));
-    let error = finished.result().err().map(|e| (e.kind, e.to_string()));
+    let error = match (&finished.rollback, rollback_error) {
+        (_, Some(error)) => Some(error),
+        (Some(_), None) => Some((
+            ErrorKind::Cancelled,
+            "Run cancelled: what this run transferred was taken back".to_owned(),
+        )),
+        (None, None) => finished.result().err().map(|e| (e.kind, e.to_string())),
+    };
     if scan {
         return RunResult {
             apply: false,
@@ -172,6 +200,7 @@ pub fn execute_as(
 pub struct Running {
     pub events: Receiver<Event>,
     cancel: Arc<AtomicBool>,
+    roll_back: Arc<AtomicBool>,
 }
 
 impl Running {
@@ -179,17 +208,26 @@ impl Running {
     pub fn spawn(job: Job) -> Running {
         let (tx, events) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        let flag = cancel.clone();
+        let roll_back = Arc::new(AtomicBool::new(false));
+        let mut progress = ChannelProgress::new(tx.clone(), cancel.clone());
+        progress.roll_back = roll_back.clone();
         std::thread::spawn(move || {
-            let mut progress = ChannelProgress::new(tx.clone(), flag);
             let result = execute(&job, &mut progress, None);
             let _ = tx.send(Event::Done(Box::new(result)));
         });
-        Running { events, cancel }
+        Running {
+            events,
+            cancel,
+            roll_back,
+        }
     }
 
-    /// Asks the run to stop at the next safe point.
-    pub fn cancel(&self) {
+    /// Asks the run to stop at the next safe point; with `roll_back` it
+    /// is then taken back.
+    pub fn cancel(&self, roll_back: bool) {
+        if roll_back {
+            self.roll_back.store(true, Ordering::Relaxed);
+        }
         self.cancel.store(true, Ordering::Relaxed);
     }
 }

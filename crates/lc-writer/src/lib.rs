@@ -17,5 +17,6 @@ pub mod entries;
 pub mod live;
 pub mod plan;
 pub mod progress;
+pub mod rollback;
 pub mod smart;
 pub mod state;

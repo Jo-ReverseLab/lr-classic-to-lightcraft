@@ -21,6 +21,7 @@ use std::sync::mpsc::channel;
 struct Scripted {
     started: Vec<Job>,
     cancelled: bool,
+    rolled_back: bool,
     events: Vec<Event>,
     scan: Option<RunResult>,
     scans: usize,
@@ -47,8 +48,9 @@ impl Host for Scripted {
     fn start(&mut self, job: Job) {
         self.started.push(job);
     }
-    fn cancel(&mut self) {
+    fn cancel(&mut self, roll_back: bool) {
         self.cancelled = true;
+        self.rolled_back |= roll_back;
     }
     fn poll(&mut self) -> Vec<Event> {
         std::mem::take(&mut self.events)
@@ -607,4 +609,105 @@ fn a_port_change_drops_the_old_answer_and_typing_does_not_scan_per_key() {
     assert_eq!(h.state().host.scans, 1, "no scan per key");
     h.run_steps(40);
     assert_eq!(h.state().host.scans, 2);
+}
+
+#[test]
+fn stop_keeps_and_cancel_asks_before_taking_back() {
+    let w = world();
+    let mut h = harness(ready(&w), 1280.0);
+    h.run_steps(4);
+    h.get_by_label("Transfer now").click();
+    h.run_steps(3);
+    h.get_by_label("Cancel…").click();
+    h.run_steps(3);
+    assert!(!h.state().host.cancelled, "Cancel asks first");
+    h.get_by_label("Keep running").click();
+    h.run_steps(3);
+    assert!(!h.state().host.cancelled);
+    h.get_by_label("Cancel…").click();
+    h.run_steps(3);
+    h.get_by_label("Cancel and take back").click();
+    h.run_steps(3);
+    assert!(h.state().host.cancelled && h.state().host.rolled_back);
+
+    let mut h = harness(ready(&w), 1280.0);
+    h.run_steps(4);
+    h.get_by_label("Transfer now").click();
+    h.run_steps(3);
+    h.get_by_label("Stop").click();
+    h.run_steps(3);
+    assert!(h.state().host.cancelled && !h.state().host.rolled_back);
+    h.get_by_label("Stopping at the next photo…");
+}
+
+#[test]
+fn a_cancelled_transfer_leaves_the_library_as_it_was() {
+    use lc_test_support::fake_lightcraft::{Config, FakeLightCraft};
+    let w = world();
+    let fake = FakeLightCraft::start(Config::new(&w.library));
+    let mut settings = settings(&w);
+    settings.port = fake.port();
+    let job = settings.job(true).unwrap();
+    let (tx, _rx) = channel();
+    let mut progress = ChannelProgress::new(tx, Arc::new(AtomicBool::new(false)));
+    progress.set_roll_back(true);
+    let result = execute(&job, &mut progress, None);
+    let (kind, message) = result.error.clone().expect("a cancelled run reports it");
+    assert_eq!(kind, lr2lc_core::ErrorKind::Cancelled, "{message}");
+    assert!(
+        fake.photos().is_empty(),
+        "every imported photo removed again"
+    );
+    // LightCraft's own (empty) Quick Collection may stay; no album of ours.
+    assert!(
+        fake.albums()
+            .iter()
+            .all(|a| a.name == "Quick Collection" && a.photos.is_empty()),
+        "{:?}",
+        fake.albums()
+    );
+    assert!(fake.keywords().is_empty());
+    let report: serde_json::Value = serde_json::from_str(&result.report_text).unwrap();
+    assert!(report["rollback"]["photos_removed"].as_u64().unwrap() > 0);
+    assert_eq!(report["rollback"]["mapping_restored"], true);
+}
+
+/// A transfer against a real LightCraft, for `ops/tools/cancel-live.sh`:
+/// catalog, library and path mapping from the environment, with Cancel
+/// (`LR2LC_LIVE_ROLLBACK=1`) or without.
+#[test]
+#[ignore = "needs a running LightCraft with a throwaway library"]
+fn live_transfer() {
+    let var = |k: &str| std::env::var(k).unwrap_or_default();
+    let mut settings = Settings {
+        catalog: var("LR2LC_LIVE_CATALOG"),
+        library: var("LR2LC_LIVE_LIBRARY"),
+        ..Settings::default()
+    };
+    if let Some((old, new)) = var("LR2LC_LIVE_MAP").split_once('=') {
+        settings.rows_mut().push(lr2lc_gui::settings::MappingRow {
+            old: old.into(),
+            new: new.into(),
+        });
+    }
+    let job = settings.job(true).unwrap();
+    let (tx, _rx) = channel();
+    let mut progress = ChannelProgress::new(tx, Arc::new(AtomicBool::new(false)));
+    progress.set_roll_back(var("LR2LC_LIVE_ROLLBACK") == "1");
+    let result = execute(&job, &mut progress, None);
+    let report: serde_json::Value = serde_json::from_str(&result.report_text).unwrap_or_default();
+    println!(
+        "LIVE error={:?} imported={} rollback={}",
+        result.error.as_ref().map(|(k, _)| k),
+        report["writer"]["photos_imported"],
+        report["rollback"]
+    );
+    let failed: Vec<&str> = report["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|e| e["stage"] == "rollback" && e["status"] == "error")
+        .filter_map(|e| e["message"].as_str())
+        .collect();
+    println!("LIVE rollback errors: {failed:?}");
 }

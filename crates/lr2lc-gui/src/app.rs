@@ -56,6 +56,10 @@ pub struct RunState {
     /// The last entries with their time.
     pub tail: VecDeque<(DateTime<Local>, Row)>,
     pub cancelling: bool,
+    /// Cancel was pressed; waiting for the confirmation.
+    pub confirm_cancel: bool,
+    /// The run is being taken back.
+    pub rolling_back: bool,
     finished: bool,
     /// Why the run failed or stopped.
     pub error: Option<(ErrorKind, String)>,
@@ -535,6 +539,8 @@ impl App {
             photos_seen: Default::default(),
             tail: VecDeque::new(),
             cancelling: false,
+            confirm_cancel: false,
+            rolling_back: false,
             finished: false,
             error: None,
             photo_line: None,
@@ -750,6 +756,7 @@ impl App {
                     run.tail.pop_front();
                 }
             }
+            Event::RollingBack => run.rolling_back = true,
             Event::Done(result) => self.finish(*result),
         }
     }

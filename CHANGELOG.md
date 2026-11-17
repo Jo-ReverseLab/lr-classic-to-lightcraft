@@ -9,6 +9,11 @@ The first release is 0.1.0.
 
 ### Added
 
+- Window: **Stop** keeps what a transfer did so far; **Cancel** takes the
+  run back (library records it added removed, fields and members set back,
+  mapping file restored; development settings of photos that were already
+  there are reported, not reset). Library API: `Finished::roll_back`,
+  `lc_writer::rollback`.
 - GUI: selected tab is filled; an “i” next to every catalog check explains
   it; counts from the catalog behind every option; the target follows the
   library open in LightCraft, can be switched back to it, can open the

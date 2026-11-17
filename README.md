@@ -62,8 +62,16 @@ cargo run --release -p lr2lc-gui   # needs Rust 1.95 or later
 - **Running**: progress per phase in the order lr2lc works (read the
   catalog, read the library when needed, keywords, photos with their
   metadata and develop settings, albums and stacks), counters and the
-  last log entries. Cancel stops at the next photo; a new run continues
-  without duplicates.
+  last log entries. **Stop** halts at the next photo and keeps what is
+  transferred; a new run continues without duplicates. **Cancel** (after a
+  confirmation) halts and takes the run back: photos, virtual copies,
+  albums, keywords and stacks it added are removed from the library again
+  (records only, never the original files), album members, Quick
+  Collection photos and fields it changed are set back, and the mapping
+  file is restored. Development settings it wrote to photos that were
+  already in the library cannot be set back over the control port; the log
+  lists them (`develop_not_reset`). `report.json` then has a `rollback`
+  section with counts.
 - **Log**: every run's [run log](#run-log), filterable by status, area and
   text, with details per entry. Runs are kept in the app's data folder
   (`~/Library/Application Support/lr2lc/runs` on macOS); **Save

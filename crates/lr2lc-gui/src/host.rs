@@ -25,8 +25,9 @@ pub trait Host {
 
     /// Starts `job`; its events arrive through [`Host::poll`].
     fn start(&mut self, job: Job);
-    /// Asks the running job to stop at the next safe point.
-    fn cancel(&mut self);
+    /// Asks the running job to stop at the next safe point (Stop); with
+    /// `roll_back` everything it wrote is then taken back (Cancel).
+    fn cancel(&mut self, roll_back: bool);
     /// The events since the last call.
     fn poll(&mut self) -> Vec<Event>;
 
@@ -101,9 +102,9 @@ impl Host for StandaloneHost {
         self.running = Some(Running::spawn(job));
     }
 
-    fn cancel(&mut self) {
+    fn cancel(&mut self, roll_back: bool) {
         if let Some(running) = &self.running {
-            running.cancel();
+            running.cancel(roll_back);
         }
     }
 

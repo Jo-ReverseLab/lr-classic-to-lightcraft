@@ -1126,7 +1126,53 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             lib.stacks.retain(|_, st| st.photos.len() >= 2);
             Ok(json!({"changed": changed}))
         }
-        "photo.delete" => {
+        "stack.ungroup" => {
+            let ids: Vec<i64> = params["ids"]
+                .as_array()
+                .ok_or("ids is missing")?
+                .iter()
+                .filter_map(Value::as_i64)
+                .collect();
+            let before = lib.stacks.len();
+            lib.stacks
+                .retain(|_, st| !st.photos.iter().any(|p| ids.contains(p)));
+            Ok(json!({"ungrouped": before - lib.stacks.len()}))
+        }
+        "album.delete" => {
+            let id = params["id"].as_u64().ok_or("id is missing")?;
+            if lib.albums.remove(&id).is_none() {
+                return Err("no such album".into());
+            }
+            // Its descendants go with it, the photos stay.
+            loop {
+                let orphans: Vec<u64> = lib
+                    .albums
+                    .values()
+                    .filter(|a| a.parent.is_some_and(|p| !lib.albums.contains_key(&p)))
+                    .map(|a| a.id)
+                    .collect();
+                if orphans.is_empty() {
+                    break;
+                }
+                for o in orphans {
+                    lib.albums.remove(&o);
+                }
+            }
+            Ok(json!({}))
+        }
+        "keyword.delete" => {
+            let k = params["keyword"]
+                .as_str()
+                .ok_or("missing `keyword`")?
+                .to_string();
+            let under = |x: &str| x == k || x.starts_with(&format!("{k}|"));
+            lib.keywords.retain(|x| !under(x));
+            for seed in lib.seeds.values_mut() {
+                seed.keywords.retain(|x| !under(x));
+            }
+            Ok(json!({}))
+        }
+        "photo.deletePermanently" | "photo.delete" => {
             // Moves photos to Recently Deleted; the fake simply forgets them.
             let ids: Vec<i64> = params["ids"]
                 .as_array()

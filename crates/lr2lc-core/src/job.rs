@@ -185,6 +185,10 @@ pub struct Finished {
     pub log: Log,
     /// Time per LightCraft command of this run (empty in a dry run).
     pub timing: Timing,
+    /// What the run changed, to take it back; `None` in a dry run.
+    journal: Option<lc_writer::rollback::Journal>,
+    /// What taking the run back did.
+    pub rollback: Option<lc_writer::rollback::RollbackSummary>,
     dry_run: bool,
     anonymize: bool,
     not_selected: Vec<&'static str>,
@@ -281,6 +285,7 @@ fn finish_by(
         },
         names,
     );
+    let journal = applied.as_mut().map(|s| std::mem::take(&mut s.journal));
     let counts = log::counts(&log.entries);
     let mut writer_summary = if not_selected.is_empty() {
         writer_summary
@@ -316,6 +321,8 @@ fn finish_by(
         stop,
         log,
         timing,
+        journal,
+        rollback: None,
         dry_run: !job.apply,
         anonymize: job.anonymize,
         not_selected,
@@ -323,6 +330,36 @@ fn finish_by(
 }
 
 impl Finished {
+    /// Whether this run wrote something that can be taken back.
+    pub fn can_roll_back(&self) -> bool {
+        self.rollback.is_none() && self.journal.as_ref().is_some_and(|j| !j.is_empty())
+    }
+
+    /// Takes the run back (Cancel): removes what it added, sets back what it
+    /// changed and restores the mapping file, through `sink` or the control
+    /// port on `job.port`. The log gets one entry per kind of change.
+    pub fn roll_back(
+        &mut self,
+        job: &Job,
+        sink: Option<&mut dyn CommandSink>,
+    ) -> Result<(), RunError> {
+        let (Some(journal), Some(library)) = (self.journal.take(), job.library.as_deref()) else {
+            return Ok(());
+        };
+        let state_file = lc_writer::state::state_path(library);
+        let result = match sink {
+            Some(sink) => lc_writer::rollback::rollback(sink, &journal, &state_file),
+            None => lc_writer::control::ControlClient::connect(job.port).and_then(|mut client| {
+                lc_writer::rollback::rollback(&mut client, &journal, &state_file)
+            }),
+        };
+        let summary =
+            result.map_err(|e| RunError::new(ErrorKind::Stopped, &writer::stop_error(&e)))?;
+        self.log.add_rollback(&summary);
+        self.rollback = Some(summary);
+        Ok(())
+    }
+
     /// `report.json` of this run, anonymized when the job says so.
     pub fn report_json(&self) -> String {
         self.report_json_as(self.anonymize)
@@ -344,6 +381,18 @@ impl Finished {
                 photo_counts: self.log.photo_counts(self.outcome.photos.read_count()),
                 entry_counts: log::counts(&self.log.entries),
                 entries: &entries,
+                rollback: self.rollback.as_ref().map(|r| output::RollbackJson {
+                    photos_removed: r.photos_removed,
+                    albums_removed: r.albums_removed,
+                    keywords_removed: r.keywords_removed,
+                    stacks_ungrouped: r.stacks_ungrouped,
+                    members_restored: r.members_restored,
+                    quick_removed: r.quick_removed,
+                    fields_restored: r.fields_restored,
+                    develop_not_reset: r.develop_not_reset,
+                    failed: r.failed.len(),
+                    mapping_restored: r.mapping_restored,
+                }),
             }),
         )
     }

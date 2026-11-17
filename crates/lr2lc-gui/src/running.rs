@@ -211,20 +211,58 @@ pub fn ui(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
                             if secondary(ui, t, "Back to Transfer", true, 0.0, 40.0).clicked() {
                                 action = Some(Action::Back);
                             }
+                        } else if run.rolling_back {
+                            ui.label(RichText::new("Taking the run back…").color(t.text_muted));
+                        } else if run.cancelling {
+                            ui.label(RichText::new("Stopping at the next photo…").color(t.text_muted));
                         } else {
-                            let label = if run.cancelling { "Cancelling…" } else { "Cancel" };
-                            if secondary(ui, t, label, !run.cancelling, 0.0, 40.0).clicked() {
-                                action = Some(Action::Cancel);
+                            if secondary(ui, t, "Stop", true, 0.0, 40.0).clicked() {
+                                action = Some(Action::Stop);
                             }
-                            ui.label(
-                                RichText::new(
-                                    "After cancelling you can run again. Photos that are already transferred are recognized and not duplicated.",
-                                )
-                                .font(font(12.0, None))
-                                .color(t.text_muted),
-                            );
+                            if run.kind == Kind::Transfer
+                                && secondary(ui, t, "Cancel…", true, 0.0, 40.0).clicked()
+                            {
+                                action = Some(Action::AskCancel);
+                            }
                         }
                     });
+                    if !finished && !run.cancelling {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(if run.kind == Kind::Transfer {
+                                    "Stop keeps what is transferred so far; a new run continues and imports nothing twice. Cancel takes everything this run did back."
+                                } else {
+                                    "Stop ends the dry run; nothing is written either way."
+                                })
+                                .font(font(12.0, None))
+                                .color(t.text_muted),
+                            )
+                            .wrap(),
+                        );
+                    }
+                    if run.confirm_cancel && !run.cancelling {
+                        egui::Frame::new()
+                            .fill(t.bg_group)
+                            .stroke(egui::Stroke::new(1.0, t.border_control))
+                            .corner_radius(egui::CornerRadius::same(4))
+                            .inner_margin(Margin::same(12))
+                            .show(ui, |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        "Cancel the transfer? Everything this run added to the LightCraft library is removed again and every field it changed is set back. Original files are not touched. Development settings written to photos that were already in the library cannot be set back; the log lists them.",
+                                    )
+                                    .wrap(),
+                                );
+                                ui.horizontal(|ui| {
+                                    if primary(ui, t, "Cancel and take back", true, 0.0).clicked() {
+                                        action = Some(Action::Cancel);
+                                    }
+                                    if secondary(ui, t, "Keep running", true, 0.0, 44.0).clicked() {
+                                        action = Some(Action::KeepRunning);
+                                    }
+                                });
+                            });
+                    }
                 });
             });
             card(ui, t, Some("Phases"), |ui| {
@@ -242,11 +280,28 @@ pub fn ui(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
         }
     });
     match action {
-        Some(Action::Cancel) => {
+        Some(Action::Stop) => {
             if let Some(run) = &mut app.run {
                 run.cancelling = true;
             }
-            host.cancel();
+            host.cancel(false);
+        }
+        Some(Action::AskCancel) => {
+            if let Some(run) = &mut app.run {
+                run.confirm_cancel = true;
+            }
+        }
+        Some(Action::KeepRunning) => {
+            if let Some(run) = &mut app.run {
+                run.confirm_cancel = false;
+            }
+        }
+        Some(Action::Cancel) => {
+            if let Some(run) = &mut app.run {
+                run.cancelling = true;
+                run.confirm_cancel = false;
+            }
+            host.cancel(true);
         }
         Some(Action::Back) => app.close_run(),
         Some(Action::ViewLog(status)) => {
@@ -261,6 +316,9 @@ pub fn ui(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
 }
 
 enum Action {
+    Stop,
+    AskCancel,
+    KeepRunning,
     Cancel,
     Back,
     ViewLog(Option<Status>),

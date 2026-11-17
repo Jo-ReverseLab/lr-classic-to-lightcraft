@@ -268,6 +268,8 @@ pub struct ApplySummary {
     /// One log entry per finished step, in run order (failures are in the
     /// skip and incomplete lists).
     pub entries: Vec<Entry>,
+    /// What this run changed in the library, to take it back (Cancel).
+    pub journal: crate::rollback::Journal,
 }
 
 /// A run that stopped: the error and what was done up to it.
@@ -319,6 +321,7 @@ pub fn apply_partial_with(
     state_file: &Path,
     progress: &mut dyn Progress,
 ) -> Result<ApplySummary, Aborted> {
+    let before = state.clone();
     let listed = list_keywords(client).map_err(|error| Aborted {
         error,
         summary: Box::default(),
@@ -401,6 +404,10 @@ pub fn apply_partial_with(
             develop_masks: plan.develop_masks(),
             develop_spots: plan.develop_spots(),
             develop_white_balance_custom: plan.develop_white_balance_custom(),
+            journal: crate::rollback::Journal {
+                before: Some(before),
+                ..Default::default()
+            },
             ..ApplySummary::default()
         },
         recorded: plan.recorded_fields_map(),
@@ -1050,6 +1057,7 @@ impl Run<'_> {
                     return Ok(());
                 };
                 self.summary.smart_created += 1;
+                self.summary.journal.created_albums.push(id.clone());
                 self.record_smart(collection_id, s, id, rules)
             }
             Ok(Outcome::AppliedNotSaved(_)) => {
@@ -1198,6 +1206,7 @@ impl Run<'_> {
             return Ok(());
         };
         self.count_not_saved(&outcome);
+        self.summary.journal.quick.extend(ids);
         self.summary.quick_added += missing.len();
         self.state.record_quick(missing.into_iter().map(|(g, _)| g));
         self.save_state(true)?;
@@ -1351,6 +1360,7 @@ impl Run<'_> {
                     CollectionKind::Folder => self.summary.folders_created += 1,
                     CollectionKind::Album => self.summary.albums_created += 1,
                 }
+                self.summary.journal.created_albums.push(id.clone());
                 self.record_created(collection_id, c, id)
             }
             Ok(Outcome::AppliedNotSaved(_)) => {
@@ -1462,6 +1472,14 @@ impl Run<'_> {
                 let Some(mut entry) = self.state.collection(collection_id).cloned() else {
                     return Ok(());
                 };
+                self.summary
+                    .journal
+                    .members
+                    .push(crate::rollback::MemberChange {
+                        album: album_id.clone(),
+                        ids: ids.clone(),
+                        added: matches!(change, Change::Add),
+                    });
                 match change {
                     Change::Add => {
                         self.summary.members_added += sent.len();
@@ -1542,6 +1560,7 @@ impl Run<'_> {
             }
         }
         self.summary.stacks_grouped += 1;
+        self.summary.journal.stacks.push(ids.clone());
         let mut members = sent.clone();
         members.extend(recorded.into_iter().filter(|g| !sent.contains(g)));
         self.state.record_stack(stack_id, members);
@@ -1578,6 +1597,7 @@ impl Run<'_> {
         match self.client.execute("keyword.create", params.clone()) {
             Ok(Outcome::Applied(_)) => {
                 self.summary.keywords_created += 1;
+                self.summary.journal.created_keywords.push(path.to_owned());
                 let keyword = self.keywords.get(path).cloned().or_else(|| {
                     // Not reachable: the plan only creates wanted keywords.
                     Keyword::new(path.split('|').map(String::from).collect()).ok()
@@ -1649,6 +1669,7 @@ impl Run<'_> {
             Ok(Outcome::Applied(result)) => match import_id(&result, &sent_path) {
                 ImportResult::Imported(id) => {
                     self.summary.photos_imported += 1;
+                    self.summary.journal.created_photos.push(id.clone());
                     self.record_import(global_id, photo.lightroom_id, id, path)?;
                 }
                 ImportResult::Existing { id, reason } => {
@@ -1770,6 +1791,7 @@ impl Run<'_> {
             Ok(Outcome::Applied(result)) => match virtual_copy_id(&result) {
                 Some(id) => {
                     self.summary.photos_imported += 1;
+                    self.summary.journal.created_photos.push(id.clone());
                     self.state.record_copy(
                         global_id,
                         photo.lightroom_id,
@@ -1909,6 +1931,7 @@ impl Run<'_> {
         }
         self.summary.photos_imported += 1;
         self.summary.photos_same_content += 1;
+        self.summary.journal.created_photos.push(copy.clone());
         self.record_import(global_id, lightroom_id, copy.clone(), path)?;
         self.reset_copy(lightroom_id, &copy)
     }
@@ -2198,17 +2221,27 @@ impl Run<'_> {
             return Ok(());
         };
         let lightroom_id = entry.lightroom_id;
-        let mut params = params.clone();
-        if let Value::Object(map) = &mut params {
-            map.insert("ids".to_string(), json!([entry.lightcraft_id.clone()]));
+        let lightcraft_id = entry.lightcraft_id.clone();
+        let mut sent = params.clone();
+        if let Value::Object(map) = &mut sent {
+            map.insert("ids".to_string(), json!([lightcraft_id.clone()]));
         }
-        let result = self.client.execute(command, params);
+        let result = self.client.execute(command, sent);
         if matches!(result, Ok(_) | Err(WriteError::Command { .. })) {
             self.count_updated();
         }
         match result {
             Ok(Outcome::Applied(_)) => {
                 self.summary.updates += 1;
+                self.summary
+                    .journal
+                    .fields
+                    .push(crate::rollback::FieldWrite {
+                        global_id: global_id.to_owned(),
+                        id: lightcraft_id,
+                        command: command.to_owned(),
+                        params: params.clone(),
+                    });
                 Ok(())
             }
             // Applied but not saved: do not record the field. The photo is
@@ -2280,6 +2313,10 @@ impl Run<'_> {
         // next run leaves it alone.
         if current.develop_pending {
             self.summary.develop_written += 1;
+            self.summary
+                .journal
+                .developed
+                .push(entry.lightcraft_id.clone());
         }
         let develop_hash = self
             .photos
