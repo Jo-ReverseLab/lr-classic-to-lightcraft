@@ -185,6 +185,10 @@ fn a_cancel_after_the_batches_takes_every_imported_photo_back() {
     .unwrap_err();
     assert!(matches!(aborted.error, WriteError::Cancelled));
     let summary = aborted.summary;
+    assert_eq!(
+        summary.photos_imported, 130,
+        "counted when LightCraft imported them"
+    );
     assert_eq!(fake.photos().len(), 130, "the batches ran");
     assert_eq!(summary.journal.created_photos.len(), 130);
     let done = lc_writer::rollback::rollback(&mut client, &summary.journal, &state_file).unwrap();

@@ -840,16 +840,24 @@ impl Run<'_> {
             let params = json!({"paths": chunk, "mode": "add"});
             let result = match self.client.execute("library.import", params) {
                 Ok(Outcome::Applied(result)) => result,
-                // Rejected or not saved: the single imports find out per file.
-                Ok(Outcome::AppliedNotSaved(_)) | Err(WriteError::Command { .. }) => continue,
+                // Not saved: counted; the single imports find each file
+                // again by path.
+                Ok(Outcome::AppliedNotSaved(_)) => {
+                    self.summary.not_saved += 1;
+                    continue;
+                }
+                // Rejected: the single imports find out per file.
+                Err(WriteError::Command { .. }) => continue,
                 Err(e) => return Err(e),
             };
             let batch = batch_answers(chunk, &result);
             self.prefetched.extend(batch.answers);
             if !batch.fresh.is_empty() {
                 self.batch_imported.extend(batch.fresh.iter().cloned());
-                // In the journal at once: a Cancel before their steps must
-                // take them back too.
+                // Counted and in the journal at once: a stop before their
+                // steps leaves them in LightCraft, and a Cancel must take
+                // them back too.
+                self.summary.photos_imported += batch.ids.len();
                 self.summary
                     .journal
                     .created_photos
@@ -1818,11 +1826,11 @@ impl Run<'_> {
         match answer {
             Ok(Outcome::Applied(result)) => match import_id(&result, &sent_path) {
                 ImportResult::Imported(id) => {
-                    self.summary.photos_imported += 1;
                     let batched = sent_path
                         .as_str()
                         .is_some_and(|p| self.batch_imported.contains(p));
                     if !batched {
+                        self.summary.photos_imported += 1;
                         self.summary.journal.created_photos.push(id.clone());
                     }
                     self.record_import(global_id, photo.lightroom_id, id, path)?;
@@ -1833,9 +1841,8 @@ impl Run<'_> {
                             .as_str()
                             .is_some_and(|p| self.batch_imported.contains(p)) =>
                 {
-                    // Imported by this run's batch (already in the journal),
-                    // id not matched by name.
-                    self.summary.photos_imported += 1;
+                    // Imported by this run's batch (already counted and in
+                    // the journal), id not matched by name.
                     self.record_import(global_id, photo.lightroom_id, id, path)?;
                 }
                 ImportResult::Existing { id, reason } => {
