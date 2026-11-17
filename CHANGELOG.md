@@ -114,6 +114,21 @@ The first release is 0.1.0.
 
 ### Fixed
 
+- Batched imports could give two photos each other's LightCraft id when
+  LightCraft listed a file it had only browsed first; ids are now matched
+  by file name, and an ambiguous name falls back to a single import.
+- Cancel right after the import batches now also removes the photos the
+  batches imported.
+- Writer failures name their photo, album, stack or keyword, so the photo
+  counts include them as errors.
+- Keywords are created before batched imports (LightCraft adds a sidecar's
+  keywords on import).
+- A photo without a recorded develop hash (for example after
+  `--skip develop`) that LightCraft shows as edited is no longer
+  overwritten without `--overwrite-develop`.
+- Camera profile names are left out of an anonymized report.
+- Batch imports are counted when LightCraft imports them; an unsaved batch
+  is counted.
 - Audit (docs/audit-2026-11.md): a photo whose development settings cannot
   be read is now reported (`develop_unreadable`); a positional `true`/`false`
   no longer makes a settings text unreadable; mapped paths are no longer
