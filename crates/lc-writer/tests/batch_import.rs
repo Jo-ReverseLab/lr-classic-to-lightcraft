@@ -120,3 +120,74 @@ fn a_stopped_batch_run_continues_without_duplicates() {
     assert_eq!(State::load(&state_file).unwrap().photos().count(), 120);
     assert_eq!(fake.ratings().len(), 120);
 }
+
+/// LightCraft does not list a batch's ids in file order. Each photo must
+/// still get the id of its own file, and a name two files share falls back
+/// to the single import.
+#[test]
+fn batch_ids_are_matched_to_files_by_name_not_position() {
+    let dir = tempfile::tempdir().unwrap();
+    let library = dir.path().join("Test.lightcraft");
+    let state_file = lc_writer::state::state_path(&library);
+    let mut config = Config::new(&library);
+    config.batch_ids_reversed = true;
+    let fake = FakeLightCraft::start(config);
+    let mut client = ControlClient::connect(fake.port()).unwrap();
+    let mut photos = input(120);
+    // Same file name in another folder: ambiguous within the second batch.
+    photos.photos.insert(
+        1,
+        Photo::new(
+            "/Users/example/Other/0100.jpg",
+            999,
+            Rating::new(2).unwrap(),
+        )
+        .with_global_id("other"),
+    );
+    let summary = apply_partial(&mut client, &photos, &mut State::default(), &state_file).unwrap();
+
+    assert_eq!(summary.photos_imported, 121);
+    assert_eq!(summary.photos_existing, 0);
+    assert_eq!(summary.journal.created_photos.len(), 121);
+    let by_path = fake.photos();
+    let state = State::load(&state_file).unwrap();
+    for photo in &photos.photos {
+        let gid = photo.global_id.as_deref().unwrap();
+        let entry = state.photo(gid).unwrap();
+        assert_eq!(
+            entry.lightcraft_id,
+            serde_json::json!(by_path[photo.path.to_str().unwrap()]),
+            "{gid} has the id of its own file"
+        );
+    }
+    let singles = imports(&fake).iter().filter(|n| **n == 1).count();
+    assert_eq!(singles, 2, "only the two files sharing a name");
+}
+
+/// Cancel right after the batches, before any photo's own step: the
+/// journal already holds every imported photo, so the rollback removes
+/// them all.
+#[test]
+fn a_cancel_after_the_batches_takes_every_imported_photo_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let library = dir.path().join("Test.lightcraft");
+    let state_file = lc_writer::state::state_path(&library);
+    let fake = FakeLightCraft::start(Config::new(&library));
+    let mut client = ControlClient::connect(fake.port()).unwrap();
+    // Stops after the first step; the batches ran before it.
+    let aborted = apply_partial_with(
+        &mut client,
+        &input(130),
+        &mut State::default(),
+        &state_file,
+        &mut StopAfter(1, 0),
+    )
+    .unwrap_err();
+    assert!(matches!(aborted.error, WriteError::Cancelled));
+    let summary = aborted.summary;
+    assert_eq!(fake.photos().len(), 130, "the batches ran");
+    assert_eq!(summary.journal.created_photos.len(), 130);
+    let done = lc_writer::rollback::rollback(&mut client, &summary.journal, &state_file).unwrap();
+    assert!(done.failed.is_empty(), "{:?}", done.failed);
+    assert!(fake.photos().is_empty());
+}

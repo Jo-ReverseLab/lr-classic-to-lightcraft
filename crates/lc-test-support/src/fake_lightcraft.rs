@@ -230,6 +230,10 @@ pub struct Config {
     /// `library.import` applies but answers `imported: []` (no id, no
     /// duplicate, not failed).
     pub import_no_id: bool,
+    /// A batched `library.import` lists the imported ids in reverse file
+    /// order, like the real app does when files it had only browsed come
+    /// first. Ids must then be matched to files by name.
+    pub batch_ids_reversed: bool,
     /// `album.create`, `album.createSmart` and `library.import` apply, then
     /// answer `saved in memory but not written to disk` (no id).
     pub not_saved_creates: bool,
@@ -289,6 +293,7 @@ impl Config {
             albums_list_garbage: false,
             albums_no_id: false,
             import_no_id: false,
+            batch_ids_reversed: false,
             not_saved_creates: false,
             not_saved_keyword_creates: false,
             seed_photos: Vec::new(),
@@ -856,6 +861,9 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                     if one["failed"].as_u64().unwrap_or(0) > 0 {
                         failed.push(json!([path, "cannot be read"]));
                     }
+                }
+                if config.batch_ids_reversed {
+                    imported.reverse();
                 }
                 return Ok(
                     json!({"imported": imported, "duplicates": duplicates, "failed": failed}),
@@ -1605,7 +1613,7 @@ fn toggle_target(config: &Config, lib: &mut Library, params: &Value) -> Result<V
 }
 
 /// `catalog.query {filter?, offset?, limit?}` -> `{total, photos:[{id,
-/// fileName}]}`; `filter.album` lists the members of that album, sorted by
+/// fileName}]}` (the file name of the imported path); `filter.album` lists the members of that album, sorted by
 /// photo id (not by insertion order, like the real app); without it all
 /// photos. `filter.deleted: true` lists only photos in the trash, a missing
 /// or false `deleted` only photos outside it. The default `limit` is 200.
@@ -1631,7 +1639,16 @@ fn catalog_query(config: &Config, lib: &Library, params: &Value) -> Result<Value
         .skip(offset)
         .take(limit)
         .map(|id| {
-            let mut v = json!({"id": id, "fileName": format!("{id}.jpg")});
+            // The imported file's name, like the real app; `<id>.jpg` for
+            // a seeded photo without a path.
+            let name = lib
+                .photos
+                .iter()
+                .find(|(_, p)| *p == id)
+                .and_then(|(path, _)| std::path::Path::new(path).file_name())
+                .and_then(|n| n.to_str())
+                .map_or_else(|| format!("{id}.jpg"), str::to_owned);
+            let mut v = json!({"id": id, "fileName": name});
             let seed = lib
                 .seeds
                 .get(id)

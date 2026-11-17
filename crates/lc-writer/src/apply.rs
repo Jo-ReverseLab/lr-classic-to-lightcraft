@@ -357,6 +357,7 @@ pub fn apply_partial_with(
     let mut run = Run {
         client,
         prefetched: std::collections::HashMap::new(),
+        batch_imported: std::collections::HashSet::new(),
         // The first save is never delayed: an unwritable mapping file must
         // stop the run before more commands are sent.
         last_save: std::time::Instant::now()
@@ -550,21 +551,35 @@ const IMPORT_BATCH: usize = 64;
 /// The longest a record that can be found again waits for its save.
 const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// The per-file answers of a batched `library.import`, shaped like the
-/// answer to a single-file import. Files the answer does not account for
-/// (a count that does not add up, a failure without a path) get none.
-fn batch_answers(paths: &[String], result: &Value) -> Vec<(String, Value)> {
+/// What one batched `library.import` said about its files.
+#[derive(Debug, Default, PartialEq)]
+struct BatchAnswer {
+    /// Answers for files that failed or were already in the library, shaped
+    /// like the answer to a single-file import.
+    answers: Vec<(String, Value)>,
+    /// Files the batch imported, in file order.
+    fresh: Vec<String>,
+    /// The ids of the imported files. LightCraft does not list them in file
+    /// order (a file it had only browsed comes first), so they are matched
+    /// to files by name afterwards, never by position.
+    ids: Vec<Value>,
+}
+
+/// Splits the answer to a batched `library.import`. An answer that does not
+/// account for every file (a count that does not add up, a failure without
+/// a path) gives no imported files; their single imports find out per file.
+fn batch_answers(paths: &[String], result: &Value) -> BatchAnswer {
     let list = |key: &str| result.get(key).and_then(Value::as_array).cloned();
     let (Some(imported), duplicates) = (list("imported"), list("duplicates").unwrap_or_default())
     else {
-        return Vec::new();
+        return BatchAnswer::default();
     };
     let failed = match result.get("failed") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Number(n)) if n.as_u64() == Some(0) => Vec::new(),
         Some(Value::Array(items)) => items.clone(),
         // A count without paths: which files failed is unknown.
-        Some(_) => return Vec::new(),
+        Some(_) => return BatchAnswer::default(),
     };
     let failed_path = |path: &str| {
         failed.iter().any(|f| {
@@ -578,40 +593,70 @@ fn batch_answers(paths: &[String], result: &Value) -> Vec<(String, Value)> {
             .iter()
             .find(|d| d.get("path").and_then(Value::as_str) == Some(path))
     };
-    let fresh: Vec<&String> = paths
-        .iter()
-        .filter(|p| !failed_path(p) && duplicate(p).is_none())
-        .collect();
-    let mut out = Vec::new();
+    let mut out = BatchAnswer::default();
     for path in paths {
         if failed_path(path) {
-            out.push((
+            out.answers.push((
                 path.clone(),
                 json!({"imported": [], "duplicates": [], "failed": 1}),
             ));
         } else if let Some(d) = duplicate(path) {
-            out.push((
+            out.answers.push((
                 path.clone(),
                 json!({"imported": [], "duplicates": [d], "failed": 0}),
             ));
+        } else {
+            out.fresh.push(path.clone());
         }
     }
-    // Ids come in file order; trust them only when every file is accounted for.
-    if fresh.len() == imported.len() {
-        for (path, id) in fresh.into_iter().zip(imported) {
-            out.push((
-                path.clone(),
-                json!({"imported": [id], "duplicates": [], "failed": 0}),
-            ));
-        }
+    if out.fresh.len() == imported.len() {
+        out.ids = imported;
+    } else {
+        out.fresh.clear();
     }
     out
+}
+
+/// Matches the ids of one batch to its imported files by file name (from
+/// `names`, id key to file name). A name that more than one file of the
+/// batch has, or an id without a name, matches nothing; those files are
+/// left to their single import, which LightCraft answers with the right id.
+fn match_by_name(
+    fresh: &[String],
+    ids: &[Value],
+    names: &std::collections::HashMap<String, String>,
+) -> Vec<(String, Value)> {
+    let file_name = |p: &str| {
+        Path::new(p)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_owned)
+    };
+    let mut by_name: std::collections::HashMap<String, Vec<&String>> =
+        std::collections::HashMap::new();
+    for path in fresh {
+        if let Some(name) = file_name(path) {
+            by_name.entry(name).or_default().push(path);
+        }
+    }
+    ids.iter()
+        .filter_map(|id| {
+            let name = names.get(&id_text(id)?)?;
+            match by_name.get(name).map(Vec::as_slice) {
+                Some([path]) => Some(((*path).clone(), id.clone())),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 struct Run<'a> {
     client: &'a mut dyn CommandSink,
     /// Answers of batched imports, by file path.
     prefetched: std::collections::HashMap<String, Value>,
+    /// Files a batch imported; their single import finds them again by
+    /// path, and they still count as imported by this run.
+    batch_imported: std::collections::HashSet<String>,
     last_save: std::time::Instant,
     unsaved: bool,
     areas: Areas,
@@ -766,8 +811,9 @@ impl Run<'_> {
     /// Sends the files of the plan's imports in batches before the steps
     /// run; each import step then takes its answer from here. LightCraft
     /// imports a batch several times faster than single files. Used only
-    /// for larger runs; an answer that does not account for every file
-    /// leaves the rest to single imports.
+    /// for larger runs. Imported ids are matched to files by file name; a
+    /// file that cannot be matched surely (or an answer that does not
+    /// account for every file) is left to its single import.
     fn prefetch_imports(&mut self, steps: &[Step]) -> Result<(), WriteError> {
         let paths: Vec<String> = steps
             .iter()
@@ -779,6 +825,7 @@ impl Run<'_> {
         if paths.len() < IMPORT_BATCH_MIN {
             return Ok(());
         }
+        let mut imported = Vec::new();
         for chunk in paths.chunks(IMPORT_BATCH) {
             if self.progress.cancelled() {
                 break;
@@ -790,11 +837,82 @@ impl Run<'_> {
                 Ok(Outcome::AppliedNotSaved(_)) | Err(WriteError::Command { .. }) => continue,
                 Err(e) => return Err(e),
             };
-            for (path, answer) in batch_answers(chunk, &result) {
-                self.prefetched.insert(path, answer);
+            let batch = batch_answers(chunk, &result);
+            self.prefetched.extend(batch.answers);
+            if !batch.fresh.is_empty() {
+                self.batch_imported.extend(batch.fresh.iter().cloned());
+                // In the journal at once: a Cancel before their steps must
+                // take them back too.
+                self.summary
+                    .journal
+                    .created_photos
+                    .extend(batch.ids.iter().cloned());
+                imported.push((batch.fresh, batch.ids));
+            }
+        }
+        if imported.is_empty() {
+            return Ok(());
+        }
+        let wanted: std::collections::HashSet<String> = imported
+            .iter()
+            .flat_map(|(_, ids)| ids.iter().filter_map(id_text))
+            .collect();
+        let Some(names) = self.file_names(&wanted)? else {
+            return Ok(());
+        };
+        for (fresh, ids) in &imported {
+            for (path, id) in match_by_name(fresh, ids, &names) {
+                self.prefetched.insert(
+                    path,
+                    json!({"imported": [id], "duplicates": [], "failed": 0}),
+                );
             }
         }
         Ok(())
+    }
+
+    /// The file names of the photos in `wanted` (id keys), from
+    /// `catalog.query`. `None` when LightCraft refuses the query; the
+    /// single imports then find every id.
+    fn file_names(
+        &mut self,
+        wanted: &std::collections::HashSet<String>,
+    ) -> Result<Option<std::collections::HashMap<String, String>>, WriteError> {
+        const PAGE: usize = 1000;
+        let mut names = std::collections::HashMap::new();
+        let mut offset = 0;
+        loop {
+            let params = json!({"filter": {}, "offset": offset, "limit": PAGE});
+            let result = match self.client.execute("catalog.query", params) {
+                Ok(Outcome::Applied(result)) => result,
+                Ok(Outcome::AppliedNotSaved(_)) | Err(WriteError::Command { .. }) => {
+                    return Ok(None);
+                }
+                Err(e) => return Err(e),
+            };
+            let photos = result
+                .get("photos")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            for photo in &photos {
+                let (Some(id), Some(name)) = (
+                    photo.get("id"),
+                    photo.get("fileName").and_then(Value::as_str),
+                ) else {
+                    continue;
+                };
+                let Some(key) = id_text(id) else { continue };
+                if wanted.contains(&key) {
+                    names.insert(key, name.to_owned());
+                }
+            }
+            offset += photos.len();
+            let total = result.get("total").and_then(Value::as_u64).unwrap_or(0) as usize;
+            if photos.is_empty() || offset >= total || names.len() == wanted.len() {
+                return Ok(Some(names));
+            }
+        }
     }
 
     /// Counters that tell how the last step ended.
@@ -1669,7 +1787,23 @@ impl Run<'_> {
             Ok(Outcome::Applied(result)) => match import_id(&result, &sent_path) {
                 ImportResult::Imported(id) => {
                     self.summary.photos_imported += 1;
-                    self.summary.journal.created_photos.push(id.clone());
+                    let batched = sent_path
+                        .as_str()
+                        .is_some_and(|p| self.batch_imported.contains(p));
+                    if !batched {
+                        self.summary.journal.created_photos.push(id.clone());
+                    }
+                    self.record_import(global_id, photo.lightroom_id, id, path)?;
+                }
+                ImportResult::Existing { id, reason }
+                    if reason.as_deref() == Some("path")
+                        && sent_path
+                            .as_str()
+                            .is_some_and(|p| self.batch_imported.contains(p)) =>
+                {
+                    // Imported by this run's batch (already in the journal),
+                    // id not matched by name.
+                    self.summary.photos_imported += 1;
                     self.record_import(global_id, photo.lightroom_id, id, path)?;
                 }
                 ImportResult::Existing { id, reason } => {
