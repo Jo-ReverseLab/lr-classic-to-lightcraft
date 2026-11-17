@@ -192,6 +192,25 @@ pub fn ui(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
                     });
                     let fill = if stopped { t.conflict } else { t.ok };
                     bar(ui, t, percent / 100.0, 8.0, fill, "Overall progress");
+                    // LightCraft answers nothing: most often a dialog is open there.
+                    let quiet = (chrono::Local::now() - run.last_event).num_seconds();
+                    if !finished && run.writing && quiet >= 15 {
+                        ui.horizontal(|ui| {
+                            icons::show(ui, Icon::Exclamation, t.conflict, 16.0);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!(
+                                        "LightCraft has not answered for {quiet} s. Is a dialog open in LightCraft? The transfer goes on as soon as it answers."
+                                    ))
+                                    .color(t.text_muted),
+                                )
+                                .wrap(),
+                            );
+                        });
+                        if secondary(ui, t, "Show LightCraft", true, 0.0, 40.0).clicked() {
+                            action = Some(Action::ShowLightCraft);
+                        }
+                    }
                     if let Some((_, message)) = &run.error {
                         // Why it stopped, where the person is looking.
                         ui.horizontal(|ui| {
@@ -280,6 +299,7 @@ pub fn ui(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
         }
     });
     match action {
+        Some(Action::ShowLightCraft) => host.show_lightcraft(),
         Some(Action::Stop) => {
             if let Some(run) = &mut app.run {
                 run.cancelling = true;
@@ -316,6 +336,7 @@ pub fn ui(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
 }
 
 enum Action {
+    ShowLightCraft,
     Stop,
     AskCancel,
     KeepRunning,

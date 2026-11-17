@@ -210,10 +210,10 @@ impl Host for StandaloneHost {
     }
 
     fn show_lightcraft(&mut self) {
-        // macOS draws (and so runs commands of) a window that is visible.
+        // Brings LightCraft forward, where an open dialog can be answered.
         #[cfg(target_os = "macos")]
         if let Ok(mut child) = std::process::Command::new("open")
-            .args(["-g", "-a", "LightCraft"])
+            .args(["-a", "LightCraft"])
             .spawn()
         {
             // Reaped off the UI thread so no zombie is left.

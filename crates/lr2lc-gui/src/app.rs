@@ -60,6 +60,8 @@ pub struct RunState {
     pub confirm_cancel: bool,
     /// The run is being taken back.
     pub rolling_back: bool,
+    /// When the run last reported anything.
+    pub last_event: DateTime<Local>,
     finished: bool,
     /// Why the run failed or stopped.
     pub error: Option<(ErrorKind, String)>,
@@ -541,6 +543,7 @@ impl App {
             cancelling: false,
             confirm_cancel: false,
             rolling_back: false,
+            last_event: Local::now(),
             finished: false,
             error: None,
             photo_line: None,
@@ -706,6 +709,7 @@ impl App {
         let Some(run) = &mut self.run else {
             return;
         };
+        run.last_event = Local::now();
         match event {
             Event::Phase(Phase::ReadingLibrary, total) => {
                 run.reading_library = true;

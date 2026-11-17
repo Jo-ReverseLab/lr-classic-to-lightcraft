@@ -711,3 +711,23 @@ fn live_transfer() {
         .collect();
     println!("LIVE rollback errors: {failed:?}");
 }
+
+#[test]
+fn a_quiet_lightcraft_is_pointed_out() {
+    let w = world();
+    let mut h = harness(ready(&w), 1280.0);
+    h.run_steps(4);
+    h.get_by_label("Transfer now").click();
+    h.run_steps(2);
+    h.state_mut()
+        .host
+        .events
+        .push(Event::Phase(lr2lc_core::Phase::Writing, 10));
+    h.run_steps(2);
+    assert_eq!(h.query_all_by_label("Show LightCraft").count(), 0);
+    if let Some(run) = &mut h.state_mut().app.run {
+        run.last_event = chrono::Local::now() - chrono::Duration::seconds(20);
+    }
+    h.run_steps(2);
+    h.get_by_label("Show LightCraft");
+}
