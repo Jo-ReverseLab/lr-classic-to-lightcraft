@@ -89,7 +89,7 @@ use crate::progress::{NoProgress, Phase, Progress};
 use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, hex_hash, keyword_text};
 use model::{
     Area, Collection, CollectionKind, Entry, Keyword, Photo, SkipCode, Skipped, SmartCollection,
-    Status,
+    Status, Subject,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -1222,9 +1222,10 @@ impl Run<'_> {
     }
 
     fn skip_smart(&mut self, collection_id: i64, code: SkipCode, why: &str) {
-        self.summary
-            .smart_skipped
-            .push(Skipped::new(code, smart_skip_reason(collection_id, why)));
+        self.summary.smart_skipped.push(
+            Skipped::new(code, smart_skip_reason(collection_id, why))
+                .about(Subject::Collection(collection_id)),
+        );
     }
 
     /// The library's album tree from `albums.list`, read at most once per
@@ -1264,7 +1265,7 @@ impl Run<'_> {
                                      quick collection"
                                 .to_string(),
                         },
-                    ));
+                    ).about(id.map_or(Subject::None, Subject::Photo)));
                 }
             }
         }
@@ -1524,10 +1525,10 @@ impl Run<'_> {
     }
 
     fn skip_collection(&mut self, collection_id: i64, code: SkipCode, why: &str) {
-        self.summary.collections_skipped.push(Skipped::new(
-            code,
-            format!("collection {collection_id}: {why}"),
-        ));
+        self.summary.collections_skipped.push(
+            Skipped::new(code, format!("collection {collection_id}: {why}"))
+                .about(Subject::Collection(collection_id)),
+        );
     }
 
     /// Adds photos to an album or removes them, after selecting exactly
@@ -1555,10 +1556,15 @@ impl Run<'_> {
             } else if change == Change::Add {
                 let lightroom_id = self.photos.get(gid.as_str()).map(|p| p.lightroom_id);
                 let photo = lightroom_id.map_or_else(|| "?".to_string(), |id| id.to_string());
-                self.summary.members_skipped.push(Skipped::new(
-                    SkipCode::NoLightcraftId,
-                    format!("photo {photo}: not added to an album; the photo has no LightCraft id"),
-                ));
+                self.summary.members_skipped.push(
+                    Skipped::new(
+                        SkipCode::NoLightcraftId,
+                        format!(
+                            "photo {photo}: not added to an album; the photo has no LightCraft id"
+                        ),
+                    )
+                    .about(lightroom_id.map_or(Subject::None, Subject::Photo)),
+                );
             }
             // Not reachable for removals: lr2lc only recorded members that
             // had a LightCraft id.
@@ -1635,12 +1641,15 @@ impl Run<'_> {
             }
         }
         if ids.len() < 2 {
-            self.summary.stacks_skipped.push(Skipped::new(
-                SkipCode::TooFewPhotos,
-                format!(
-                    "stack {stack_id}: fewer than two photos with a LightCraft id; not grouped"
-                ),
-            ));
+            self.summary.stacks_skipped.push(
+                Skipped::new(
+                    SkipCode::TooFewPhotos,
+                    format!(
+                        "stack {stack_id}: fewer than two photos with a LightCraft id; not grouped"
+                    ),
+                )
+                .about(Subject::Stack(stack_id)),
+            );
             return Ok(());
         }
         let recorded: Vec<String> = self
@@ -1665,13 +1674,16 @@ impl Run<'_> {
                     }
                 }
                 Err(WriteError::Command { command, .. }) => {
-                    self.summary.stacks_incomplete.push(Skipped::new(
-                        SkipCode::Rejected,
-                        format!(
-                            "stack {stack_id}: LightCraft rejected `{command}`; \
+                    self.summary.stacks_incomplete.push(
+                        Skipped::new(
+                            SkipCode::Rejected,
+                            format!(
+                                "stack {stack_id}: LightCraft rejected `{command}`; \
                              the stack is grouped again by the next run"
-                        ),
-                    ));
+                            ),
+                        )
+                        .about(Subject::Stack(stack_id)),
+                    );
                     return Ok(());
                 }
                 Err(e) => return Err(e),
@@ -1689,13 +1701,16 @@ impl Run<'_> {
     /// Reports an album as incomplete, once per run.
     fn mark_incomplete(&mut self, collection_id: i64, command: &str) {
         if self.incomplete.insert(collection_id) {
-            self.summary.collections_incomplete.push(Skipped::new(
-                SkipCode::Rejected,
-                format!(
-                    "collection {collection_id}: LightCraft rejected `{command}`; \
+            self.summary.collections_incomplete.push(
+                Skipped::new(
+                    SkipCode::Rejected,
+                    format!(
+                        "collection {collection_id}: LightCraft rejected `{command}`; \
                      its members are written again by the next run"
-                ),
-            ));
+                    ),
+                )
+                .about(Subject::Collection(collection_id)),
+            );
         }
     }
 
@@ -1706,10 +1721,14 @@ impl Run<'_> {
         });
         if parent_failed {
             self.failed_keywords.insert(path.to_string());
-            self.summary.keywords_not_created.push(Skipped::new(
-                SkipCode::ParentFailed,
-                "keyword not created: `keyword.create` failed for its parent keyword".to_string(),
-            ));
+            self.summary.keywords_not_created.push(
+                Skipped::new(
+                    SkipCode::ParentFailed,
+                    "keyword not created: `keyword.create` failed for its parent keyword"
+                        .to_string(),
+                )
+                .about(Subject::Keyword(path.to_string())),
+            );
             return Ok(());
         }
         match self.client.execute("keyword.create", params.clone()) {
@@ -1735,20 +1754,26 @@ impl Run<'_> {
             Ok(Outcome::AppliedNotSaved(_)) => {
                 self.summary.not_saved += 1;
                 self.failed_keywords.insert(path.to_string());
-                self.summary.keywords_not_created.push(Skipped::new(
-                    SkipCode::AppliedNotSaved,
-                    "keyword not created: `keyword.create` was applied but not saved; \
+                self.summary.keywords_not_created.push(
+                    Skipped::new(
+                        SkipCode::AppliedNotSaved,
+                        "keyword not created: `keyword.create` was applied but not saved; \
                      the next run creates it again, check LightCraft for a duplicate"
-                        .to_string(),
-                ));
+                            .to_string(),
+                    )
+                    .about(Subject::Keyword(path.to_string())),
+                );
                 Ok(())
             }
             Err(WriteError::Command { command, .. }) => {
                 self.failed_keywords.insert(path.to_string());
-                self.summary.keywords_not_created.push(Skipped::new(
-                    SkipCode::Rejected,
-                    format!("keyword not created: LightCraft rejected `{command}`"),
-                ));
+                self.summary.keywords_not_created.push(
+                    Skipped::new(
+                        SkipCode::Rejected,
+                        format!("keyword not created: LightCraft rejected `{command}`"),
+                    )
+                    .about(Subject::Keyword(path.to_string())),
+                );
                 Ok(())
             }
             Err(e) => Err(e),
@@ -1762,10 +1787,10 @@ impl Run<'_> {
             return Ok(());
         };
         let skip = |summary: &mut ApplySummary, code: SkipCode, why: &str| {
-            summary.photos_skipped.push(Skipped::new(
-                code,
-                format!("photo {}: {why}", photo.lightroom_id),
-            ));
+            summary.photos_skipped.push(
+                Skipped::new(code, format!("photo {}: {why}", photo.lightroom_id))
+                    .about(Subject::Photo(photo.lightroom_id)),
+            );
         };
         // Not reachable through `plan` (it skips such a photo with
         // `PathNotUtf8`); never send a lossily encoded path.
@@ -1903,10 +1928,10 @@ impl Run<'_> {
             return Ok(());
         }
         let skip = |summary: &mut ApplySummary, code: SkipCode, why: &str| {
-            summary.photos_skipped.push(Skipped::new(
-                code,
-                format!("photo {}: {why}", photo.lightroom_id),
-            ));
+            summary.photos_skipped.push(
+                Skipped::new(code, format!("photo {}: {why}", photo.lightroom_id))
+                    .about(Subject::Photo(photo.lightroom_id)),
+            );
         };
         let Some(master) = self.state.photo(master_global_id) else {
             skip(
@@ -1985,9 +2010,10 @@ impl Run<'_> {
     ) -> Result<(), WriteError> {
         let lightroom_id = photo.lightroom_id;
         let skip = |summary: &mut ApplySummary, code: SkipCode, why: &str| {
-            summary
-                .photos_skipped
-                .push(Skipped::new(code, format!("photo {lightroom_id}: {why}")));
+            summary.photos_skipped.push(
+                Skipped::new(code, format!("photo {lightroom_id}: {why}"))
+                    .about(Subject::Photo(lightroom_id)),
+            );
         };
         let mut params = json!({"ids": [source_id]});
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
@@ -2121,13 +2147,16 @@ impl Run<'_> {
                 Ok(Outcome::Applied(_)) => {}
                 Ok(Outcome::AppliedNotSaved(_)) => {
                     self.summary.not_saved += 1;
-                    self.summary.photos_incomplete.push(Skipped::new(
-                        SkipCode::AppliedNotSaved,
-                        format!(
-                            "photo {lightroom_id}: `{command}` was applied but not saved \
+                    self.summary.photos_incomplete.push(
+                        Skipped::new(
+                            SkipCode::AppliedNotSaved,
+                            format!(
+                                "photo {lightroom_id}: `{command}` was applied but not saved \
                              while resetting the new copy; the photo is incomplete"
-                        ),
-                    ));
+                            ),
+                        )
+                        .about(Subject::Photo(lightroom_id)),
+                    );
                     self.fail_current();
                     return Ok(());
                 }
@@ -2277,13 +2306,16 @@ impl Run<'_> {
             Ok(Outcome::Applied(_)) => Ok(()),
             Ok(Outcome::AppliedNotSaved(_)) => {
                 self.summary.not_saved += 1;
-                self.summary.photos_incomplete.push(Skipped::new(
-                    SkipCode::AppliedNotSaved,
-                    format!(
-                        "photo {lightroom_id}: `{command}` was applied but not saved; \
+                self.summary.photos_incomplete.push(
+                    Skipped::new(
+                        SkipCode::AppliedNotSaved,
+                        format!(
+                            "photo {lightroom_id}: `{command}` was applied but not saved; \
                          the photo is incomplete and is updated again by the next run"
-                    ),
-                ));
+                        ),
+                    )
+                    .about(Subject::Photo(lightroom_id)),
+                );
                 self.fail_current();
                 Ok(())
             }
@@ -2298,13 +2330,16 @@ impl Run<'_> {
     /// Marks the running photo as incomplete after a rejected develop
     /// command, without counting it as a field update.
     fn reject_develop(&mut self, lightroom_id: i64, command: &str) {
-        self.summary.photos_incomplete.push(Skipped::new(
-            SkipCode::Rejected,
-            format!(
-                "photo {lightroom_id}: LightCraft rejected `{command}`; \
+        self.summary.photos_incomplete.push(
+            Skipped::new(
+                SkipCode::Rejected,
+                format!(
+                    "photo {lightroom_id}: LightCraft rejected `{command}`; \
                  the photo is incomplete and is updated again by the next run"
-            ),
-        ));
+                ),
+            )
+            .about(Subject::Photo(lightroom_id)),
+        );
         self.fail_current();
     }
 
@@ -2337,13 +2372,16 @@ impl Run<'_> {
 
     /// Marks the running photo as incomplete after a rejected command.
     fn reject(&mut self, lightroom_id: i64, command: &str) {
-        self.summary.photos_incomplete.push(Skipped::new(
-            SkipCode::Rejected,
-            format!(
-                "photo {lightroom_id}: LightCraft rejected `{command}`; \
+        self.summary.photos_incomplete.push(
+            Skipped::new(
+                SkipCode::Rejected,
+                format!(
+                    "photo {lightroom_id}: LightCraft rejected `{command}`; \
                  the photo is incomplete and is updated again by the next run"
-            ),
-        ));
+                ),
+            )
+            .about(Subject::Photo(lightroom_id)),
+        );
         self.fail_current();
     }
 
@@ -2384,13 +2422,16 @@ impl Run<'_> {
             // `album.createSmart` (see T14).
             Ok(Outcome::AppliedNotSaved(_)) => {
                 self.summary.not_saved += 1;
-                self.summary.photos_incomplete.push(Skipped::new(
-                    SkipCode::AppliedNotSaved,
-                    format!(
-                        "photo {lightroom_id}: `{command}` was applied but not saved; \
+                self.summary.photos_incomplete.push(
+                    Skipped::new(
+                        SkipCode::AppliedNotSaved,
+                        format!(
+                            "photo {lightroom_id}: `{command}` was applied but not saved; \
                          the photo is incomplete and is updated again by the next run"
-                    ),
-                ));
+                        ),
+                    )
+                    .about(Subject::Photo(lightroom_id)),
+                );
                 self.fail_current();
                 Ok(())
             }

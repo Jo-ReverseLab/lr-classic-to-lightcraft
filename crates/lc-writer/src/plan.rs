@@ -50,7 +50,7 @@ use crate::state::{EntryKind, PhotoFields, State, hex_hash, keyword_text, snapsh
 use model::{
     Collection, CollectionKind, CurvePoint, Curves, Develop, Keyword, Mask, MaskComponent, MaskOp,
     MaskShape, MergeValue, Photo, Point, QuickCollection, SkipCode, Skipped, SmartCollection, Spot,
-    SpotMode, Stack, WhiteBalanceHint,
+    SpotMode, Stack, Subject, WhiteBalanceHint,
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -999,9 +999,10 @@ fn plan_smart(input: &WriteInput, state: &State, out: &mut Plan) {
                     params,
                 });
             }
-            Err((code, why)) => out
-                .smart_skips
-                .push(Skipped::new(code, smart_skip_reason(s.lightroom_id, &why))),
+            Err((code, why)) => out.smart_skips.push(
+                Skipped::new(code, smart_skip_reason(s.lightroom_id, &why))
+                    .about(Subject::Collection(s.lightroom_id)),
+            ),
         }
     }
 }
@@ -1023,10 +1024,13 @@ fn plan_quick(input: &WriteInput, state: &State, out: &mut Plan) {
         match global_ids.get(member) {
             Some(gid) if !wanted.iter().any(|g| g == gid) => wanted.push((*gid).to_string()),
             Some(_) => {}
-            None => out.quick_skips.push(Skipped::new(
-                SkipCode::NoGlobalId,
-                format!("photo {member}: no global id; not added to the quick collection"),
-            )),
+            None => out.quick_skips.push(
+                Skipped::new(
+                    SkipCode::NoGlobalId,
+                    format!("photo {member}: no global id; not added to the quick collection"),
+                )
+                .about(Subject::Photo(*member)),
+            ),
         }
     }
     out.quick_removed = recorded.iter().filter(|g| !wanted.contains(g)).count();
@@ -1130,12 +1134,15 @@ fn plan_keywords(
         let text = keyword_text(&w.keyword);
         if let Some(entry) = state.keyword(&text) {
             if w.explicit && !entry.same_attributes(&w.keyword) {
-                out.skipped.push(Skipped::new(
-                    SkipCode::KeywordChanged,
-                    "keyword synonyms or attributes changed after the keyword was \
+                out.skipped.push(
+                    Skipped::new(
+                        SkipCode::KeywordChanged,
+                        "keyword synonyms or attributes changed after the keyword was \
                              created in LightCraft; not updated"
-                        .to_string(),
-                ));
+                            .to_string(),
+                    )
+                    .about(Subject::Keyword(text.clone())),
+                );
             }
             continue;
         }
@@ -1176,19 +1183,25 @@ fn plan_photos(
     let mut by_gid: BTreeMap<&str, &Photo> = BTreeMap::new();
     for p in &input.photos {
         match p.global_id.as_deref() {
-            None => out.skipped.push(Skipped::new(
-                SkipCode::MissingGlobalId,
-                format!("photo {} has no global id", p.lightroom_id),
-            )),
+            None => out.skipped.push(
+                Skipped::new(
+                    SkipCode::MissingGlobalId,
+                    format!("photo {} has no global id", p.lightroom_id),
+                )
+                .about(Subject::Photo(p.lightroom_id)),
+            ),
             Some(gid) => {
                 if by_gid.contains_key(gid) {
-                    out.skipped.push(Skipped::new(
-                        SkipCode::DuplicateGlobalId,
-                        format!(
-                            "photo {} has the same global id as another photo",
-                            p.lightroom_id
-                        ),
-                    ));
+                    out.skipped.push(
+                        Skipped::new(
+                            SkipCode::DuplicateGlobalId,
+                            format!(
+                                "photo {} has the same global id as another photo",
+                                p.lightroom_id
+                            ),
+                        )
+                        .about(Subject::Photo(p.lightroom_id)),
+                    );
                 } else {
                     by_gid.insert(gid, p);
                 }
@@ -1259,14 +1272,17 @@ fn plan_photos(
                     // a LightCraft id. If the master was skipped at read
                     // time it is absent here and the copy cannot be created.
                     let Some(master_global_id) = master_gid.get(&master).copied() else {
-                        out.skipped.push(Skipped::new(
-                            SkipCode::VirtualCopy,
-                            format!(
-                                "photo {}: virtual copy of photo {} cannot be created, \
+                        out.skipped.push(
+                            Skipped::new(
+                                SkipCode::VirtualCopy,
+                                format!(
+                                    "photo {}: virtual copy of photo {} cannot be created, \
                                  the master was not converted",
-                                p.lightroom_id, master
-                            ),
-                        ));
+                                    p.lightroom_id, master
+                                ),
+                            )
+                            .about(Subject::Photo(p.lightroom_id)),
+                        );
                         continue;
                     };
                     out.steps.push(Step::VirtualCopy {
@@ -1275,13 +1291,16 @@ fn plan_photos(
                     });
                 } else {
                     if p.path.to_str().is_none() {
-                        out.skipped.push(Skipped::new(
-                            SkipCode::PathNotUtf8,
-                            format!(
-                                "photo {} has a file path that is not valid UTF-8",
-                                p.lightroom_id
-                            ),
-                        ));
+                        out.skipped.push(
+                            Skipped::new(
+                                SkipCode::PathNotUtf8,
+                                format!(
+                                    "photo {} has a file path that is not valid UTF-8",
+                                    p.lightroom_id
+                                ),
+                            )
+                            .about(Subject::Photo(p.lightroom_id)),
+                        );
                         continue;
                     }
                     out.steps.push(Step::Import {
@@ -1783,13 +1802,16 @@ fn plan_stacks(input: &WriteInput, state: &State, out: &mut Plan) {
             }
         }
         if gids.len() < 2 {
-            out.stack_skips.push(Skipped::new(
-                SkipCode::TooFewPhotos,
-                format!(
-                    "stack {}: fewer than two photos with a global id; not grouped",
-                    s.lightroom_id
-                ),
-            ));
+            out.stack_skips.push(
+                Skipped::new(
+                    SkipCode::TooFewPhotos,
+                    format!(
+                        "stack {}: fewer than two photos with a global id; not grouped",
+                        s.lightroom_id
+                    ),
+                )
+                .about(Subject::Stack(s.lightroom_id)),
+            );
             continue;
         }
         if let Some(shared) = gids.iter().find(|g| used.contains(*g)) {
@@ -1799,7 +1821,7 @@ fn plan_stacks(input: &WriteInput, state: &State, out: &mut Plan) {
                     "stack {}: shares photo {} with an earlier stack; a photo can be in only one stack; not grouped",
                     s.lightroom_id, shared
                 ),
-            ));
+            ).about(Subject::Stack(s.lightroom_id)));
             continue;
         }
         let recorded: &[String] = state
@@ -1894,13 +1916,16 @@ fn plan_collections(input: &WriteInput, state: &State, out: &mut Plan) {
                         wanted.push((*gid).to_string());
                     }
                 }
-                None => out.member_skips.push(Skipped::new(
-                    SkipCode::NoGlobalId,
-                    format!(
-                        "photo {member}: not added to an album; the photo is not converted or \
+                None => out.member_skips.push(
+                    Skipped::new(
+                        SkipCode::NoGlobalId,
+                        format!(
+                            "photo {member}: not added to an album; the photo is not converted or \
                          has no global id"
-                    ),
-                )),
+                        ),
+                    )
+                    .about(Subject::Photo(*member)),
+                ),
             }
         }
         let recorded: &[String] = state

@@ -844,3 +844,31 @@ fn a_second_run_gives_the_same_codes() {
         assert_eq!(a, b, "{name}");
     }
 }
+
+/// Every entry of the photos area names its photo, also the writer's
+/// failures, so `photo_counts` counts each failed photo as an error.
+#[test]
+fn photo_entries_name_their_photo_and_failures_count() {
+    for (name, run) in all_runs() {
+        let entries = run.report["entries"].as_array().unwrap();
+        let mut failed = BTreeSet::new();
+        for e in entries {
+            if e["area"] != "photos" {
+                continue;
+            }
+            assert!(e["photo"].is_i64(), "{name}: entry without its photo: {e}");
+            if e["status"] == "error" {
+                failed.insert(e["photo"].as_i64().unwrap());
+            }
+        }
+        let counted = run.report["photo_counts"]["error"].as_u64().unwrap() as usize;
+        assert!(
+            counted >= failed.len(),
+            "{name}: {counted} photos with errors counted, {} failed",
+            failed.len()
+        );
+        if name.contains("rejecting") {
+            assert!(!failed.is_empty(), "{name}: the failed import is an error");
+        }
+    }
+}

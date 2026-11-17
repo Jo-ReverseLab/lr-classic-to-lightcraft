@@ -8,7 +8,7 @@ use lc_writer::progress::{NoProgress, Phase, Progress};
 use lr_reader::{Catalog, KeywordData, checksum, drop_missing_originals};
 use model::{
     Collection, CollectionKind, Flag, Folder, Keyword, MappedPath, PathMappings, Photo,
-    QuickCollection, Rating, Report, SkipCode, SmartCollection, Stack,
+    QuickCollection, Rating, Report, SkipCode, Skipped, SmartCollection, Stack, Subject,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -304,12 +304,15 @@ pub fn run_with(
                 MappedPath::Mapped(new) => new,
                 MappedPath::Unchanged(orig) => orig,
                 MappedPath::Escaped(_) => {
-                    photos.skip(
-                        SkipCode::PathMappingEscaped,
-                        format!(
-                            "photo {}: path mapping would climb out of the new prefix",
-                            p.lightroom_id
-                        ),
+                    photos.push_skipped(
+                        Skipped::new(
+                            SkipCode::PathMappingEscaped,
+                            format!(
+                                "photo {}: path mapping would climb out of the new prefix",
+                                p.lightroom_id
+                            ),
+                        )
+                        .about(Subject::Photo(p.lightroom_id)),
                     );
                     continue;
                 }
@@ -341,12 +344,15 @@ pub fn run_with(
         let mut kept_before_originals: Vec<Photo> = Vec::with_capacity(mapped_photos.len());
         for (i, p) in mapped_photos.drain(..).enumerate() {
             if collisions.binary_search(&i).is_ok() {
-                photos.skip(
-                    SkipCode::PathMappingCollision,
-                    format!(
-                        "photo {}: path mapping collides with an earlier photo",
-                        p.lightroom_id
-                    ),
+                photos.push_skipped(
+                    Skipped::new(
+                        SkipCode::PathMappingCollision,
+                        format!(
+                            "photo {}: path mapping collides with an earlier photo",
+                            p.lightroom_id
+                        ),
+                    )
+                    .about(Subject::Photo(p.lightroom_id)),
                 );
             } else {
                 kept_before_originals.push(p);
