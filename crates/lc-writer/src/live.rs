@@ -37,6 +37,9 @@ pub struct LivePhoto {
     pub caption: Option<String>,
     pub copyright: Option<String>,
     pub creator: Option<String>,
+    /// LightCraft shows the photo as edited (development settings other
+    /// than its defaults). `false` when the answer does not say.
+    pub edited: bool,
 }
 
 /// One mapped album or album folder as LightCraft has it now.
@@ -273,6 +276,7 @@ fn parse_summary_page(value: &Value) -> Result<(usize, Vec<(Value, LivePhoto)>),
                 caption: None,
                 copyright: None,
                 creator: None,
+                edited: item["edited"].as_bool().unwrap_or(false),
             },
         ));
     }

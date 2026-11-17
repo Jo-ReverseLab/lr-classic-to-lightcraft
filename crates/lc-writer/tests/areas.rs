@@ -160,3 +160,33 @@ fn area_names_parse_and_list_in_a_fixed_order() {
     );
     assert!(Areas::ALL.not_selected().is_empty());
 }
+
+/// Development left out, then the photo edited in LightCraft: the next full
+/// run does not overwrite that edit without `overwrite_develop`.
+#[test]
+fn develop_selected_later_leaves_a_photo_edited_in_lightcraft_alone() {
+    let env = env();
+    env.run(&input(only(&[])));
+    let id = State::load(&env.state_file)
+        .unwrap()
+        .photo("g1")
+        .unwrap()
+        .lightcraft_id
+        .clone();
+    env.fake
+        .dispatch(
+            "develop.set",
+            serde_json::json!({"values": {"light.exposure": 1.0}, "ids": [id]}),
+            true,
+        )
+        .unwrap();
+    let (summary, sent) = env.run(&input(Areas::ALL));
+    assert!(!sent.contains("develop.set"), "{sent:?}");
+    assert_eq!(summary.develop_not_applied, 1);
+
+    let mut forced = input(Areas::ALL);
+    forced.overwrite_develop = true;
+    let (summary, sent) = env.run(&forced);
+    assert!(sent.contains("develop.set"), "{sent:?}");
+    assert_eq!(summary.develop_written, 1);
+}

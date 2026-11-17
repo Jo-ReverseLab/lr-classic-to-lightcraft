@@ -108,6 +108,11 @@ pub struct PhotoEntry {
     /// command of the photo succeeded, never after a failed one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub develop_hash: Option<String>,
+    /// lr2lc began writing development settings and no hash is recorded
+    /// yet (a command failed or the run stopped). The next run writes them
+    /// again even though LightCraft shows the photo as edited.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub develop_started: bool,
 }
 
 /// One keyword created in the library, with the attributes it was created
@@ -321,10 +326,17 @@ impl State {
         fields: PhotoFields,
     ) {
         let global_id = global_id.into();
-        let (copy_of, path, develop_hash) =
-            self.photos.get(&global_id).map_or((None, None, None), |e| {
-                (e.copy_of.clone(), e.path.clone(), e.develop_hash.clone())
-            });
+        let (copy_of, path, develop_hash, develop_started) =
+            self.photos
+                .get(&global_id)
+                .map_or((None, None, None, false), |e| {
+                    (
+                        e.copy_of.clone(),
+                        e.path.clone(),
+                        e.develop_hash.clone(),
+                        e.develop_started,
+                    )
+                });
         self.photos.insert(
             global_id,
             PhotoEntry {
@@ -334,6 +346,7 @@ impl State {
                 path,
                 copy_of,
                 develop_hash,
+                develop_started,
             },
         );
     }
@@ -361,8 +374,21 @@ impl State {
     /// succeeded, so an incomplete photo is written again by the next run.
     pub fn record_develop_hash(&mut self, global_id: &str, hash: Option<String>) -> bool {
         match self.photos.get_mut(global_id) {
-            Some(entry) if entry.develop_hash != hash => {
+            Some(entry) if entry.develop_hash != hash || entry.develop_started => {
+                entry.develop_started &= hash.is_none();
                 entry.develop_hash = hash;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Notes that lr2lc begins writing a photo's development settings.
+    /// Returns whether the entry changed.
+    pub fn mark_develop_started(&mut self, global_id: &str) -> bool {
+        match self.photos.get_mut(global_id) {
+            Some(entry) if !entry.develop_started => {
+                entry.develop_started = true;
                 true
             }
             _ => false,
@@ -389,6 +415,7 @@ impl State {
                 path: None,
                 copy_of: Some(master_global_id.into()),
                 develop_hash: None,
+                develop_started: false,
             },
         );
     }

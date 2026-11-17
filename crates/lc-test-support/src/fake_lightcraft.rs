@@ -322,6 +322,8 @@ struct Library {
     ratings: BTreeMap<i64, i64>,
     /// Field values of the seeded photos, by photo id.
     seeds: BTreeMap<i64, SeedPhoto>,
+    /// Photos with development settings (`edited` in `catalog.query`).
+    edited: BTreeSet<i64>,
     /// The ids of the selected photos (empty: nothing selected).
     selection: Vec<i64>,
     /// album id -> album
@@ -1007,6 +1009,7 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             if let Some(unknown) = ids.iter().find(|i| !lib.photos.values().any(|p| p == *i)) {
                 return Err(format!("unknown photo id {unknown}"));
             }
+            lib.edited.extend(ids);
             Ok(json!({}))
         }
         "develop.merge" => {
@@ -1021,6 +1024,8 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             if params.get("settings").and_then(Value::as_object).is_none() {
                 return Err("settings is missing".into());
             }
+            let selected = lib.selection.clone();
+            lib.edited.extend(selected);
             Ok(json!({}))
         }
         "photo.virtualCopy" => {
@@ -1660,6 +1665,7 @@ fn catalog_query(config: &Config, lib: &Library, params: &Value) -> Result<Value
             v["title"] = json!(seed.title);
             v["keywords"] = json!(seed.keywords);
             v["deleted"] = json!(seed.deleted);
+            v["edited"] = json!(lib.edited.contains(id));
             if config.summary_broken {
                 v["rating"] = json!("many");
             }

@@ -2217,9 +2217,7 @@ impl Run<'_> {
         };
         let lightroom_id = entry.lightroom_id;
         let id = entry.lightcraft_id.clone();
-        if let Some(c) = &mut self.current {
-            c.develop_pending = true;
-        }
+        self.start_develop(global_id);
         let result = self
             .client
             .execute("develop.set", json!({"values": values, "ids": [id]}));
@@ -2243,9 +2241,7 @@ impl Run<'_> {
             }
             Err(e) => return Err(e),
         }
-        if let Some(c) = &mut self.current {
-            c.develop_pending = true;
-        }
+        self.start_develop(global_id);
         let result = self
             .client
             .execute("develop.merge", json!({"settings": settings}));
@@ -2287,9 +2283,7 @@ impl Run<'_> {
                 return Ok(());
             }
         }
-        if let Some(c) = &mut self.current {
-            c.develop_pending = true;
-        }
+        self.start_develop(global_id);
         let result = self
             .client
             .execute("develop.set", json!({"values": values, "ids": [id]}));
@@ -2298,6 +2292,18 @@ impl Run<'_> {
             self.summary.develop_white_balance_written += 1;
         }
         Ok(())
+    }
+
+    /// Notes that the running photo's development settings are being
+    /// written, in the run and in the mapping file (see
+    /// [`State::mark_develop_started`]).
+    fn start_develop(&mut self, global_id: &str) {
+        if let Some(c) = &mut self.current {
+            c.develop_pending = true;
+        }
+        if self.state.mark_develop_started(global_id) {
+            self.unsaved = true;
+        }
     }
 
     /// Handles a develop command's reply like the field updates: a rejected or

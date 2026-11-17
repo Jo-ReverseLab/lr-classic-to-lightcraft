@@ -1354,7 +1354,19 @@ fn plan_photos(
             });
         }
         if let Some(develop) = p.develop.as_ref().filter(|_| input.areas.develop) {
-            plan_develop(gid, state.photo(gid), develop, input.overwrite_develop, out);
+            let edited = input
+                .live
+                .as_ref()
+                .and_then(|live| live.photos.get(gid))
+                .is_some_and(|live| live.edited);
+            plan_develop(
+                gid,
+                state.photo(gid),
+                edited,
+                develop,
+                input.overwrite_develop,
+                out,
+            );
         }
     }
     // Deterministic report order: by photo, then by the fixed field order.
@@ -1368,11 +1380,15 @@ fn plan_photos(
 ///
 /// A known photo whose recorded hash equals the source hash needs nothing.
 /// A different hash is only reported (`develop_not_applied`) unless
-/// `overwrite` is given, so a Lightroom change never overwrites silently. A
-/// mapping file without a hash plans one write.
+/// `overwrite` is given, so a Lightroom change never overwrites silently.
+/// Without a hash (development left out before, or written by an older
+/// version) the settings are written once, unless LightCraft shows the
+/// photo as `edited` by someone else: that is treated like a different
+/// hash. A photo whose earlier write lr2lc began itself is written again.
 fn plan_develop(
     global_id: &str,
     known: Option<&crate::state::PhotoEntry>,
+    edited: bool,
     develop: &Develop,
     overwrite: bool,
     out: &mut Plan,
@@ -1389,8 +1405,8 @@ fn plan_develop(
             {
                 return;
             }
-            None => {}
-            Some(_) => {
+            None if !edited || entry.develop_started => {}
+            _ => {
                 if !overwrite {
                     out.develop_not_applied += 1;
                     out.develop_not_applied_ids.push(global_id.to_string());
@@ -3020,7 +3036,7 @@ mod tests {
             ..Develop::default()
         };
         let mut out = Plan::default();
-        plan_develop("gid", None, &develop, false, &mut out);
+        plan_develop("gid", None, false, &develop, false, &mut out);
         assert_eq!(out.steps.len(), 2);
         let Step::DevelopSet { values, .. } = &out.steps[0] else {
             panic!("{:?}", out.steps[0]);
@@ -3032,6 +3048,44 @@ mod tests {
         };
         assert!(settings["masks"].is_array());
         assert_eq!(settings.as_object().map(|map| map.len()), Some(1));
+    }
+
+    #[test]
+    fn without_a_hash_a_photo_edited_in_lightcraft_is_left_alone() {
+        let develop = Develop {
+            controls: BTreeMap::from([("light.exposure".to_string(), 0.5)]),
+            source_hash: Some([7u8; 32]),
+            ..Develop::default()
+        };
+        let mut known = crate::state::PhotoEntry {
+            lightroom_id: 1,
+            lightcraft_id: json!(5),
+            fields: crate::state::PhotoFields::default(),
+            path: None,
+            copy_of: None,
+            develop_hash: None,
+            develop_started: false,
+        };
+        // Not edited in LightCraft: written once.
+        let mut out = Plan::default();
+        plan_develop("gid", Some(&known), false, &develop, false, &mut out);
+        assert_eq!(out.develop_planned, 1);
+        // Edited by someone else: reported, not overwritten.
+        let mut out = Plan::default();
+        plan_develop("gid", Some(&known), true, &develop, false, &mut out);
+        assert!(out.steps.is_empty());
+        assert_eq!(out.develop_not_applied, 1);
+        // ... unless asked to.
+        let mut out = Plan::default();
+        plan_develop("gid", Some(&known), true, &develop, true, &mut out);
+        assert_eq!(out.develop_planned, 1);
+        assert_eq!(out.develop_overwritten, 1);
+        // Edited by lr2lc's own unfinished write: written again.
+        known.develop_started = true;
+        let mut out = Plan::default();
+        plan_develop("gid", Some(&known), true, &develop, false, &mut out);
+        assert_eq!(out.develop_planned, 1);
+        assert_eq!(out.develop_not_applied, 0);
     }
 
     #[test]
@@ -3050,9 +3104,10 @@ mod tests {
             path: None,
             copy_of: None,
             develop_hash: Some(hex_hash(&source)),
+            develop_started: false,
         };
         let mut out = Plan::default();
-        plan_develop("gid", Some(&known), &develop, false, &mut out);
+        plan_develop("gid", Some(&known), false, &develop, false, &mut out);
         assert!(out.steps.is_empty(), "{:?}", out.steps);
         assert_eq!(out.develop_planned, 0);
     }
@@ -3136,9 +3191,10 @@ mod tests {
             path: None,
             copy_of: None,
             develop_hash: Some(hex_hash(&source)),
+            develop_started: false,
         };
         let mut out = Plan::default();
-        plan_develop("gid", Some(&known), &develop, false, &mut out);
+        plan_develop("gid", Some(&known), false, &develop, false, &mut out);
         assert!(out.steps.is_empty(), "{:?}", out.steps);
         assert_eq!(out.develop_planned, 0);
     }
@@ -3151,7 +3207,7 @@ mod tests {
             ..Develop::default()
         };
         let mut out = Plan::default();
-        plan_develop("gid", None, &develop, false, &mut out);
+        plan_develop("gid", None, false, &develop, false, &mut out);
         assert_eq!(out.steps.len(), 2);
         let Step::DevelopSet { values, .. } = &out.steps[0] else {
             panic!("{:?}", out.steps[0]);

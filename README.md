@@ -681,7 +681,13 @@ The mapping file records `develop_hash`, the SHA-256 of the settings text
 last written for a photo. On a later run the settings are compared by that
 hash:
 
-- a new photo, or one written by an older lr2lc without a hash, is written;
+- a new photo, or a known photo without a hash (development left out with
+  `--skip develop`, or written by an older lr2lc), is written, unless
+  LightCraft shows that photo as edited: then it is left alone and counted
+  as `not_applied` like a changed hash, so an edit made in LightCraft is
+  never overwritten silently. A photo whose earlier write lr2lc began but
+  did not finish (the mapping file marks it with `develop_started`) is
+  written again;
 - an unchanged hash sends nothing;
 - a changed hash of a known photo is left alone by default and counted as
   `not_applied`, because the settings may have been edited in Lightroom
@@ -896,7 +902,9 @@ photos again as duplicates and the keywords in the library's keyword list.
 A photo entry also gains `develop_hash` once its development settings were
 written (see [Development settings](#development-settings)). Files from an
 older lr2lc without the field still load; such a known photo is written
-once, which records the hash.
+once, which records the hash, unless LightCraft shows it as edited.
+`develop_started: true` marks a photo whose development write began and
+has no hash yet; it is cleared when the hash is recorded.
 
 Collections are kept under `collections`, keyed by the Lightroom collection
 id: `{"lightcraft_id": ..., "kind": "album" | "folder", "name": ...,

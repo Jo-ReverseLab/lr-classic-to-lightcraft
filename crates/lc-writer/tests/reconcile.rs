@@ -98,6 +98,7 @@ fn live_photo(
         caption: caption.map(str::to_string),
         copyright: copyright.map(str::to_string),
         creator: creator.map(str::to_string),
+        edited: false,
     }
 }
 
