@@ -183,6 +183,10 @@ fn develop_selected_later_leaves_a_photo_edited_in_lightcraft_alone() {
     let (summary, sent) = env.run(&input(Areas::ALL));
     assert!(!sent.contains("develop.set"), "{sent:?}");
     assert_eq!(summary.develop_not_applied, 1);
+    // A run with nothing else to do still leaves it alone.
+    let (summary, sent) = env.run(&input(Areas::ALL));
+    assert!(!sent.contains("develop.set"), "{sent:?}");
+    assert_eq!(summary.develop_not_applied, 1);
 
     let mut forced = input(Areas::ALL);
     forced.overwrite_develop = true;

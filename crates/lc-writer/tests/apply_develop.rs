@@ -233,8 +233,11 @@ fn a_second_run_with_unchanged_input_sends_no_develop_command() {
     );
 }
 
+/// A mapping file without `develop_hash` (from before 0.1.0): the photo
+/// LightCraft shows as edited is not overwritten silently; it is reported,
+/// and `overwrite_develop` writes it once and records the hash.
 #[test]
-fn a_mapping_file_without_a_develop_hash_gets_one_write_not_an_error() {
+fn a_mapping_file_without_a_develop_hash_is_not_an_error() {
     let env = env();
     let fake = FakeLightCraft::start(Config::new(&env.library));
     run(&fake, &env, &input(vec![photo("g1", 1, sliders(0x11))])).unwrap();
@@ -250,6 +253,13 @@ fn a_mapping_file_without_a_develop_hash_gets_one_write_not_an_error() {
         &env.state_file,
     )
     .expect("an older mapping file is not an error");
+    assert_eq!(summary.develop_not_applied, 1);
+    assert!(develop_commands(&fake, before).is_empty());
+
+    let before = fake.commands().len();
+    let mut forced = input(vec![photo("g1", 1, sliders(0x11))]);
+    forced.overwrite_develop = true;
+    let summary = apply(&mut client, &forced, &mut state, &env.state_file).unwrap();
     assert_clean(&summary);
     let develop = develop_commands(&fake, before);
     assert_eq!(develop.len(), 1, "{develop:?}");

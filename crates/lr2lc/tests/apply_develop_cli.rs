@@ -480,8 +480,11 @@ fn a_catalog_without_develop_settings_reports_zero_and_writes_nothing() {
     assert!(develop_commands(&fake.commands(), 0).is_empty());
 }
 
+/// A mapping file from before 0.1.0 has no `develop_hash`. LightCraft shows
+/// the photo as edited (by that earlier run), so it is reported, never
+/// overwritten silently; `--overwrite-develop` writes it once.
 #[test]
-fn an_old_mapping_file_without_develop_hash_is_written_once() {
+fn an_old_mapping_file_without_develop_hash_needs_the_overwrite_flag() {
     let s = Setup::sliders();
     let fake = FakeLightCraft::start(Config::new(&s.library));
     s.ok(&s.catalog, fake.port(), true, &[]);
@@ -498,13 +501,17 @@ fn an_old_mapping_file_without_develop_hash_is_written_once() {
 
     let before = fake.commands().len();
     let report = s.ok(&s.catalog, fake.port(), true, &[]);
-    let d = develop(&report);
+    assert!(develop_commands(&fake.commands(), before).is_empty());
+    assert_eq!(n(&develop(&report)["not_applied"]), 1);
+
+    let before = fake.commands().len();
+    let report = s.ok(&s.catalog, fake.port(), true, &["--overwrite-develop"]);
     assert_eq!(
         develop_commands(&fake.commands(), before).len(),
         1,
         "one write, not an error"
     );
-    assert_eq!(n(&d["written"]), 1);
+    assert_eq!(n(&develop(&report)["written"]), 1);
 }
 
 #[test]

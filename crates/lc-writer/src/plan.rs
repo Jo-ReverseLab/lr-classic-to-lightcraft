@@ -939,7 +939,8 @@ pub fn plan(input: &WriteInput, state: &State, library_keywords: &BTreeSet<Strin
 
 /// Whether reconciling at least one known photo needs the live values from
 /// LightCraft: a field or a keyword membership changed in Lightroom since the
-/// last import. If nothing changed in Lightroom, the live value can never
+/// last import, or development settings without a recorded hash wait to be
+/// written. If nothing changed in Lightroom, the live value can never
 /// change the outcome (rule: `lr == last` means nothing is written), so an
 /// apply run can skip the read and a second run sends no extra commands.
 pub(crate) fn needs_live(input: &WriteInput, state: &State) -> bool {
@@ -951,6 +952,15 @@ pub(crate) fn needs_live(input: &WriteInput, state: &State) -> bool {
         let Some(entry) = state.photo(global_id) else {
             return false;
         };
+        // Development settings without a recorded hash are written only if
+        // LightCraft does not show the photo as edited (see `plan_develop`).
+        if input.areas.develop
+            && entry.develop_hash.is_none()
+            && !entry.develop_started
+            && photo.develop.as_ref().is_some_and(has_develop_content)
+        {
+            return true;
+        }
         let keywords = input
             .photo_keywords
             .get(&photo.lightroom_id)

@@ -906,8 +906,9 @@ photos again as duplicates and the keywords in the library's keyword list.
 
 A photo entry also gains `develop_hash` once its development settings were
 written (see [Development settings](#development-settings)). Files from an
-older lr2lc without the field still load; such a known photo is written
-once, which records the hash, unless LightCraft shows it as edited.
+lr2lc from before 0.1.0 without the field still load; such a known photo
+is written once, which records the hash, unless LightCraft shows it as
+edited (then `--overwrite-develop` writes it once).
 `develop_started: true` marks a photo whose development write began and
 has no hash yet; it is cleared when the hash is recorded.
 
