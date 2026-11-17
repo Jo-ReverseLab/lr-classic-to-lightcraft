@@ -191,3 +191,28 @@ fn a_cancel_after_the_batches_takes_every_imported_photo_back() {
     assert!(done.failed.is_empty(), "{:?}", done.failed);
     assert!(fake.photos().is_empty());
 }
+
+/// The keywords are created before any file is imported, batched or not:
+/// LightCraft adds a sidecar's keywords on import.
+#[test]
+fn keywords_are_created_before_the_batches() {
+    let dir = tempfile::tempdir().unwrap();
+    let library = dir.path().join("Test.lightcraft");
+    let state_file = lc_writer::state::state_path(&library);
+    let fake = FakeLightCraft::start(Config::new(&library));
+    let mut client = ControlClient::connect(fake.port()).unwrap();
+    let mut photos = input(110);
+    photos.photo_keywords.insert(
+        5,
+        vec![model::Keyword::new(vec!["Trip".to_string()]).unwrap()],
+    );
+    apply_partial(&mut client, &photos, &mut State::default(), &state_file).unwrap();
+    let commands: Vec<String> = fake.commands().into_iter().map(|(c, _)| c).collect();
+    let first_import = commands.iter().position(|c| c == "library.import").unwrap();
+    let last_keyword = commands
+        .iter()
+        .rposition(|c| c == "keyword.create")
+        .unwrap();
+    assert!(last_keyword < first_import, "{commands:?}");
+    assert_eq!(imports(&fake), [64, 46]);
+}

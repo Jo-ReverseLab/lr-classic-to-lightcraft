@@ -758,7 +758,7 @@ fn wanting(input: &WriteInput, steps: &[Step]) -> BTreeMap<CollectionKey, usize>
 impl Run<'_> {
     fn steps(&mut self, steps: &[Step]) -> Result<(), WriteError> {
         self.progress.phase(Phase::Writing, steps.len());
-        self.prefetch_imports(steps)?;
+        let mut batched = false;
         for (done, step) in steps.iter().enumerate() {
             if self.progress.cancelled() && self.starts_unit(step) {
                 // The photo before has all its steps done; the fields of
@@ -766,6 +766,13 @@ impl Run<'_> {
                 // any other stop, so their updates are sent again.
                 self.finish_photo()?;
                 return Err(WriteError::Cancelled);
+            }
+            // Batches go out at the first import, after the keywords are
+            // created: LightCraft adds the keywords of a file's XMP sidecar
+            // on import, and `keyword.create` refuses a keyword that exists.
+            if !batched && matches!(step, Step::Import { .. }) {
+                batched = true;
+                self.prefetch_imports(&steps[done..])?;
             }
             self.progress.advance(done);
             let before = self.tally();
