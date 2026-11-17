@@ -94,6 +94,9 @@ pub struct Converted {
 pub struct Names {
     pub photos: BTreeMap<i64, std::path::PathBuf>,
     pub collections: BTreeMap<i64, String>,
+    /// Lightroom ids of converted photos whose development settings could
+    /// not be read; they are transferred without them.
+    pub develop_unreadable: Vec<i64>,
 }
 
 /// Counts over the converted stacks.
@@ -295,6 +298,7 @@ pub fn run_with(
         for p in &photo_data.photos {
             names.photos.insert(p.lightroom_id, p.path.clone());
         }
+        names.develop_unreadable = photo_data.develop_invalid.clone();
         for mut p in photo_data.photos {
             p.path = match mappings.classify(&p.path) {
                 MappedPath::Mapped(new) => new,
@@ -326,8 +330,10 @@ pub fn run_with(
             .iter()
             .map(|&i| mapped_photos[i].path.as_path())
             .collect();
-        let mut collisions: Vec<usize> = mappings
-            .collisions(&master_paths)
+        // The paths are mapped already; mapping them again would turn a path
+        // that happens to start with another rule's prefix into a false
+        // collision.
+        let mut collisions: Vec<usize> = model::mapping::duplicate_paths(&master_paths)
             .into_iter()
             .map(|j| master_indices[j])
             .collect();

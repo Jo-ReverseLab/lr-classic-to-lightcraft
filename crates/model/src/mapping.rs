@@ -226,6 +226,18 @@ impl PathMappings {
     }
 }
 
+/// The indices of the paths in `paths` that equal an earlier one, ascending.
+/// For paths that are already mapped: nothing is mapped again here.
+pub fn duplicate_paths(paths: &[&Path]) -> Vec<usize> {
+    let mut seen: HashSet<&Path> = HashSet::new();
+    paths
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| !seen.insert(**p))
+        .map(|(i, _)| i)
+        .collect()
+}
+
 fn is_separator(c: char) -> bool {
     c == '/' || c == '\\'
 }
@@ -360,5 +372,17 @@ mod tests {
         let p = Path::new(OsStr::from_bytes(b"/data/\xff.jpg"));
         assert_eq!(m.apply(p), None);
         assert_eq!(m.map(p), p.to_path_buf());
+    }
+
+    #[test]
+    fn mapped_paths_are_compared_as_they_are() {
+        // `/a/x.jpg` came from `/c/x.jpg` by `/c=/a`; with a rule `/a=/b`
+        // mapping it again would make it collide with `/b/x.jpg`.
+        let paths = [
+            Path::new("/b/x.jpg"),
+            Path::new("/a/x.jpg"),
+            Path::new("/b/x.jpg"),
+        ];
+        assert_eq!(duplicate_paths(&paths), [2]);
     }
 }

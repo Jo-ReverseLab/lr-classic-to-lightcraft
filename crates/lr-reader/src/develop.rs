@@ -394,8 +394,9 @@ impl<'a> Parser<'a> {
                 if self.peek() == Some(b'=') {
                     Ok(Some(self.text[start..end].to_owned()))
                 } else {
-                    // Not a field name: a bare identifier used as a value.
-                    self.pos = end;
+                    // Not a field name: a bare identifier used as a value
+                    // (`true`, `false`); leave it for the value parser.
+                    self.pos = start;
                     Ok(None)
                 }
             }
@@ -1635,9 +1636,11 @@ fn merge_brush_parts(parts: Vec<MaskComponent>) -> Vec<MaskComponent> {
     let mut merged: Vec<MaskComponent> = Vec::new();
     for part in parts {
         if let MaskShape::Brush { strokes } = &part.shape
+            // Only the component right before: merging across another
+            // component would change the order the mask is combined in.
             && let Some(previous) = merged
-                .iter_mut()
-                .find(|other| other.op == part.op && matches!(other.shape, MaskShape::Brush { .. }))
+                .last_mut()
+                .filter(|other| other.op == part.op && matches!(other.shape, MaskShape::Brush { .. }))
             && let MaskShape::Brush {
                 strokes: previous_strokes,
             } = &mut previous.shape
@@ -3208,5 +3211,39 @@ mod tests {
         );
         assert!(develop.masks[0].invert);
         assert!(!develop.masks[0].components[0].invert);
+    }
+
+    #[test]
+    fn a_positional_boolean_does_not_make_the_text_unreadable() {
+        let develop = parse_develop("s = { Exposure2012 = 1, Flags = { true, false } }").unwrap();
+        assert_eq!(develop.controls.get("light.exposure"), Some(&1.0));
+    }
+
+    #[test]
+    fn only_adjacent_brush_components_are_merged() {
+        let brush = |op| MaskComponent {
+            op,
+            invert: false,
+            shape: MaskShape::Brush {
+                strokes: Vec::new(),
+            },
+        };
+        let other = MaskComponent {
+            op: MaskOp::Subtract,
+            invert: false,
+            shape: MaskShape::Sky,
+        };
+        let merged = merge_brush_parts(vec![
+            brush(MaskOp::Add),
+            brush(MaskOp::Add),
+            other.clone(),
+            brush(MaskOp::Add),
+        ]);
+        assert_eq!(
+            merged.len(),
+            3,
+            "the brush after the sky stays its own part"
+        );
+        assert_eq!(merged[1], other);
     }
 }

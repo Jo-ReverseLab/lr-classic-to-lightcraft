@@ -109,6 +109,12 @@ The first release is 0.1.0.
 
 ### Fixed
 
+- Audit (docs/audit-2026-11.md): a photo whose development settings cannot
+  be read is now reported (`develop_unreadable`); a positional `true`/`false`
+  no longer makes a settings text unreadable; mapped paths are no longer
+  mapped twice for the collision check; brush mask components are merged
+  only when adjacent; the window no longer shows a stopped transfer as
+  finished and no longer parses reports per frame.
 - AI mask and range-mask codes are read when the catalog stores them as
   numbers, as Lightroom Classic does; before, every subject or sky mask from
   a catalog was reported as `Mask: AI mask (?)` (#11).

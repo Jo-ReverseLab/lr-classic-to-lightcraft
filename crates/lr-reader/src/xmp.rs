@@ -121,8 +121,13 @@ fn decode_entities(s: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         let tail = &rest[i..];
-        match tail
-            .find(';')
+        // An entity is short; looking further would make a text full of
+        // `&` quadratic.
+        let window = &tail[..tail.len().min(12)];
+        match window
+            .char_indices()
+            .find(|(_, c)| *c == ';')
+            .map(|(j, _)| j)
             .and_then(|j| entity(&tail[1..j]).map(|c| (c, j)))
         {
             Some((c, j)) => {

@@ -190,11 +190,15 @@ pub struct Sources<'a> {
     /// The run's summary, when it wrote; `None` in a dry run.
     pub applied: Option<&'a ApplySummary>,
     pub not_selected: &'a [&'static str],
+    /// Converted photos whose development settings could not be read.
+    pub develop_unreadable: &'a [i64],
 }
 
 /// The whole log, in run order: reading, areas left out, the steps, then
 /// what the writer skipped, failed or found in conflict.
-pub fn build(sources: &Sources<'_>, names: Names) -> Log {
+pub fn build(sources: &Sources<'_>, mut names: Names) -> Log {
+    // Only needed to build the entries.
+    names.develop_unreadable = Vec::new();
     Log {
         entries: entries(sources),
         by_gid: by_gid(sources.input),
@@ -406,6 +410,21 @@ fn entries_unnamed(sources: &Sources<'_>) -> Vec<RawEntry> {
             ));
             out.push(raw(entry, None));
         }
+    }
+    for id in sources.develop_unreadable {
+        let entry = Entry::new(
+            Status::Error,
+            Area::Develop,
+            Stage::Read,
+            Subject::Photo(*id),
+            "Development settings cannot be read; the photo is transferred without them",
+        )
+        .code("develop_unreadable")
+        .reason("The settings text in the catalog is damaged, of an unexpected kind or too large.");
+        out.push(raw(
+            entry,
+            Some("Open the photo in Lightroom and save its settings again, then run again."),
+        ));
     }
     for removed in plan.removed_photos() {
         let entry = Entry::new(

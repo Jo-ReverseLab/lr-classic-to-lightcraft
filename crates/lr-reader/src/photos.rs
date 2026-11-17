@@ -522,6 +522,7 @@ fn unreadable_path(id: i64, component: &str, cell: &TextCell) -> Skipped {
             cell.problem().unwrap_or("is not usable text")
         ),
     )
+    .about(Subject::Photo(id))
 }
 
 /// File extensions (lower case, without dot) that mark a video.

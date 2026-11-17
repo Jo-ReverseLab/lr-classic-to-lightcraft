@@ -277,6 +277,7 @@ fn finish_by(
             plan: &plan,
             applied: applied.as_ref(),
             not_selected: &not_selected,
+            develop_unreadable: &names.develop_unreadable.clone(),
         },
         names,
     );
