@@ -115,6 +115,43 @@ pub struct LogState {
     pub anonymize_save: bool,
     /// The search field's id, to leave arrow keys to it while it has focus.
     pub search_id: Option<egui::Id>,
+    /// The entries that pass the filters and, when grouped, their photos;
+    /// recomputed only when the report, the filters or the grouping change.
+    pub visible: Vec<usize>,
+    pub groups: Option<Vec<crate::logdata::PhotoGroup>>,
+    cached_for: Option<(Filter, bool, usize)>,
+    /// Scroll the list so that this row is in view.
+    pub scroll_to: Option<usize>,
+}
+
+impl LogState {
+    /// Brings `visible` and `groups` up to date.
+    pub fn refresh(&mut self) {
+        let key = (
+            self.filter.clone(),
+            self.group_by_photo,
+            self.data.rows.len(),
+        );
+        if self.cached_for.as_ref() == Some(&key) {
+            return;
+        }
+        self.visible = self.data.filtered(&self.filter);
+        self.groups = self
+            .group_by_photo
+            .then(|| self.data.by_photo(&self.visible));
+        // Keep a selection only while it is still shown.
+        if let Some(sel) = self.selected
+            && self.visible.binary_search(&sel).is_err()
+        {
+            self.selected = None;
+        }
+        if let (Some(sel), Some(groups)) = (self.selected_photo, &self.groups)
+            && !groups.iter().any(|g| g.photo == sel)
+        {
+            self.selected_photo = None;
+        }
+        self.cached_for = Some(key);
+    }
 }
 
 /// The whole window.
@@ -465,6 +502,7 @@ impl App {
         self.log.anonymized_text = anonymized;
         self.log.selected = None;
         self.log.selected_photo = None;
+        self.log.cached_for = None;
         self.log.copied = false;
         self.log.saved = None;
     }

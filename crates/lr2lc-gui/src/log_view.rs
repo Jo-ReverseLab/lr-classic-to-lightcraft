@@ -28,6 +28,7 @@ pub fn ui(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
         });
         return;
     }
+    app.log.refresh();
     keyboard(app, ui);
     columns(ui, &[2.0, 1.0], 1000.0, |ui, column| match column {
         0 => {
@@ -265,25 +266,11 @@ fn tilde(path: &str) -> String {
 const COLS: [f32; 2] = [150.0, 150.0];
 
 fn entries(app: &mut App, ui: &mut Ui, t: &Tokens) {
-    let visible = app.log.data.filtered(&app.log.filter);
-    // Keep the selection only while its entry is visible.
-    if let Some(sel) = app.log.selected
-        && !visible.contains(&sel)
-    {
-        app.log.selected = None;
-    }
+    // Taken out for the frame so the rows can be drawn while `app` is used.
+    let visible = std::mem::take(&mut app.log.visible);
+    let groups = app.log.groups.take();
     let total = app.log.data.rows.len();
-    let groups = if app.log.group_by_photo {
-        let groups = app.log.data.by_photo(&visible);
-        if let Some(sel) = app.log.selected_photo
-            && !groups.iter().any(|g| g.photo == sel)
-        {
-            app.log.selected_photo = None;
-        }
-        Some(groups)
-    } else {
-        None
-    };
+    let scroll_to = app.log.scroll_to.take();
     card(ui, t, None, |ui| {
         Frame::new()
             .inner_margin(Margin::symmetric(16, 8))
@@ -333,10 +320,13 @@ fn entries(app: &mut App, ui: &mut Ui, t: &Tokens) {
                     && !groups.is_empty()
                 {
                     let height = (groups.len() as f32 * 48.0).min(440.0);
-                    egui::ScrollArea::vertical()
+                    let mut area = egui::ScrollArea::vertical()
                         .id_salt("photos")
-                        .max_height(440.0)
-                        .min_scrolled_height(height)
+                        .max_height(440.0);
+                    if let Some(row) = scroll_to {
+                        area = area.vertical_scroll_offset((row as f32 * 48.0 - 196.0).max(0.0));
+                    }
+                    area.min_scrolled_height(height)
                         .auto_shrink([false, true])
                         .show_rows(ui, 48.0, groups.len(), |ui, range| {
                             ui.spacing_mut().item_spacing.y = 0.0;
@@ -364,10 +354,13 @@ fn entries(app: &mut App, ui: &mut Ui, t: &Tokens) {
                     return;
                 }
                 let height = (visible.len() as f32 * 48.0).min(440.0);
-                egui::ScrollArea::vertical()
+                let mut area = egui::ScrollArea::vertical()
                     .id_salt("entries")
-                    .max_height(440.0)
-                    .min_scrolled_height(height)
+                    .max_height(440.0);
+                if let Some(row) = scroll_to {
+                    area = area.vertical_scroll_offset((row as f32 * 48.0 - 196.0).max(0.0));
+                }
+                area.min_scrolled_height(height)
                     .auto_shrink([false, true])
                     .show_rows(ui, 48.0, visible.len(), |ui, range| {
                         ui.spacing_mut().item_spacing.y = 0.0;
@@ -382,6 +375,8 @@ fn entries(app: &mut App, ui: &mut Ui, t: &Tokens) {
                     });
             });
     });
+    app.log.visible = visible;
+    app.log.groups = groups;
 }
 
 fn cell_xs(left: f32, width: f32) -> [f32; 4] {
@@ -492,16 +487,13 @@ fn keyboard(app: &mut App, ui: &mut Ui) {
     {
         return;
     }
-    let visible = app.log.data.filtered(&app.log.filter);
+    let visible = &app.log.visible;
     // Grouped: move through the photos; else through the entries.
-    let photos: Option<Vec<i64>> = app.log.group_by_photo.then(|| {
-        app.log
-            .data
-            .by_photo(&visible)
-            .iter()
-            .map(|g| g.photo)
-            .collect()
-    });
+    let photos: Option<Vec<i64>> = app
+        .log
+        .groups
+        .as_ref()
+        .map(|groups| groups.iter().map(|g| g.photo).collect());
     let count = photos.as_ref().map_or(visible.len(), Vec::len);
     if count == 0 {
         return;
@@ -530,23 +522,24 @@ fn keyboard(app: &mut App, ui: &mut Ui) {
         }
     });
     if let Some(p) = next {
+        let entry = visible.get(p).copied();
         match &photos {
             Some(photos) => app.log.selected_photo = photos.get(p).copied(),
-            None => app.log.selected = visible.get(p).copied(),
+            None => app.log.selected = entry,
         }
+        app.log.scroll_to = Some(p);
         app.log.copied = false;
     }
 }
 
 /// Everything the log has about one photo.
 fn photo_details(app: &mut App, ui: &mut Ui, t: &Tokens, photo: i64) {
-    let visible = app.log.data.filtered(&app.log.filter);
     let Some(group) = app
         .log
-        .data
-        .by_photo(&visible)
-        .into_iter()
-        .find(|g| g.photo == photo)
+        .groups
+        .as_ref()
+        .and_then(|groups| groups.iter().find(|g| g.photo == photo))
+        .cloned()
     else {
         return;
     };
