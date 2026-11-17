@@ -502,7 +502,8 @@ read, and lr2lc stops with exit code 2 if:
 
 `report.json` ends with the run log: `entry_counts` (entries per status)
 and `entries`, one entry per thing that was done, adjusted, skipped, in
-conflict or failed, in run order. The summary counts them in a line
+conflict or failed: what the catalog read found first, then what the run
+did in the order it did it, then the failures and skips by area. The summary counts them in a line
 `log entries (one per photo, field, keyword and album): adjusted N, …`,
 after a line that counts each photo once: `photos: N in the catalog,
 transferred N, unchanged N, skipped N, conflict N, error N` (also in
@@ -737,9 +738,10 @@ lr2lc reads the catalog as in a dry run, then checks the app before it writes an
   touches the originals, so it refuses this unless you turn XMP auto-write
   off in LightCraft or allow it explicitly with `--allow-xmp`.
 
-Then it creates the missing keywords (parents first), imports each photo on
-its own as a reference (`mode: add`, the file stays where it is) and sets
-the fields that differ. LightCraft applies rating, flag, label and metadata
+Then it creates the missing keywords (parents first), imports each photo as
+a reference (`mode: add`, the file stays where it is; from 100 photos on in
+batches of 64, each photo still recorded on its own) and sets the fields
+that differ. LightCraft applies rating, flag, label and metadata
 commands only to selected photos, so lr2lc selects each photo before its
 first update; this changes the selection in LightCraft, which afterwards
 holds the last updated photo. A select is not counted as an update.
@@ -892,8 +894,10 @@ unknown`. After a complete run `aborted` is absent.
 lr2lc remembers what it wrote in `<library folder name>.lr2lc.json` next to
 the library folder, e.g. `Photos.lightcraft.lr2lc.json`. It maps each
 photo's Lightroom global id to its LightCraft id and keeps the values last
-written. It is saved after every finished step, so an interrupted run loses
-nothing. A step LightCraft applied but did not save (`AppliedNotSaved`) is
+written. A record the next run could not find again (a created keyword,
+album or virtual copy) is saved at once; imports and field values, which
+the next run finds again by path or compares anew, are saved at most once a
+second and on every exit, so an interrupted run loses nothing. A step LightCraft applied but did not save (`AppliedNotSaved`) is
 not recorded: the next run sends it again (field updates are idempotent; a
 keyword is looked up with `keyword.list` before it is created, so no
 duplicate is made). A second run sends only what changed in Lightroom since
@@ -1007,6 +1011,13 @@ counts the smart collections converted as smart albums.
 - The CI workflow runs format, lint and tests on Linux, macOS and Windows; pull requests run on Linux only.
 - Only `127.0.0.1` is contacted; a LightCraft app on another machine is not
   supported.
+- LightCraft reads an XMP sidecar next to an original when it imports the
+  file (rating, label, keywords, development settings). lr2lc records a new
+  photo with LightCraft's import defaults and writes only the Lightroom
+  values that differ from them, so a value from a sidecar that Lightroom
+  does not have (for example stars in the sidecar, none in the catalog) can
+  stay in LightCraft. Turn off “Automatically write changes into XMP” in
+  Lightroom, or remove stale sidecars, before the first transfer.
 
 ### Exit codes
 

@@ -1831,13 +1831,22 @@ fn plan_stacks(input: &WriteInput, state: &State, out: &mut Plan) {
             continue;
         }
         if let Some(shared) = gids.iter().find(|g| used.contains(*g)) {
-            out.stack_skips.push(Skipped::new(
-                SkipCode::AlreadyInStack,
-                format!(
-                    "stack {}: shares photo {} with an earlier stack; a photo can be in only one stack; not grouped",
-                    s.lightroom_id, shared
-                ),
-            ).about(Subject::Stack(s.lightroom_id)));
+            // Named by its Lightroom id, like every other reason.
+            let photo = s
+                .members
+                .iter()
+                .find(|m| global_ids.get(*m).is_some_and(|g| g == shared))
+                .map_or_else(|| "?".to_string(), i64::to_string);
+            out.stack_skips.push(
+                Skipped::new(
+                    SkipCode::AlreadyInStack,
+                    format!(
+                        "stack {}: shares photo {photo} with an earlier stack; a photo can be in only one stack; not grouped",
+                        s.lightroom_id
+                    ),
+                )
+                .about(Subject::Stack(s.lightroom_id)),
+            );
             continue;
         }
         let recorded: &[String] = state
