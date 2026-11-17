@@ -707,7 +707,8 @@ carries the same numbers in its top-level `develop` area (`photos`, `planned`,
 dry run.
 `unmapped` lists at most 20 distinct field names, sorted; `unmapped_count`
 is the full count. `camera_profiles` maps each profile name to the number of
-converted photos, sorted, at most 20 entries; `camera_profiles_count` is the
+converted photos, sorted, at most 20 entries (empty with `--anonymize`,
+since the names are catalog values); `camera_profiles_count` is the
 full number of distinct names and `photos_with_profile` the number of
 converted photos with a profile. Neither the report nor the summary ever
 holds a rendering value.

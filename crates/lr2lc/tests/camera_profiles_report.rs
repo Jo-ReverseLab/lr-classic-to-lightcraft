@@ -34,8 +34,8 @@ mod perf_support;
 
 use lrcat_fixtures::develop::{profile as p, write_camera_profile_catalog_with_files};
 use perf_support::{
-    assert_catalog_unchanged, assert_no_state_file, assert_report_invariants, dry_run, exit_ok,
-    read_report,
+    assert_catalog_unchanged, assert_no_state_file, assert_report_invariants, dry_run,
+    dry_run_named, exit_ok, read_report,
 };
 use serde_json::Value;
 use std::fs;
@@ -50,7 +50,7 @@ fn setup() -> (tempfile::TempDir, PathBuf, PathBuf) {
 }
 
 fn run(catalog: &Path, report: &Path) -> (Output, Value) {
-    let output = dry_run(catalog, report);
+    let output = dry_run_named(catalog, report);
     exit_ok(&output);
     (output, read_report(report))
 }
@@ -247,4 +247,19 @@ fn the_mandatory_invariants_hold_for_the_profile_fixture() {
     );
     assert_catalog_unchanged(&catalog, &before);
     assert_no_state_file(_dir.path());
+}
+
+#[test]
+fn an_anonymized_report_counts_profiles_without_their_names() {
+    let (_dir, catalog, report_path) = setup();
+    let output = dry_run(&catalog, &report_path);
+    exit_ok(&output);
+    let report = read_report(&report_path);
+    assert!(profiles(&report).is_empty(), "{}", develop(&report));
+    assert_eq!(
+        count(&report, "camera_profiles_count"),
+        p::DISTINCT_PROFILES
+    );
+    let text = std::fs::read_to_string(&report_path).unwrap();
+    assert!(!text.contains(p::STUDIO));
 }

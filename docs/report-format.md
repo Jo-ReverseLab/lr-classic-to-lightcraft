@@ -162,7 +162,7 @@ rendering value.
 | `develop.unmapped_photos` | object | always | every unmapped field name (sorted, not capped) with the number of converted photos that carry it; names and counts only |
 | `develop.not_applied` | integer | always | known photos whose settings changed in Lightroom and were left alone |
 | `develop.overwritten` | integer | always | photos rewritten because `--overwrite-develop` was given |
-| `develop.camera_profiles` | object | always, may be `{}` | profile name → number of converted photos, sorted, at most 20 entries |
+| `develop.camera_profiles` | object | always, may be `{}` | profile name → number of converted photos, sorted, at most 20 entries; `{}` in an anonymized report |
 | `develop.camera_profiles_count` | integer | always | full number of distinct profile names, also above the cap |
 | `develop.photos_with_profile` | integer | always | converted photos with a non-empty profile name |
 | `develop.masks` | integer | always | converted photos with at least one mask (local correction) |

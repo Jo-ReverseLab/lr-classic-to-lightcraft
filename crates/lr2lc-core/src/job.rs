@@ -369,11 +369,21 @@ impl Finished {
     /// catalog left out when `anonymize` is set.
     pub fn report_json_as(&self, anonymize: bool) -> String {
         let entries = self.log.render(anonymize);
+        // Profile names are catalog values; the counts stay.
+        let anonymous_develop;
+        let develop = if anonymize && !self.develop.camera_profiles.is_empty() {
+            let mut d = self.develop.clone();
+            d.camera_profiles.clear();
+            anonymous_develop = d;
+            &anonymous_develop
+        } else {
+            &self.develop
+        };
         output::report_json_with(
             &self.outcome,
             self.dry_run,
             Some(&self.writer),
-            &self.develop,
+            develop,
             &self.not_selected,
             &self.timing,
             Some(output::LogJson {

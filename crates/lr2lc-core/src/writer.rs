@@ -27,7 +27,7 @@ pub enum WriterJson {
 }
 
 /// The top-level `develop` section of `report.json`.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct DevelopJson {
     /// Converted photos that carry development settings.
     pub photos: usize,

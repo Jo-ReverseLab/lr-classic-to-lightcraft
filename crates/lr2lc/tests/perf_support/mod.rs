@@ -36,6 +36,16 @@ pub fn dry_run(catalog: &Path, report: &Path) -> Output {
         .expect("lr2lc starts")
 }
 
+/// Like [`dry_run`], but the report keeps names (no `--anonymize`).
+pub fn dry_run_named(catalog: &Path, report: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_lr2lc"))
+        .arg(catalog)
+        .arg("--report")
+        .arg(report)
+        .output()
+        .expect("lr2lc starts")
+}
+
 /// Decodes captured output for failure messages.
 pub fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
