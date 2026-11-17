@@ -4,6 +4,7 @@
 //! LightCraft (the control port here, a host's own command dispatch when the
 //! window lives inside LightCraft) is the [`crate::host::Host`]'s business.
 
+use crate::logdata::{LogData, ScanSummary};
 use lr2lc_core::log::{Log, LogEntry};
 use lr2lc_core::{CommandSink, ErrorKind, Job, Phase, Progress, finish, finish_with, prepare};
 use model::{Entry, Stage};
@@ -36,6 +37,10 @@ pub struct RunResult {
     pub report_text: String,
     /// `report.json` without names, paths and values.
     pub anonymized_text: String,
+    /// The report's log, parsed off the UI thread.
+    pub data: LogData,
+    /// The numbers of the Transfer screen.
+    pub summary: Option<ScanSummary>,
     /// Why the run failed or stopped.
     pub error: Option<(ErrorKind, String)>,
 }
@@ -46,6 +51,8 @@ impl RunResult {
             apply,
             report_text: String::new(),
             anonymized_text: String::new(),
+            data: LogData::default(),
+            summary: None,
             error: Some((kind, message)),
         }
     }
@@ -105,6 +112,17 @@ pub fn execute(
     progress: &mut ChannelProgress,
     sink: Option<&mut dyn CommandSink>,
 ) -> RunResult {
+    execute_as(job, progress, sink, false)
+}
+
+/// [`execute`]; a `scan` only needs the summary, so its report texts and
+/// log are dropped.
+pub fn execute_as(
+    job: &Job,
+    progress: &mut ChannelProgress,
+    sink: Option<&mut dyn CommandSink>,
+    scan: bool,
+) -> RunResult {
     let prepared = match prepare(job, progress) {
         Ok(prepared) => prepared,
         Err(e) => return RunResult::failed(job.apply, e.kind, e.to_string()),
@@ -126,11 +144,27 @@ pub fn execute(
         Ok(finished) => finished,
         Err(e) => return RunResult::failed(job.apply, e.kind, e.to_string()),
     };
+    let report_text = finished.report_json_as(false);
+    let value: serde_json::Value = serde_json::from_str(&report_text).unwrap_or_default();
+    let summary = Some(ScanSummary::from_report(&value));
+    let error = finished.result().err().map(|e| (e.kind, e.to_string()));
+    if scan {
+        return RunResult {
+            apply: false,
+            report_text: String::new(),
+            anonymized_text: String::new(),
+            data: LogData::default(),
+            summary,
+            error,
+        };
+    }
     RunResult {
         apply: job.apply,
-        report_text: finished.report_json_as(false),
+        data: LogData::from_report(&value),
+        summary,
+        report_text,
         anonymized_text: finished.report_json_as(true),
-        error: finished.result().err().map(|e| (e.kind, e.to_string())),
+        error,
     }
 }
 

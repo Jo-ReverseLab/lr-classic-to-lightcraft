@@ -233,7 +233,7 @@ fn filters(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
                 {
                     app.log.filter.area = None;
                 }
-                for area in data.areas() {
+                for &area in data.areas() {
                     let selected = app.log.filter.area.as_deref() == Some(area);
                     if chip(ui, t, selected, None, area_label(area), None, 32.0).clicked() {
                         app.log.filter.area = Some(area.to_owned());

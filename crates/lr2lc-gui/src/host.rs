@@ -4,13 +4,13 @@
 //! its activity list and its command dispatch, and tests use a scripted
 //! host.
 
-use crate::run::{ChannelProgress, Event, RunResult, Running, execute};
+use crate::run::{ChannelProgress, Event, RunResult, Running, execute_as};
 use lr2lc_core::Job;
 use lr2lc_core::probe::{LibraryAction, Probe};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 /// The window's surroundings.
 pub trait Host {
@@ -37,8 +37,8 @@ pub trait Host {
 
     /// Asks LightCraft on `port` for its state.
     fn probe(&mut self, port: u16);
-    /// The probe's answer once it is in.
-    fn poll_probe(&mut self) -> Option<Result<Probe, String>>;
+    /// The probe's answer once it is in, with the port it was asked on.
+    fn poll_probe(&mut self) -> Option<(u16, Result<Probe, String>)>;
 
     /// Lets the person choose the folder a new library is created in.
     fn pick_new_library_folder(&mut self) -> Option<PathBuf>;
@@ -56,10 +56,22 @@ pub trait Host {
 #[derive(Default)]
 pub struct StandaloneHost {
     running: Option<Running>,
-    scan: Option<Receiver<RunResult>>,
-    probe: Option<Receiver<Result<Probe, String>>>,
+    scan: Option<(Receiver<RunResult>, Arc<AtomicBool>)>,
+    probe: Option<(u16, Receiver<Result<Probe, String>>)>,
     library: Option<Receiver<Result<Probe, String>>>,
 }
+
+/// What a worker left in its channel: its answer, nothing yet, or `lost`
+/// when the worker died without answering.
+fn take<T>(receiver: &Receiver<T>, lost: impl FnOnce() -> T) -> Option<T> {
+    match receiver.try_recv() {
+        Ok(value) => Some(value),
+        Err(TryRecvError::Empty) => None,
+        Err(TryRecvError::Disconnected) => Some(lost()),
+    }
+}
+
+const WORKER_LOST: &str = "the background task ended unexpectedly";
 
 impl Host for StandaloneHost {
     fn pick_catalog(&mut self) -> Option<PathBuf> {
@@ -99,7 +111,24 @@ impl Host for StandaloneHost {
         let Some(running) = &self.running else {
             return Vec::new();
         };
-        let events: Vec<Event> = running.events.try_iter().collect();
+        let mut events = Vec::new();
+        loop {
+            match running.events.try_recv() {
+                Ok(event) => events.push(event),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    // The worker is gone; without a final event it died.
+                    if !events.iter().any(|e| matches!(e, Event::Done(_))) {
+                        events.push(Event::Done(Box::new(RunResult::failed(
+                            true,
+                            lr2lc_core::ErrorKind::Stopped,
+                            WORKER_LOST.to_owned(),
+                        ))));
+                    }
+                    break;
+                }
+            }
+        }
         if events.iter().any(|e| matches!(e, Event::Done(_))) {
             self.running = None;
         }
@@ -107,18 +136,31 @@ impl Host for StandaloneHost {
     }
 
     fn scan(&mut self, mut job: Job) {
+        // A newer scan replaces the running one, which stops at its next phase.
+        if let Some((_, cancel)) = &self.scan {
+            cancel.store(true, Ordering::Relaxed);
+        }
         job.apply = false;
         let (tx, rx) = channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
         std::thread::spawn(move || {
             let (events, _) = channel();
-            let mut progress = ChannelProgress::new(events, Arc::new(AtomicBool::new(false)));
-            let _ = tx.send(execute(&job, &mut progress, None));
+            let mut progress = ChannelProgress::new(events, flag);
+            let _ = tx.send(execute_as(&job, &mut progress, None, true));
         });
-        self.scan = Some(rx);
+        self.scan = Some((rx, cancel));
     }
 
     fn poll_scan(&mut self) -> Option<RunResult> {
-        let result = self.scan.as_ref()?.try_recv().ok()?;
+        let (receiver, _) = self.scan.as_ref()?;
+        let result = take(receiver, || {
+            RunResult::failed(
+                false,
+                lr2lc_core::ErrorKind::Stopped,
+                WORKER_LOST.to_owned(),
+            )
+        })?;
         self.scan = None;
         Some(result)
     }
@@ -132,13 +174,15 @@ impl Host for StandaloneHost {
             let answer = lr2lc_core::probe::probe(port).map_err(|e| e.short_reason());
             let _ = tx.send(answer);
         });
-        self.probe = Some(rx);
+        self.probe = Some((port, rx));
     }
 
-    fn poll_probe(&mut self) -> Option<Result<Probe, String>> {
-        let answer = self.probe.as_ref()?.try_recv().ok()?;
+    fn poll_probe(&mut self) -> Option<(u16, Result<Probe, String>)> {
+        let (port, receiver) = self.probe.as_ref()?;
+        let answer = take(receiver, || Err(WORKER_LOST.to_owned()))?;
+        let port = *port;
         self.probe = None;
-        Some(answer)
+        Some((port, answer))
     }
 
     fn pick_new_library_folder(&mut self) -> Option<PathBuf> {
@@ -159,7 +203,7 @@ impl Host for StandaloneHost {
     }
 
     fn poll_library_action(&mut self) -> Option<Result<Probe, String>> {
-        let answer = self.library.as_ref()?.try_recv().ok()?;
+        let answer = take(self.library.as_ref()?, || Err(WORKER_LOST.to_owned()))?;
         self.library = None;
         Some(answer)
     }
@@ -167,10 +211,14 @@ impl Host for StandaloneHost {
     fn show_lightcraft(&mut self) {
         // macOS draws (and so runs commands of) a window that is visible.
         #[cfg(target_os = "macos")]
+        if let Ok(mut child) = std::process::Command::new("open")
+            .args(["-g", "-a", "LightCraft"])
+            .spawn()
         {
-            let _ = std::process::Command::new("open")
-                .args(["-g", "-a", "LightCraft"])
-                .spawn();
+            // Reaped off the UI thread so no zombie is left.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
         }
     }
 }

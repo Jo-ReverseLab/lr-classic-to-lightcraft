@@ -18,9 +18,17 @@ pub struct Row {
     pub source: Option<String>,
     pub result: Option<String>,
     pub photo: Option<i64>,
+    /// Item and message in lower case, for the search.
+    pub search: String,
 }
 
 impl Row {
+    /// Fills [`Row::search`] from the item and the message.
+    pub fn indexed(mut self) -> Row {
+        self.search = format!("{}\n{}", self.item, self.message).to_lowercase();
+        self
+    }
+
     pub fn from_json(v: &Value) -> Row {
         let text = |key: &str| v[key].as_str().map(str::to_owned);
         Row {
@@ -35,6 +43,26 @@ impl Row {
             source: text("source"),
             result: text("result"),
             photo: v["photo"].as_i64(),
+            search: String::new(),
+        }
+        .indexed()
+    }
+
+    /// A live entry of a running transfer.
+    pub fn from_entry(e: &lr2lc_core::log::LogEntry) -> Row {
+        Row {
+            status: crate::widgets::status_of(e.status),
+            area: e.area.to_owned(),
+            stage: e.stage.to_owned(),
+            item: e.item.clone(),
+            message: e.message.clone(),
+            code: e.code.map(str::to_owned),
+            reason: e.reason.clone(),
+            recommendation: e.recommendation.map(str::to_owned),
+            source: e.source.clone(),
+            result: e.result.clone(),
+            photo: e.photo,
+            search: String::new(),
         }
     }
 
@@ -152,12 +180,83 @@ pub struct LogData {
     pub anonymized: bool,
     pub photo_counts: Option<PhotoCounts>,
     pub dry_run: bool,
+    /// Entries per status, in [`Status::ALL`] order.
+    counts: [usize; 5],
+    /// The areas that have entries, in display order.
+    areas: Vec<&'static str>,
+}
+
+/// What the Transfer screen needs from a scan of the catalog (a dry run):
+/// a handful of numbers instead of the whole report.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScanSummary {
+    pub catalog_version: String,
+    pub photos_read: u64,
+    pub photos: u64,
+    pub folders: u64,
+    pub missing: u64,
+    pub keywords: u64,
+    pub rated: u64,
+    pub labelled: u64,
+    pub flagged: u64,
+    pub captions: u64,
+    pub copyrights: u64,
+    pub albums: u64,
+    pub smart: u64,
+    pub stacks: u64,
+    pub virtual_copies: u64,
+    pub develop: u64,
+}
+
+impl ScanSummary {
+    pub fn from_report(r: &Value) -> ScanSummary {
+        let n = |path: &[&str]| {
+            path.iter()
+                .try_fold(r, |v, k| v.get(k))
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        };
+        let sum = |path: &[&str], keys: &[&str]| -> u64 {
+            keys.iter()
+                .map(|k| {
+                    let mut full = path.to_vec();
+                    full.push(k);
+                    n(&full)
+                })
+                .sum()
+        };
+        ScanSummary {
+            catalog_version: r["catalog_version"].as_str().unwrap_or("").to_owned(),
+            photos_read: n(&["photos", "read"]),
+            photos: n(&["photos", "converted"]),
+            folders: n(&["folders", "converted"]),
+            missing: n(&["photos", "by_code", "missing"]),
+            keywords: n(&["keywords", "converted"]),
+            rated: sum(&["ratings"], &["1", "2", "3", "4", "5"]),
+            labelled: sum(
+                &["photos", "labels"],
+                &["red", "yellow", "green", "blue", "purple"],
+            ),
+            flagged: sum(&["photos", "flags"], &["pick", "reject"]),
+            captions: n(&["photos", "captions"]),
+            copyrights: n(&["photos", "copyrights"]),
+            albums: n(&["collections", "albums"]),
+            smart: n(&["collections", "smart"]),
+            stacks: n(&["stacks", "converted"]),
+            virtual_copies: r["entries"].as_array().map_or(0, |a| {
+                a.iter()
+                    .filter(|e| e["area"] == "virtual-copies" && e["status"] == "transferred")
+                    .count() as u64
+            }),
+            develop: n(&["develop", "photos"]),
+        }
+    }
 }
 
 impl LogData {
     /// Reads the entries of a report; none when it has no log.
     pub fn from_report(report: &Value) -> LogData {
-        LogData {
+        let mut data = LogData {
             rows: report["entries"]
                 .as_array()
                 .map(|a| a.iter().map(Row::from_json).collect())
@@ -178,20 +277,37 @@ impl LogData {
                     }
                 }),
             dry_run: report["dry_run"].as_bool().unwrap_or(false),
+            counts: [0; 5],
+            areas: Vec::new(),
+        };
+        data.recount();
+        data
+    }
+
+    /// Recomputes the cached counts and areas after `rows` changed.
+    pub fn recount(&mut self) {
+        self.counts = [0; 5];
+        let mut seen = std::collections::HashSet::new();
+        for row in &self.rows {
+            if let Some(i) = Status::ALL.iter().position(|s| *s == row.status) {
+                self.counts[i] += 1;
+            }
+            seen.insert(row.area.as_str());
         }
+        self.areas = AREAS.into_iter().filter(|a| seen.contains(a)).collect();
     }
 
     /// Entries per status.
     pub fn count(&self, status: Status) -> usize {
-        self.rows.iter().filter(|r| r.status == status).count()
+        Status::ALL
+            .iter()
+            .position(|s| *s == status)
+            .map_or(0, |i| self.counts[i])
     }
 
     /// The areas that have entries, in display order.
-    pub fn areas(&self) -> Vec<&'static str> {
-        AREAS
-            .into_iter()
-            .filter(|a| self.rows.iter().any(|r| r.area == *a))
-            .collect()
+    pub fn areas(&self) -> &[&'static str] {
+        &self.areas
     }
 
     /// The `visible` entries grouped by photo, in order of each photo's
@@ -254,6 +370,7 @@ impl LogData {
                         source: None,
                         result: None,
                         photo: Some(photo),
+                        search: String::new(),
                     },
                     entries,
                 })
@@ -269,11 +386,7 @@ impl LogData {
             .enumerate()
             .filter(|(_, r)| filter.status.is_none_or(|s| r.status == s))
             .filter(|(_, r)| filter.area.as_deref().is_none_or(|a| r.area == a))
-            .filter(|(_, r)| {
-                needle.is_empty()
-                    || r.item.to_lowercase().contains(&needle)
-                    || r.message.to_lowercase().contains(&needle)
-            })
+            .filter(|(_, r)| needle.is_empty() || r.search.contains(&needle))
             .map(|(i, _)| i)
             .collect()
     }

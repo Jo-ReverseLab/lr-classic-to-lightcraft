@@ -5,13 +5,13 @@ use crate::app::{App, focus_ring};
 use crate::checks::version_name;
 use crate::host::Host;
 use crate::icons::{self, Icon};
+use crate::logdata::ScanSummary;
 use crate::settings::{Labels, MappingRow, Selection};
 use crate::theme::{MEDIUM, SEMIBOLD, Tokens, font};
 use crate::widgets::{caps, card, check_row, divider, path_field, primary, secondary};
 use egui::{Align, CornerRadius, Frame, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
 use lr2lc_core::ErrorKind;
 use lr2lc_core::probe::LibraryAction;
-use serde_json::Value;
 use std::path::PathBuf;
 
 /// One reason the start buttons are blocked.
@@ -84,6 +84,9 @@ pub fn blocks(app: &App) -> Vec<Block> {
     if app.files.open_in_lightroom {
         block("Close the catalog in Lightroom first.", false);
     }
+    if app.library_busy {
+        block("LightCraft is switching libraries.", true);
+    }
     if let Some((ErrorKind::Catalog, _)) = &app.scan.error {
         block("The catalog cannot be read.", false);
     }
@@ -95,7 +98,7 @@ pub fn blocks(app: &App) -> Vec<Block> {
             if probe.xmp_auto_write == Some(true) && !s.allow_xmp {
                 block("LightCraft writes XMP automatically.", true);
             }
-            if !s.library.is_empty() && !probe.has_open(std::path::Path::new(&s.library)) {
+            if app.library_mismatch() {
                 block("LightCraft has another library open.", true);
             }
         }
@@ -171,18 +174,14 @@ fn source(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
         };
         row(ui, t, icon, color, "Companion file (.lrcat-data)", value);
         let scan = &app.scan;
-        let (icon, color, value) = match (&scan.report, &scan.error) {
+        let (icon, color, value) = match (&scan.summary, &scan.error) {
             (_, Some((ErrorKind::Catalog, message))) if message.contains("version") => {
                 (Icon::Cross, t.error, "not supported".to_owned())
             }
             (_, Some((ErrorKind::Catalog, _))) => {
                 (Icon::Cross, t.error, "cannot be read".to_owned())
             }
-            (Some(report), _) => (
-                Icon::Check,
-                ok,
-                version_name(report["catalog_version"].as_str().unwrap_or("")),
-            ),
+            (Some(report), _) => (Icon::Check, ok, version_name(&report.catalog_version)),
             _ => (Icon::Dot, t.skipped, "…".to_owned()),
         };
         row(ui, t, icon, color, "Catalog version", &value);
@@ -227,10 +226,10 @@ fn source(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
                 "unknown",
             ),
         }
-        if let Some(report) = &scan.report {
-            let missing = n(report, &["photos", "by_code", "missing"]);
+        if let Some(report) = &scan.summary {
+            let missing = report.missing;
             if missing > 0 {
-                let total = n(report, &["photos", "read"]);
+                let total = report.photos_read;
                 row(
                     ui,
                     t,
@@ -300,13 +299,7 @@ fn target(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
             });
             new_library_confirm(app, ui, host, t, idle);
             // LightCraft's state, and a way to switch it to the chosen library.
-            let mismatch = match &app.app.answer {
-                Some(Ok(probe)) => {
-                    !app.settings.library.is_empty()
-                        && !probe.has_open(std::path::Path::new(&app.settings.library))
-                }
-                _ => false,
-            };
+            let mismatch = app.library_mismatch();
             let (icon, color, text) = match &app.app.answer {
                 _ if app.library_busy => (
                     Icon::Arc,
@@ -410,8 +403,8 @@ fn new_library_confirm(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Toke
             if let Some((folder, name)) = app.new_library.take() {
                 app.library_busy = true;
                 app.library_error = None;
-                app.settings.follow_app = true;
-                app.changed = true;
+                // Followed once it exists; a failure keeps the choice made.
+                app.follow_after_action = true;
                 host.library_action(
                     app.settings.port,
                     LibraryAction::Create {
@@ -921,33 +914,16 @@ fn advanced(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens, enabled
     });
 }
 
-fn n(v: &Value, path: &[&str]) -> u64 {
-    path.iter()
-        .try_fold(v, |v, k| v.get(k))
-        .and_then(Value::as_u64)
-        .unwrap_or(0)
-}
-
-fn sum(v: &Value, path: &[&str], keys: &[&str]) -> u64 {
-    keys.iter()
-        .map(|k| {
-            let mut full = path.to_vec();
-            full.push(k);
-            n(v, &full)
-        })
-        .sum()
-}
-
 /// The count of each area from the scan: label, selected, value.
 fn summary_rows(app: &App) -> Vec<(&'static str, bool, String)> {
     let s = &app.settings.selection;
-    let report = app.scan.report.as_ref();
-    let count = |f: &dyn Fn(&Value) -> String| match report {
+    let scan = app.scan.summary.as_ref();
+    let count = |f: &dyn Fn(&ScanSummary) -> String| match scan {
         Some(r) => f(r),
         None if app.scan.pending => "…".to_owned(),
         None => "–".to_owned(),
     };
-    let photos_n = |k: u64| crate::app::plural(k as usize, "photo");
+    let photos = |k: u64| crate::app::plural(k as usize, "photo");
     vec![
         (
             "Photos",
@@ -955,85 +931,32 @@ fn summary_rows(app: &App) -> Vec<(&'static str, bool, String)> {
             count(&|r| {
                 format!(
                     "{} in {}",
-                    n(r, &["photos", "converted"]),
-                    crate::app::plural(n(r, &["folders", "converted"]) as usize, "folder")
+                    r.photos,
+                    crate::app::plural(r.folders as usize, "folder")
                 )
             }),
         ),
-        (
-            "Keywords",
-            s.keywords,
-            count(&|r| n(r, &["keywords", "converted"]).to_string()),
-        ),
-        (
-            "Star ratings",
-            s.ratings,
-            count(&|r| photos_n(sum(r, &["ratings"], &["1", "2", "3", "4", "5"]))),
-        ),
-        (
-            "Color labels",
-            s.labels,
-            count(&|r| {
-                photos_n(sum(
-                    r,
-                    &["photos", "labels"],
-                    &["red", "yellow", "green", "blue", "purple"],
-                ))
-            }),
-        ),
-        (
-            "Flags",
-            s.flags,
-            count(&|r| photos_n(sum(r, &["photos", "flags"], &["pick", "reject"]))),
-        ),
+        ("Keywords", s.keywords, count(&|r| r.keywords.to_string())),
+        ("Star ratings", s.ratings, count(&|r| photos(r.rated))),
+        ("Color labels", s.labels, count(&|r| photos(r.labelled))),
+        ("Flags", s.flags, count(&|r| photos(r.flagged))),
         (
             "Caption and copyright",
             s.texts,
-            count(&|r| {
-                format!(
-                    "{} captions, {} copyright",
-                    n(r, &["photos", "captions"]),
-                    n(r, &["photos", "copyrights"])
-                )
-            }),
+            count(&|r| format!("{} captions, {} copyright", r.captions, r.copyrights)),
         ),
         (
             "Collections",
             s.collections,
-            count(&|r| {
-                format!(
-                    "{} albums, {} smart",
-                    n(r, &["collections", "albums"]),
-                    n(r, &["collections", "smart"])
-                )
-            }),
+            count(&|r| format!("{} albums, {} smart", r.albums, r.smart)),
         ),
-        (
-            "Stacks",
-            s.stacks,
-            count(&|r| n(r, &["stacks", "converted"]).to_string()),
-        ),
+        ("Stacks", s.stacks, count(&|r| r.stacks.to_string())),
         (
             "Virtual copies",
             s.virtual_copies,
-            count(&|r| {
-                r["entries"]
-                    .as_array()
-                    .map_or(0, |a| {
-                        a.iter()
-                            .filter(|e| {
-                                e["area"] == "virtual-copies" && e["status"] == "transferred"
-                            })
-                            .count()
-                    })
-                    .to_string()
-            }),
+            count(&|r| r.virtual_copies.to_string()),
         ),
-        (
-            "Develop settings",
-            s.develop,
-            count(&|r| photos_n(n(r, &["develop", "photos"]))),
-        ),
+        ("Develop settings", s.develop, count(&|r| photos(r.develop))),
     ]
 }
 

@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, Local, TimeZone};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// The kind of a run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,7 +58,11 @@ pub fn local(secs: i64) -> DateTime<Local> {
         .unwrap_or_else(Local::now)
 }
 
+/// How many runs are kept; older ones are removed with their reports.
+pub const KEEP: usize = 50;
+
 /// The history folder.
+#[derive(Debug, Clone)]
 pub struct History {
     dir: PathBuf,
 }
@@ -99,9 +103,18 @@ impl History {
         }
         let mut records = self.list();
         records.retain(|r| r.id != record.id);
-        records.push(record.clone());
+        records.insert(0, record.clone());
+        records.sort_by(|a, b| b.started.cmp(&a.started).then(b.id.cmp(&a.id)));
+        // Reports hold names and paths: old runs do not pile up.
+        for old in records.drain(KEEP.min(records.len())..) {
+            let _ = std::fs::remove_file(self.report_file(&old.id));
+            let _ = std::fs::remove_file(self.report_file(&format!("{}-anonymized", old.id)));
+        }
         let text = serde_json::to_string_pretty(&records).map_err(std::io::Error::other)?;
-        std::fs::write(self.index_file(), text)
+        // Written beside and renamed, so a crash never leaves half an index.
+        let tmp = self.dir.join("index.json.tmp");
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(tmp, self.index_file())
     }
 
     /// The report of run `id`.
@@ -121,10 +134,6 @@ impl History {
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
             .collect();
         self.dir.join(format!("{safe}.json"))
-    }
-
-    pub fn dir(&self) -> &Path {
-        &self.dir
     }
 }
 
@@ -171,6 +180,24 @@ mod tests {
         assert_eq!(history.anonymized("a").as_deref(), Some("{}"));
         assert_eq!(record("a", 100).duration(), "0:41");
         assert!(history.report("../../etc").is_none());
+    }
+
+    #[test]
+    fn only_the_newest_runs_are_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let history = History::new(dir.path().join("runs"));
+        for i in 0..(KEEP as i64 + 3) {
+            history
+                .add(&record(&format!("r{i}"), i), "{}", "{}")
+                .unwrap();
+        }
+        let list = history.list();
+        assert_eq!(list.len(), KEEP);
+        assert!(
+            history.report("r0").is_none(),
+            "the oldest report is removed"
+        );
+        assert!(history.report(&format!("r{}", KEEP + 2)).is_some());
     }
 
     #[test]

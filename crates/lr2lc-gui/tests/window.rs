@@ -63,8 +63,8 @@ impl Host for Scripted {
         self.scan.take()
     }
     fn probe(&mut self, _port: u16) {}
-    fn poll_probe(&mut self) -> Option<Result<Probe, String>> {
-        self.probe.clone()
+    fn poll_probe(&mut self) -> Option<(u16, Result<Probe, String>)> {
+        self.probe.clone().map(|answer| (7980, answer))
     }
     fn pick_new_library_folder(&mut self) -> Option<PathBuf> {
         self.new_folder.clone()
@@ -174,7 +174,7 @@ fn a_ready_catalog_starts_a_dry_run_and_a_transfer() {
     let w = world();
     let mut h = harness(ready(&w), 1280.0);
     h.run_steps(4);
-    assert!(h.state().app.scan.report.is_some(), "the scan arrived");
+    assert!(h.state().app.scan.summary.is_some(), "the scan arrived");
     h.get_by_label("Dry run (writes nothing)").click();
     h.run_steps(2);
     let started = &h.state().host.started;
@@ -348,7 +348,7 @@ fn a_transfer_runs_on_its_thread_and_ends_in_the_log() {
     for _ in 0..200 {
         h.run_steps(1);
         let a = &h.state().app;
-        if a.scan.report.is_some() && matches!(a.app.answer, Some(Ok(_))) {
+        if a.scan.summary.is_some() && matches!(a.app.answer, Some(Ok(_))) {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -364,11 +364,7 @@ fn a_transfer_runs_on_its_thread_and_ends_in_the_log() {
     let app = &h.state().app;
     let run = app.run.as_ref().expect("the run screen stays");
     assert!(run.finished());
-    assert!(
-        run.result.as_ref().unwrap().error.is_none(),
-        "{:?}",
-        run.result
-    );
+    assert!(run.error.is_none(), "{:?}", run.error);
     assert!(!fake.photos().is_empty(), "photos were imported");
     assert!(
         run.counts
@@ -517,8 +513,7 @@ fn checks_explain_themselves_and_options_show_their_counts() {
         );
     }
     // The fixture has 12 keywords; the option row shows the number.
-    let report = h.state().app.scan.report.clone().unwrap();
-    let keywords = report["keywords"]["converted"].as_u64().unwrap();
+    let keywords = h.state().app.scan.summary.clone().unwrap().keywords;
     assert!(keywords > 0);
     assert!(h.query_all_by_label_contains("Keywords").count() >= 1);
 }
@@ -554,4 +549,62 @@ fn the_log_counts_photos_once_and_groups_entries_by_photo() {
     let groups = data.by_photo(&data.filtered(&Default::default()));
     assert_eq!(groups[0].photo, photo);
     assert!(groups.len() as u64 <= counts.total);
+}
+
+#[test]
+fn a_stopped_transfer_is_not_shown_as_finished() {
+    let w = world();
+    let mut h = harness(ready(&w), 1280.0);
+    h.run_steps(4);
+    h.get_by_label("Transfer now").click();
+    h.run_steps(2);
+    let stopped = RunResult::failed(
+        true,
+        lr2lc_core::ErrorKind::Stopped,
+        "writing to LightCraft stopped: LightCraft has another library open".into(),
+    );
+    h.state_mut()
+        .host
+        .events
+        .push(Event::Done(Box::new(stopped)));
+    h.run_steps(4);
+    assert!(h.query_all_by_label("Transfer stopped").count() >= 1);
+    assert_eq!(h.query_all_by_label("Transfer finished").count(), 0);
+    h.get_by_label_contains("LightCraft has another library open");
+    assert_eq!(h.query_all_by_label("100 %").count(), 0);
+    // The reason is also an entry of the run in the Log.
+    let rows = &h.state().app.log.data.rows;
+    assert!(
+        rows.iter()
+            .any(|r| r.message == "The run stopped before it was finished")
+    );
+}
+
+#[test]
+fn a_port_change_drops_the_old_answer_and_typing_does_not_scan_per_key() {
+    let w = world();
+    let mut h = harness(ready(&w), 1280.0);
+    h.run_steps(4);
+    assert_eq!(h.state().host.scans, 1);
+    // An answer for the old port is not applied to the new one.
+    h.state_mut().app.settings.port = 7999;
+    h.run_steps(3);
+    assert!(h.state().app.app.answer.is_none());
+    h.state_mut().app.settings.port = 7980;
+    h.run_steps(3);
+    assert!(matches!(h.state().app.app.answer, Some(Ok(_))));
+    // Editing a mapping: the old numbers go at once, one scan follows later.
+    for text in ["/a", "/ab", "/abc"] {
+        let rows = h.state_mut().app.settings.rows_mut();
+        rows.clear();
+        rows.push(lr2lc_gui::settings::MappingRow {
+            old: text.into(),
+            new: "/x".into(),
+        });
+        h.run_steps(2);
+    }
+    assert!(h.state().app.scan.summary.is_none());
+    assert_eq!(h.state().host.scans, 1, "no scan per key");
+    h.run_steps(40);
+    assert_eq!(h.state().host.scans, 2);
 }

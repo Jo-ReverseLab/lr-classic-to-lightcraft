@@ -11,7 +11,7 @@ use crate::widgets::{
     card, divider, header, primary, secondary, status_color, status_label, text_link,
 };
 use egui::{Align, CornerRadius, Frame, Layout, Margin, RichText, Sense, Ui, vec2};
-use lr2lc_core::{ErrorKind, Phase};
+use lr2lc_core::Phase;
 use model::{Stage, Status};
 
 /// How a phase stands.
@@ -104,7 +104,8 @@ fn phases(run: &RunState) -> Vec<PhaseRow> {
         let count = |s: Status| entries.and_then(|e| e.get(&s)).copied().unwrap_or(0);
         let errors = count(Status::Error);
         let problems = errors + count(Status::Conflict);
-        let active = run.writing || finished;
+        // After a stop, phases keep the state they really reached.
+        let active = run.writing || (finished && run.error.is_none());
         let state = if total == 0 && active {
             State::NotNeeded
         } else if active && run.written >= start + total {
@@ -145,17 +146,15 @@ pub fn ui(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
         return;
     };
     let finished = run.finished();
-    let cancelled = run
-        .result
-        .as_ref()
-        .and_then(|r| r.error.as_ref())
-        .is_some_and(|(k, _)| *k == ErrorKind::Cancelled);
-    let title = match (run.kind, finished, cancelled) {
-        (Kind::Transfer, false, _) => "Transfer running",
-        (Kind::DryRun, false, _) => "Dry run running",
-        (_, true, true) => "Run cancelled",
-        (Kind::Transfer, true, _) => "Transfer finished",
-        (Kind::DryRun, true, _) => "Dry run finished",
+    let stopped = run.error.is_some();
+    let title = match (run.kind, finished) {
+        (Kind::Transfer, false) => "Transfer running",
+        (Kind::DryRun, false) => "Dry run running",
+        (_, true) if run.cancelled() => "Run cancelled",
+        (Kind::Transfer, true) if stopped => "Transfer stopped",
+        (Kind::DryRun, true) if stopped => "Dry run stopped",
+        (Kind::Transfer, true) => "Transfer finished",
+        (Kind::DryRun, true) => "Dry run finished",
     };
     let rows = phases(run);
     let current = rows
@@ -163,7 +162,7 @@ pub fn ui(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
         .position(|r| r.state == State::Running)
         .unwrap_or(rows.len().saturating_sub(1));
     let total_steps: usize = run.stage_totals.iter().flat_map(|t| t.values()).sum();
-    let percent = if finished {
+    let percent = if finished && !stopped {
         100.0
     } else if total_steps > 0 {
         run.written as f32 / total_steps as f32 * 100.0
@@ -191,7 +190,17 @@ pub fn ui(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
                             ui.label(RichText::new(format!("{percent:.0} %")).font(font(13.0, Some(MEDIUM))));
                         });
                     });
-                    bar(ui, t, percent / 100.0, 8.0, t.ok, "Overall progress");
+                    let fill = if stopped { t.conflict } else { t.ok };
+                    bar(ui, t, percent / 100.0, 8.0, fill, "Overall progress");
+                    if let Some((_, message)) = &run.error {
+                        // Why it stopped, where the person is looking.
+                        ui.horizontal(|ui| {
+                            icons::show(ui, Icon::Cross, t.error, 16.0);
+                            ui.add(
+                                egui::Label::new(RichText::new(message).color(t.error)).wrap(),
+                            );
+                        });
+                    }
                     ui.horizontal(|ui| {
                         if finished {
                             if run.kind == Kind::Transfer
@@ -304,16 +313,10 @@ fn phase_row(ui: &mut Ui, t: &Tokens, row: &PhaseRow) {
 
 fn counters(ui: &mut Ui, t: &Tokens, run: &RunState, finished: bool, action: &mut Option<Action>) {
     card(ui, t, Some("Log entries so far"), |ui| {
-        let photos = match (&run.result, finished) {
-            (Some(result), true) if !result.report_text.is_empty() => {
-                serde_json::from_str::<serde_json::Value>(&result.report_text)
-                    .ok()
-                    .map(|report| crate::logdata::LogData::from_report(&report))
-                    .and_then(|data| data.photo_counts.map(|c| c.line(data.dry_run)))
-            }
-            _ => None,
-        }
-        .unwrap_or_else(|| crate::app::plural(run.photos_seen.len(), "photo") + " so far");
+        let photos = run
+            .photo_line
+            .clone()
+            .unwrap_or_else(|| crate::app::plural(run.photos_seen.len(), "photo") + " so far");
         Frame::new()
             .inner_margin(Margin::symmetric(16, 10))
             .show(ui, |ui| {

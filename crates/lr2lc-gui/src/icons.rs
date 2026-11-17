@@ -134,7 +134,8 @@ pub fn show(ui: &mut Ui, icon: Icon, color: Color32, size: f32) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
     let angle = if icon == Icon::Arc {
         // A slow turn: one round in two seconds.
-        ui.ctx().request_repaint();
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(50));
         (ui.input(|i| i.time) as f32) * std::f32::consts::PI
     } else {
         0.0

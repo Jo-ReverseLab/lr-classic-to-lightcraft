@@ -7,7 +7,7 @@ use crate::checks::{CatalogFiles, catalog_files};
 use crate::history::{History, Kind, Record, new_id};
 use crate::host::Host;
 use crate::icons::{self, Icon};
-use crate::logdata::{Filter, LogData, Row};
+use crate::logdata::{Filter, LogData, Row, ScanSummary};
 use crate::run::{Event, RunResult};
 use crate::settings::Settings;
 use crate::theme::{self, MEDIUM, SEMIBOLD, Tokens, font, tokens};
@@ -56,13 +56,22 @@ pub struct RunState {
     /// The last entries with their time.
     pub tail: VecDeque<(DateTime<Local>, Row)>,
     pub cancelling: bool,
-    pub result: Option<RunResult>,
-    pub record: Option<Record>,
+    finished: bool,
+    /// Why the run failed or stopped.
+    pub error: Option<(ErrorKind, String)>,
+    /// The photo count line of the finished run.
+    pub photo_line: Option<String>,
 }
 
 impl RunState {
     pub fn finished(&self) -> bool {
-        self.result.is_some()
+        self.finished
+    }
+
+    pub fn cancelled(&self) -> bool {
+        self.error
+            .as_ref()
+            .is_some_and(|(k, _)| *k == ErrorKind::Cancelled)
     }
 }
 
@@ -72,8 +81,11 @@ pub struct Scan {
     /// What the scan was made for (catalog, library, mappings, labels).
     pub key: String,
     pub pending: bool,
-    pub report: Option<Value>,
+    pub summary: Option<ScanSummary>,
     pub error: Option<(ErrorKind, String)>,
+    /// When the scan for `key` starts: a moment after the last change, so
+    /// typing a path does not start a scan per character.
+    due: Option<f64>,
 }
 
 /// The last answer of LightCraft's control port.
@@ -116,6 +128,8 @@ pub struct App {
     pub files: CatalogFiles,
     pub files_checked_at: Option<f64>,
     pub history: Option<History>,
+    /// Set by the writer thread when a run could not be stored.
+    pub history_failed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub log: LogState,
     pub advanced_open: bool,
     pub problem: Option<String>,
@@ -124,6 +138,13 @@ pub struct App {
     /// A library is being opened or created in LightCraft.
     pub library_busy: bool,
     pub library_error: Option<String>,
+    /// Follow LightCraft's library once the running library action succeeds.
+    pub follow_after_action: bool,
+    /// Whether LightCraft has the chosen library open (`None`: unknown);
+    /// checked with the catalog's files, not every frame.
+    pub library_matches: Option<bool>,
+    checked_library: String,
+    recheck_library: bool,
     /// Fonts and themes are installed (on the first frame).
     styled: bool,
 }
@@ -141,6 +162,7 @@ impl App {
             files: CatalogFiles::default(),
             files_checked_at: None,
             history,
+            history_failed: Default::default(),
             log: LogState {
                 records,
                 ..LogState::default()
@@ -150,8 +172,17 @@ impl App {
             new_library: None,
             library_busy: false,
             library_error: None,
+            follow_after_action: false,
+            library_matches: None,
+            checked_library: String::new(),
+            recheck_library: false,
             styled: false,
         }
+    }
+
+    /// LightCraft is known to have another library open than the chosen one.
+    pub fn library_mismatch(&self) -> bool {
+        self.library_matches == Some(false)
     }
 
     /// Whether the settings changed since the last call (to save them).
@@ -347,16 +378,11 @@ impl App {
     fn status_bar(&self, ui: &mut Ui, t: &Tokens) {
         let state = match &self.run {
             Some(run) if !run.finished() => "Running…".to_owned(),
-            Some(run) => match (run.kind, &run.result) {
-                (_, Some(r))
-                    if r.error
-                        .as_ref()
-                        .is_some_and(|(k, _)| *k == ErrorKind::Cancelled) =>
-                {
-                    "Run cancelled".to_owned()
-                }
-                (Kind::DryRun, _) => "Dry run finished".to_owned(),
-                (Kind::Transfer, _) => "Transfer finished".to_owned(),
+            Some(run) if run.cancelled() => "Run cancelled".to_owned(),
+            Some(run) if run.error.is_some() => "Run stopped".to_owned(),
+            Some(run) => match run.kind {
+                Kind::DryRun => "Dry run finished".to_owned(),
+                Kind::Transfer => "Transfer finished".to_owned(),
             },
             None => "Ready".to_owned(),
         };
@@ -388,40 +414,50 @@ impl App {
 
     /// Shows run `id` in the Log.
     pub fn show_run(&mut self, id: &str) {
-        let text = self
-            .history
-            .as_ref()
-            .and_then(|h| h.report(id))
-            .unwrap_or_default();
-        let anonymized = self
-            .history
-            .as_ref()
-            .and_then(|h| h.anonymized(id))
-            .unwrap_or_default();
-        self.show_report(id, text, anonymized);
+        let read = |anonymized: bool| {
+            self.history
+                .as_ref()
+                .and_then(|h| {
+                    if anonymized {
+                        h.anonymized(id)
+                    } else {
+                        h.report(id)
+                    }
+                })
+                .unwrap_or_default()
+        };
+        let (text, anonymized) = (read(false), read(true));
+        let value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        self.show_report(id, LogData::from_report(&value), text, anonymized);
     }
 
-    fn show_report(&mut self, id: &str, text: String, anonymized: String) {
-        let value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-        let mut data = LogData::from_report(&value);
+    fn show_report(&mut self, id: &str, mut data: LogData, text: String, anonymized: String) {
         if let Some(record) = self.log.records.iter().find(|r| r.id == id)
             && let Some(error) = &record.error
-            && data.rows.is_empty()
         {
-            // The run stopped before it had a report: say why.
-            data.rows.push(Row {
-                status: Status::Error,
-                area: "photos".into(),
-                stage: "read".into(),
-                item: String::new(),
-                message: "The run stopped before it could report".into(),
-                code: None,
-                reason: Some(error.clone()),
-                recommendation: None,
-                source: None,
-                result: None,
-                photo: None,
-            });
+            // Why the run stopped, as its own entry at the end.
+            data.rows.push(
+                Row {
+                    status: Status::Error,
+                    area: "photos".into(),
+                    stage: "run".into(),
+                    item: String::new(),
+                    message: if record.cancelled {
+                        "Run cancelled".into()
+                    } else {
+                        "The run stopped before it was finished".into()
+                    },
+                    code: None,
+                    reason: Some(error.clone()),
+                    recommendation: None,
+                    source: None,
+                    result: None,
+                    photo: None,
+                    search: String::new(),
+                }
+                .indexed(),
+            );
+            data.recount();
         }
         self.log.shown = Some(id.to_owned());
         self.log.data = data;
@@ -461,8 +497,9 @@ impl App {
             photos_seen: Default::default(),
             tail: VecDeque::new(),
             cancelling: false,
-            result: None,
-            record: None,
+            finished: false,
+            error: None,
+            photo_line: None,
         });
         self.tab = Tab::Transfer;
         host.start(job);
@@ -477,14 +514,17 @@ impl App {
             && self.scan.pending
         {
             self.scan.pending = false;
-            self.scan.error = result
-                .error
-                .clone()
-                .filter(|(k, _)| *k != ErrorKind::Cancelled);
-            self.scan.report = serde_json::from_str(&result.report_text).ok();
+            self.scan.error = result.error.filter(|(k, _)| *k != ErrorKind::Cancelled);
+            self.scan.summary = result.summary;
         }
-        if let Some(answer) = host.poll_probe() {
-            self.app.answer = Some(answer);
+        if let Some((port, answer)) = host.poll_probe() {
+            if port == self.settings.port {
+                self.app.answer = Some(answer);
+                self.recheck_library = true;
+            } else {
+                // Asked before the port changed: ask the new one now.
+                self.app.asked_at = None;
+            }
         }
         if let Some(answer) = host.poll_library_action() {
             self.library_busy = false;
@@ -495,9 +535,17 @@ impl App {
                         self.settings.library = path.display().to_string();
                         self.changed = true;
                     }
+                    // A library created here is the one to follow.
+                    if std::mem::take(&mut self.follow_after_action) {
+                        self.settings.follow_app = true;
+                    }
                     self.app.answer = Some(Ok(probe));
+                    self.recheck_library = true;
                 }
-                Err(e) => self.library_error = Some(e),
+                Err(e) => {
+                    self.follow_after_action = false;
+                    self.library_error = Some(e);
+                }
             }
         }
         // Following LightCraft: the target is the library it has open.
@@ -513,10 +561,27 @@ impl App {
                 self.changed = true;
             }
         }
+        // Does LightCraft have the chosen library open? Compared when either
+        // side changed, not every frame (it resolves both paths on disk).
+        if self.recheck_library || self.checked_library != self.settings.library {
+            self.recheck_library = false;
+            self.checked_library = self.settings.library.clone();
+            self.library_matches = match &self.app.answer {
+                Some(Ok(probe)) if !self.settings.library.is_empty() => {
+                    Some(probe.has_open(std::path::Path::new(&self.settings.library)))
+                }
+                _ => None,
+            };
+        }
         // LightCraft's state: every 5 s, and at once when the port changes.
-        if self.app.port != self.settings.port || self.app.asked_at.is_none_or(|at| now - at > 5.0)
-        {
+        // Not during a run: it holds its own connection and checks itself.
+        if self.app.port != self.settings.port {
             self.app.port = self.settings.port;
+            self.app.answer = None;
+            self.app.asked_at = None;
+            self.recheck_library = true;
+        }
+        if !self.is_running() && self.app.asked_at.is_none_or(|at| now - at > 5.0) {
             self.app.asked_at = Some(now);
             host.probe(self.settings.port);
         }
@@ -529,21 +594,30 @@ impl App {
                 catalog_files(std::path::Path::new(&self.settings.catalog))
             };
         }
-        // A new scan when the catalog, library or mapping changes.
+        // A new scan when the catalog, library, mapping or labels change. The
+        // old numbers go at once; the scan starts when typing has paused.
         let key = self.scan_key();
-        if !self.settings.catalog.is_empty()
-            && key != self.scan.key
-            && !self.scan.pending
-            && let Ok(job) = self.settings.job(false)
-        {
+        if key != self.scan.key {
+            let first = self.scan.key.is_empty();
             self.scan = Scan {
                 key,
-                pending: true,
+                due: Some(if first { now } else { now + 0.5 }),
                 ..Scan::default()
             };
-            host.scan(job);
         }
-        if self.is_running() || self.scan.pending {
+        if let Some(due) = self.scan.due
+            && now >= due
+            && !self.is_running()
+        {
+            self.scan.due = None;
+            if !self.settings.catalog.is_empty()
+                && let Ok(job) = self.settings.job(false)
+            {
+                self.scan.pending = true;
+                host.scan(job);
+            }
+        }
+        if self.is_running() || self.scan.pending || self.scan.due.is_some() || self.library_busy {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
         } else {
@@ -595,8 +669,8 @@ impl App {
                 run.phase_done = 0;
             }
             Event::Phase(Phase::Writing, total) => {
+                run.library_read = run.reading_library;
                 run.reading_library = false;
-                run.library_read = true;
                 run.writing = true;
                 run.phase_total = total;
                 run.phase_done = 0;
@@ -617,7 +691,7 @@ impl App {
                 run.stage_totals = Some(totals);
             }
             Event::Entry(entry) => {
-                let row = Row::from_json(&serde_json::to_value(&*entry).unwrap_or(Value::Null));
+                let row = Row::from_entry(&entry);
                 *run.counts.entry(row.status).or_insert(0) += 1;
                 if let Some(photo) = row.photo {
                     run.photos_seen.insert(photo);
@@ -646,46 +720,58 @@ impl App {
         let Some(run) = &mut self.run else {
             return;
         };
-        let value: Value = serde_json::from_str(&result.report_text).unwrap_or(Value::Null);
-        let data = LogData::from_report(&value);
+        let RunResult {
+            report_text,
+            anonymized_text,
+            data,
+            error,
+            ..
+        } = result;
         if !data.rows.is_empty() {
             run.counts = Status::ALL.iter().map(|s| (*s, data.count(*s))).collect();
         }
-        if run.stage_totals.is_some() {
+        // Only a run that reached its end has done every step.
+        if error.is_none() && run.stage_totals.is_some() {
             run.written = run.stage_totals.iter().flat_map(|t| t.values()).sum();
         }
-        let cancelled = result
-            .error
+        run.photo_line = data.photo_counts.map(|c| c.line(data.dry_run));
+        let cancelled = error
             .as_ref()
             .is_some_and(|(k, _)| *k == ErrorKind::Cancelled);
         let started = run.started;
-        let finished = Local::now();
         let id = new_id(started, &self.log.records);
         let record = Record {
             id: id.clone(),
             kind: run.kind,
             started: started.timestamp(),
-            finished: finished.timestamp(),
+            finished: Local::now().timestamp(),
             catalog: run.catalog.clone(),
             library: run.library.clone(),
             cancelled,
-            error: result.error.as_ref().map(|(_, m)| m.clone()),
-            has_report: !result.report_text.is_empty(),
+            error: error.as_ref().map(|(_, m)| m.clone()),
+            has_report: !report_text.is_empty(),
         };
-        if let Some(history) = &self.history {
-            let _ = history.add(&record, &result.report_text, &result.anonymized_text);
-            self.log.records = history.list();
-        } else {
-            self.log.records.insert(0, record.clone());
-        }
-        run.record = Some(record);
         let kind = run.kind;
-        let text = result.report_text.clone();
-        let anonymized = result.anonymized_text.clone();
-        run.result = Some(result);
-        self.show_report(&id, text, anonymized);
+        run.error = error;
+        run.finished = true;
+        self.log.records.insert(0, record.clone());
+        self.log.records.truncate(crate::history::KEEP);
+        if let Some(history) = &self.history {
+            // Large reports are written off the UI thread.
+            let history = history.clone();
+            let (named, anonymized) = (report_text.clone(), anonymized_text.clone());
+            let failed = self.history_failed.clone();
+            std::thread::spawn(move || {
+                if history.add(&record, &named, &anonymized).is_err() {
+                    failed.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            });
+        }
+        self.show_report(&id, data, report_text, anonymized_text);
         // A transfer changes what the next dry run plans.
-        self.scan.key.clear();
+        if kind == Kind::Transfer {
+            self.scan.key.clear();
+        }
         if kind == Kind::DryRun {
             self.run = None;
             self.tab = Tab::Log;
