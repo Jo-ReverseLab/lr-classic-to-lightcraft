@@ -20,29 +20,11 @@
 
 lr2lc (short for Lightroom Classic to LightCraft) reads a Lightroom Classic
 catalog (`.lrcat`) **read-only** and writes what it finds into a running
-LightCraft library. Unlike LightCraft's built-in import, it is made for a
-catalog that keeps changing: run it again and it brings over only what
-changed, without overwriting what you did in LightCraft.
-
-## Why not just LightCraft's own import?
-
-LightCraft can import a Lightroom catalog itself, with ratings, keywords,
-collections and development settings. lr2lc goes further where a real,
-living catalog needs it:
-
-| | LightCraft's import | lr2lc |
-| --- | --- | --- |
-| **Running it again** | Adds new photos and takes ratings, flags and labels from Lightroom again, also where you changed them in LightCraft | Writes only what changed in Lightroom; a value changed on both sides is reported as a conflict, never overwritten |
-| **Before writing** | Counts, missing originals and warnings | A dry run with a reason for every item left out, in the summary, `report.json` and the run log |
-| **Smart collections** | Plain albums with today's members | Smart albums that keep updating (star-rating rules today) |
-| **Stacks and Quick Collection** | Not imported | Imported |
-| **Keywords** | Hierarchy | Hierarchy plus synonyms and keyword attributes |
-| **Moved photos** | Only paths relative to the catalog | Any path with `--map OLD=NEW`, e.g. another disk or computer |
-| **Photos you imported by hand** | No question asked | Found before writing; you choose per photo: overwrite, development only, only if unedited, or skip |
-
-LightCraft's own import is the better choice if you need any of these:
-missing originals kept as offline photos, videos, prints, books and
-slideshows, or a Lightroom backup `.zip` as the source.
+LightCraft library. LightCraft can import a catalog itself; lr2lc adds what
+a catalog that keeps changing needs: a re-sync that brings over only what
+changed and reports conflicts instead of overwriting your LightCraft edits,
+plus real smart albums, stacks, the Quick Collection and path mapping for
+moved photos.
 
 Your original photos are never touched, and nothing is written until you ask
 for it: without that, every run is a dry run.
