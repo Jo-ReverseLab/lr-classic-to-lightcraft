@@ -247,7 +247,7 @@ fn cloud_only_originals_to_import_are_counted_and_logged() {
     assert!(
         prepared
             .catalog_summary(&s.job)
-            .contains("originals only in the cloud (not downloaded): 1 (30.0 MB)")
+            .contains("originals only in the cloud (not downloaded): 1 (30.0 MB)\ndownload them")
     );
     let done = finish(&s.job, prepared, &mut NoProgress).unwrap();
     let report: Value = serde_json::from_str(&done.report_json()).unwrap();

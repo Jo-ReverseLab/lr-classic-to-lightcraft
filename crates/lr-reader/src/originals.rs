@@ -33,13 +33,18 @@ impl CloudOnly {
 #[cfg(target_os = "macos")]
 const SF_DATALESS: u32 = 0x4000_0000;
 
+/// Whether BSD file flags (`st_flags`) mark a dataless placeholder.
+pub fn flags_dataless(flags: u32) -> bool {
+    flags & SF_DATALESS != 0
+}
+
 /// Whether the file is a dataless placeholder (only on macOS; elsewhere
 /// always false).
 pub fn is_dataless(metadata: &Metadata) -> bool {
     #[cfg(target_os = "macos")]
     {
         use std::os::macos::fs::MetadataExt;
-        metadata.st_flags() & SF_DATALESS != 0
+        flags_dataless(metadata.st_flags())
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -154,6 +159,15 @@ mod tests {
         assert_eq!(found.photos, vec![(2, 5)]);
         assert_eq!((found.count(), found.bytes()), (1, 5));
         assert!(report.skipped_items().is_empty());
+    }
+
+    #[test]
+    fn the_dataless_flag_is_read_from_st_flags() {
+        // `ls -lO` shows such a file as `compressed,dataless`.
+        assert!(flags_dataless(0x4000_0020));
+        assert!(flags_dataless(SF_DATALESS));
+        assert!(!flags_dataless(0x20));
+        assert!(!flags_dataless(0));
     }
 
     #[test]

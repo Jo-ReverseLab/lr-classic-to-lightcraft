@@ -437,6 +437,13 @@ pub fn summary_with(outcome: &Outcome, dry_run: bool) -> String {
         outcome.cloud_only.count(),
         megabytes(outcome.cloud_only.bytes())
     );
+    if outcome.cloud_only.count() > 0 {
+        let _ = writeln!(
+            out,
+            "download them before the transfer (Finder: Download Now): LightCraft has to \
+             download each one while importing, which is slow and may fail"
+        );
+    }
     let _ = writeln!(out, "{}", stack_counts_line(&outcome.stack_counts));
     let _ = writeln!(out, "{}", attributes_line(&outcome.keyword_attributes));
     for (area, report) in areas(outcome) {

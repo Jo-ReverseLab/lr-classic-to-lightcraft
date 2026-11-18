@@ -26,7 +26,8 @@ pub use collections::CollectionData;
 pub use develop::{DEVELOP_MAX_DEPTH, DEVELOP_MAX_TEXT_BYTES, DevelopError, parse_develop};
 pub use keywords::KeywordData;
 pub use originals::{
-    CloudOnly, check_originals, check_originals_with, drop_missing_originals, is_dataless,
+    CloudOnly, check_originals, check_originals_with, drop_missing_originals, flags_dataless,
+    is_dataless,
 };
 pub use photos::{PhotoData, VIDEO_SKIP_REASON};
 pub use smart::{SmartParseError, parse_smart_rules};
