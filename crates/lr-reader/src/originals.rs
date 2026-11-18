@@ -30,7 +30,8 @@ impl CloudOnly {
 
 /// macOS's `SF_DATALESS` file flag (`sys/stat.h`): the file's data is not
 /// on this computer.
-pub const SF_DATALESS: u32 = 0x4000_0000;
+#[cfg(target_os = "macos")]
+const SF_DATALESS: u32 = 0x4000_0000;
 
 /// Whether the file is a dataless placeholder (only on macOS; elsewhere
 /// always false).
