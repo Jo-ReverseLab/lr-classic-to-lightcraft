@@ -6,7 +6,7 @@
 
 **Move your Adobe Lightroom Classic catalog into [LightCraft](https://github.com/storytold/lightcraft),<br>with keywords, albums, ratings and edits. Safe to run again.**
 
-[![CI](https://github.com/Jo-ReverseLab/lr2lc/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Jo-ReverseLab/lr2lc/actions/workflows/ci.yml)
+[![CI](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 [![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![Tested on macOS](https://img.shields.io/badge/tested%20on-macOS-lightgrey?logo=apple)](docs/limits.md)
@@ -18,10 +18,11 @@
 
 </div>
 
-lr2lc reads a Lightroom Classic catalog (`.lrcat`) **read-only** and writes
-what it finds into a running LightCraft library. Your original photos are
-never touched, and nothing is written until you ask for it: without that,
-every run is a dry run with a full report.
+lr2lc (short for Lightroom Classic to LightCraft) reads a Lightroom Classic
+catalog (`.lrcat`) **read-only** and writes what it finds into a running
+LightCraft library. Your original photos are never touched, and nothing is
+written until you ask for it: without that, every run is a dry run with a
+full report.
 
 ## Why lr2lc
 
@@ -88,8 +89,8 @@ You need a Lightroom Classic 15 catalog,
 and [Rust](https://rustup.rs) to build lr2lc.
 
 ```sh
-git clone https://github.com/Jo-ReverseLab/lr2lc.git
-cd lr2lc
+git clone https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft.git
+cd lr-classic-to-lightcraft
 
 # The desktop window (Rust 1.95 or later)
 cargo run --release -p lr2lc-gui
@@ -112,8 +113,8 @@ There are no prebuilt binaries yet. To install both programs into
 `~/.cargo/bin`:
 
 ```sh
-cargo install --locked --git https://github.com/Jo-ReverseLab/lr2lc lr2lc
-cargo install --locked --git https://github.com/Jo-ReverseLab/lr2lc lr2lc-gui
+cargo install --locked --git https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft lr2lc
+cargo install --locked --git https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft lr2lc-gui
 ```
 
 ## Documentation
@@ -135,7 +136,7 @@ Linux and Windows only the automated tests run (CI checks formatting, lint
 and tests on all three).
 
 Bug reports and ideas are welcome in the
-[issues](https://github.com/Jo-ReverseLab/lr2lc/issues).
+[issues](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues).
 
 ## License
 

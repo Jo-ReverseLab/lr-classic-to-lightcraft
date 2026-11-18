@@ -53,7 +53,7 @@ Photos
 - Photos whose original file is missing are skipped with everything that
   belongs to them; LightCraft offers no way yet to add them as offline
   records over the control port (see [Missing originals](usage.md#missing-originals),
-  [#23](https://github.com/Jo-ReverseLab/lr2lc/issues/23)).
+  [#23](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/23)).
 - Originals that are only in iCloud (or another cloud drive) are
   downloaded by LightCraft one by one while importing, often many seconds
   per photo. lr2lc only points them out and downloads nothing itself (see
@@ -63,12 +63,12 @@ Photos
   LightCraft (`--existing`, `--removed`, the window's question) hold for
   one run; they are not remembered.
 - Videos are skipped
-  ([#15](https://github.com/Jo-ReverseLab/lr2lc/issues/15)).
+  ([#15](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/15)).
 - A virtual copy whose master is not converted (for example a video) is
   skipped with its memberships.
 
 Collections and re-sync
-([#16](https://github.com/Jo-ReverseLab/lr2lc/issues/16))
+([#16](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/16))
 
 - Smart collections become smart albums only when every rule translates
   exactly, which currently means star-rating rules; all others are only
@@ -85,19 +85,19 @@ Development settings (see [Development settings](usage.md#development-settings))
 
 - A photo rotated or mirrored in Lightroom arrives in its camera
   orientation; the rotation or mirror is not carried over
-  ([#10](https://github.com/Jo-ReverseLab/lr2lc/issues/10)).
+  ([#10](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/10)).
 - Not carried over, only reported:
   - camera profile and creative look
-    ([#14](https://github.com/Jo-ReverseLab/lr2lc/issues/14));
+    ([#14](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/14));
   - point color, lens blur, AI denoise, Raw Details, Super Resolution and
-    red eye ([#10](https://github.com/Jo-ReverseLab/lr2lc/issues/10));
+    red eye ([#10](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/10));
   - colour range masks, AI object and people-part masks, masks combining
     several parts
-    ([#11](https://github.com/Jo-ReverseLab/lr2lc/issues/11));
+    ([#11](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/11));
   - painted spots, generative Remove and distraction removal
-    ([#12](https://github.com/Jo-ReverseLab/lr2lc/issues/12));
+    ([#12](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/12));
   - Guided Upright
-    ([#13](https://github.com/Jo-ReverseLab/lr2lc/issues/13));
+    ([#13](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/13));
   - a Kelvin white balance on a photo LightCraft does not edit in Kelvin,
     and every other field without an exact LightCraft equivalent.
 - `--probe-white-balance` (reading the original file) is not implemented
@@ -113,16 +113,16 @@ Window
   values (stars, edited or not), not Lightroom's.
 - **Retry this photo** and **Overwrite with Lightroom state** are disabled
   until lr2lc can run a single photo
-  ([#36](https://github.com/Jo-ReverseLab/lr2lc/issues/36)).
+  ([#36](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/36)).
 - No pause; the spinner ignores the system's reduced-motion setting; some
   labels and info marks are not reachable by keyboard or screen reader, and
   a run cannot be deleted from the history
-  ([#45](https://github.com/Jo-ReverseLab/lr2lc/issues/45)).
+  ([#45](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/45)).
 
 Report and resources
 
 - Skip reasons and unmapped names can quote short constants from the
   catalog (smart-rule criteria, mask kinds), also with `--anonymize`
-  ([#43](https://github.com/Jo-ReverseLab/lr2lc/issues/43)).
+  ([#43](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/43)).
 - A dry run of about 25,000 photos needs about 300 MB of memory
-  ([#44](https://github.com/Jo-ReverseLab/lr2lc/issues/44)).
+  ([#44](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/issues/44)).
