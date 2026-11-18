@@ -84,6 +84,8 @@ pub struct RollbackJson {
     pub quick_removed: usize,
     pub fields_restored: usize,
     pub develop_not_reset: usize,
+    /// Photos the run had restored from LightCraft's trash, moved back.
+    pub photos_trashed_again: usize,
     pub failed: usize,
     pub mapping_restored: bool,
 }
@@ -120,6 +122,10 @@ pub struct PhotosJson<'a> {
     pub titles: usize,
     /// Converted photos whose title blob cannot be read.
     pub titles_unreadable: usize,
+    /// Converted photos whose original is only in the cloud (macOS
+    /// "dataless", e.g. iCloud Drive), and their size together in bytes.
+    pub cloud_only: usize,
+    pub cloud_only_bytes: u64,
 }
 
 /// Converted photos per flag; the fields add up to the converted photos.
@@ -309,6 +315,8 @@ pub fn report_json_with(
             creators: outcome.creators,
             titles: outcome.titles,
             titles_unreadable: outcome.titles_unreadable,
+            cloud_only: outcome.cloud_only.count(),
+            cloud_only_bytes: outcome.cloud_only.bytes(),
         },
         collections: collections_json(&outcome.collections, &outcome.collection_counts),
         collection_members: AreaJson::new(&outcome.collection_members),
@@ -395,6 +403,11 @@ pub fn summary(outcome: &Outcome) -> String {
     summary_with(outcome, true)
 }
 
+/// `12.3 MB`.
+pub fn megabytes(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+}
+
 /// Builds the readable summary of the catalog part of a run.
 pub fn summary_with(outcome: &Outcome, dry_run: bool) -> String {
     let mut out = String::new();
@@ -418,6 +431,12 @@ pub fn summary_with(outcome: &Outcome, dry_run: bool) -> String {
         );
     }
     let _ = writeln!(out, "videos: skipped {}", outcome.videos);
+    let _ = writeln!(
+        out,
+        "originals only in the cloud (not downloaded): {} ({})",
+        outcome.cloud_only.count(),
+        megabytes(outcome.cloud_only.bytes())
+    );
     let _ = writeln!(out, "{}", stack_counts_line(&outcome.stack_counts));
     let _ = writeln!(out, "{}", attributes_line(&outcome.keyword_attributes));
     for (area, report) in areas(outcome) {
@@ -673,6 +692,7 @@ mod tests {
             titles: 0,
             titles_unreadable: 0,
             catalog_checksum: [0; 32],
+            cloud_only: Default::default(),
             converted: Default::default(),
         }
     }

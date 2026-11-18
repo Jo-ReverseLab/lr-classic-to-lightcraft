@@ -153,6 +153,12 @@ fn text(code: SkipCode) -> Guidance {
         ),
         C::Rejected => error("LightCraft rejected the command", RERUN),
         C::SameContent => error("A copy with the same content could not be created", RERUN),
+        C::RemovedInLightcraft => skip(
+            "Deleted in LightCraft; left as it is",
+            Some(
+                "Choose “import again” (--removed reimport) to bring the photo back into LightCraft.",
+            ),
+        ),
         C::PathMappingEscaped => skip(
             "Path mapping would leave the new folder",
             Some(

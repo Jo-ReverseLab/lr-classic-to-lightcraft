@@ -240,6 +240,7 @@ impl Settings {
             anonymize: false,
             // Without the question in the window: the safe default.
             existing: Default::default(),
+            removed: Default::default(),
         })
     }
 }

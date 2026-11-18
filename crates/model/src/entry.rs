@@ -143,6 +143,10 @@ pub struct Entry {
     /// A name the writer already knows (a file name, keyword or album
     /// name); private, dropped when anonymized.
     pub item: Option<String>,
+    /// LightCraft's own error message for a rejected command; added to the
+    /// reason when the log is rendered, with paths replaced by `<path>`
+    /// when anonymized.
+    pub detail: Option<String>,
 }
 
 impl Entry {
@@ -164,7 +168,13 @@ impl Entry {
             source: None,
             result: None,
             item: None,
+            detail: None,
         }
+    }
+
+    pub fn detail(mut self, message: Option<String>) -> Entry {
+        self.detail = message;
+        self
     }
 
     pub fn code(mut self, code: &'static str) -> Entry {

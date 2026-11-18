@@ -24,15 +24,17 @@ pub mod report_file;
 pub mod writer;
 
 pub use job::{
-    ErrorKind, Finished, Job, Prepared, RunError, check_existing, check_existing_with, finish,
+    ErrorKind, Finished, Job, Prepared, RunError, check_library, check_library_with, finish,
     finish_with, prepare,
 };
 /// Re-exported so a front end needs no direct dependency on lc-writer to
 /// write through its own [`CommandSink`].
 pub use lc_writer::control::{CommandSink, HostSink, Request};
 pub use lc_writer::existing::{
-    ExistingChoice, ExistingCounts, ExistingDecisions, ExistingPhoto, ExistingReason,
+    ExistingChoice, ExistingCounts, ExistingDecisions, ExistingPhoto, ExistingReason, LibraryCheck,
+    RemovedChoice, RemovedCounts, RemovedDecisions, RemovedInLightCraft,
 };
 pub use lc_writer::live::LivePhoto;
 pub use lc_writer::plan::Areas;
 pub use lc_writer::progress::{NoProgress, Phase, Progress};
+pub use lr_reader::CloudOnly;

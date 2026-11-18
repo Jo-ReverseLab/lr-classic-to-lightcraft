@@ -87,8 +87,11 @@
 
 use crate::albums::{Decision, Existing, Node, parse_album_list};
 use crate::control::{CommandSink, Outcome, WriteError};
-use crate::entries::{StepOutcome, stage_of, step_entries};
-use crate::existing::{ExistingChoice, ExistingCounts, ExistingDecisions, read_one};
+use crate::entries::{StepOutcome, removed_entry, stage_of, step_entries};
+use crate::existing::{
+    ExistingChoice, ExistingCounts, ExistingDecisions, ExistingReason, RemovedChoice,
+    RemovedCounts, preview_one, read_one,
+};
 use crate::live::read_live_with;
 use crate::plan::{
     Areas, Conflict, MovedPhoto, Plan, RemovedPhoto, RenamedKeyword, Step, WriteInput, field_order,
@@ -254,6 +257,8 @@ pub struct ApplySummary {
     /// Global ids of the adopted photos whose development settings in
     /// LightCraft were kept; a subset of `develop_not_applied_ids`.
     pub existing_develop_kept_ids: Vec<String>,
+    /// Recorded photos deleted in LightCraft, by choice.
+    pub removed_in_lightcraft: RemovedCounts,
     /// Names of catalog fields that could not be carried over, sorted, with
     /// the number of converted photos that carry each. Only names and
     /// counts, never values.
@@ -349,6 +354,26 @@ pub fn apply_partial_with(
     // with nothing written. When no known photo changed in Lightroom, the
     // live values cannot change the outcome, so the extra reads are skipped
     // and a first or unchanged second run sends the same commands as before.
+    // Recorded photos deleted in LightCraft for good (or virtual copies in
+    // its trash) that are brought back are forgotten first: the plan then
+    // imports them (or makes the copy again) and adds them to their albums,
+    // stacks and Quick Collection as new photos. A photo in the trash keeps
+    // its entry and is restored (`Step::Restore`). `before` above still
+    // holds them, so Cancel restores the mapping file as it was.
+    let mut reimported = Vec::new();
+    for r in &input.removed {
+        if input.removed_decisions.choice_for(&r.global_id) != RemovedChoice::Reimport
+            || (r.trashed && !r.virtual_copy)
+        {
+            continue;
+        }
+        let same = state
+            .photo(&r.global_id)
+            .is_some_and(|e| same_id(&e.lightcraft_id, &r.lightcraft_id));
+        if same && state.forget_photo(&r.global_id) {
+            reimported.push(removed_entry(&r.global_id, &r.path, false));
+        }
+    }
     let live = match &input.live {
         Some(_) => None,
         None if !needs_live(input, state) => None,
@@ -373,7 +398,10 @@ pub fn apply_partial_with(
     // The plan already used this map; keep it for recording fresh imports.
     let renamed = renamed_keywords(input, state).0;
     let mut run = Run {
-        client,
+        client: Recording {
+            inner: client,
+            rejection: None,
+        },
         prefetched: std::collections::HashMap::new(),
         batch_imported: std::collections::HashSet::new(),
         // The first save is never delayed: an unwritable mapping file must
@@ -423,6 +451,7 @@ pub fn apply_partial_with(
                 ..ExistingCounts::default()
             },
             existing_develop_kept_ids: plan.existing_develop_kept_ids().to_vec(),
+            removed_in_lightcraft: plan.removed_in_lightcraft(),
             develop_unmapped: plan.develop_unmapped().clone(),
             develop_camera_profiles: plan.develop_camera_profiles().clone(),
             develop_photos_with_profile: plan.develop_photos_with_profile(),
@@ -473,6 +502,10 @@ pub fn apply_partial_with(
         inserted: std::collections::VecDeque::new(),
         late_choice: None,
     };
+    for entry in reimported {
+        run.progress.entry(&entry);
+        run.summary.entries.push(entry);
+    }
     let result = run.steps(&plan.steps);
     // Whatever waited for its save is written now, on every exit.
     let result = match (result, run.unsaved) {
@@ -688,8 +721,29 @@ fn match_by_name(
         .collect()
 }
 
+/// Passes commands on and keeps LightCraft's message of the last rejected
+/// one, for the log entry of the step that failed.
+struct Recording<'a> {
+    inner: &'a mut dyn CommandSink,
+    rejection: Option<String>,
+}
+
+impl CommandSink for Recording<'_> {
+    fn execute(&mut self, command: &str, params: Value) -> Result<Outcome, WriteError> {
+        let result = self.inner.execute(command, params);
+        if let Err(WriteError::Command { message, .. }) = &result {
+            self.rejection = Some(message.clone());
+        }
+        result
+    }
+
+    fn call(&mut self, method: &str, params: Value) -> Result<Outcome, WriteError> {
+        self.inner.call(method, params)
+    }
+}
+
 struct Run<'a> {
-    client: &'a mut dyn CommandSink,
+    client: Recording<'a>,
     /// Answers of batched imports, by file path.
     prefetched: std::collections::HashMap<String, Value>,
     /// Files a batch imported; their single import finds them again by
@@ -841,9 +895,11 @@ impl Run<'_> {
     /// Runs one step and logs how it ended.
     fn run_step(&mut self, step: &Step) -> Result<(), WriteError> {
         let before = self.tally();
+        self.client.rejection = None;
         self.step(step)?;
         let after = self.tally();
         if after.lists != before.lists {
+            self.attach_rejection(&before);
             self.report_failures(&before, step);
         } else if !after.unfinished {
             let outcome = match self.late_choice.take() {
@@ -859,6 +915,37 @@ impl Run<'_> {
         }
         self.late_choice = None;
         Ok(())
+    }
+
+    /// Gives the skips and failures a step added LightCraft's message of the
+    /// command it rejected during that step.
+    fn attach_rejection(&mut self, before: &Tally) {
+        let Some(message) = self.client.rejection.take() else {
+            return;
+        };
+        let s = &mut self.summary;
+        let lists: [&mut Vec<Skipped>; 11] = [
+            &mut s.keywords_not_created,
+            &mut s.photos_skipped,
+            &mut s.photos_incomplete,
+            &mut s.collections_skipped,
+            &mut s.collections_incomplete,
+            &mut s.members_skipped,
+            &mut s.stacks_skipped,
+            &mut s.stacks_incomplete,
+            &mut s.quick_skipped,
+            &mut s.quick_incomplete,
+            &mut s.smart_skipped,
+        ];
+        for (list, was) in lists.into_iter().zip(before.lists) {
+            for skipped in list.iter_mut().skip(was) {
+                if skipped.detail.is_none()
+                    && matches!(skipped.code, SkipCode::Rejected | SkipCode::SameContent)
+                {
+                    skipped.detail = Some(message.clone());
+                }
+            }
+        }
     }
 
     /// Whether `step` is a field or develop step planned for a fresh import
@@ -1054,7 +1141,8 @@ impl Run<'_> {
                         skipped.subject.clone(),
                         skipped.reason.clone(),
                     )
-                    .code(skipped.code.as_str()),
+                    .code(skipped.code.as_str())
+                    .detail(skipped.detail.clone()),
                 );
             }
         }
@@ -1106,6 +1194,18 @@ impl Run<'_> {
                     develop_pending: false,
                 });
                 self.adopt(global_id, lightcraft_id, path, *choice)
+            }
+            Step::Restore { global_id, path } => {
+                self.finish_photo()?;
+                self.current = Some(Current {
+                    global_id: global_id.clone(),
+                    ok: true,
+                    selected: false,
+                    // A known photo: its first update counts it as updated.
+                    uncounted_update: true,
+                    develop_pending: false,
+                });
+                self.restore(global_id, path)
             }
             Step::VirtualCopy {
                 global_id,
@@ -1936,23 +2036,14 @@ impl Run<'_> {
                     self.record_import(global_id, photo.lightroom_id, id, path)?;
                 }
                 ImportResult::Existing { id, reason } => {
-                    // A duplicate by content of a photo another Lightroom photo
-                    // already maps to (or that the check found for another
-                    // photo of this run): two different photos, one record.
-                    // Give this photo its own record instead of sharing.
-                    let claimed =
-                        reason.as_deref() == Some("content")
-                            && (self.state.photos().any(|(gid, e)| {
-                                gid != global_id && same_id(&e.lightcraft_id, &id)
-                            }) || self
-                                .found
-                                .iter()
-                                .any(|(gid, (found, _))| gid != global_id && same_id(found, &id)));
-                    if claimed {
-                        self.same_content_copy(global_id, photo, &id, &sent_path, path)?;
-                    } else {
-                        self.adopt_while_importing(global_id, photo, id, path)?;
-                    }
+                    self.duplicate_on_import(
+                        global_id,
+                        photo,
+                        id,
+                        reason.as_deref(),
+                        &sent_path,
+                        path,
+                    )?;
                 }
                 ImportResult::Failed => {
                     skip(
@@ -1982,16 +2073,150 @@ impl Run<'_> {
                 self.fail_current();
             }
             Err(WriteError::Command { command, .. }) => {
-                skip(
+                // LightCraft may finish an import it answered with an error
+                // (a cloud-only original it had to download): look once
+                // whether the file is in the library now, and take it over
+                // instead of importing it again on the next run.
+                let found = match sent_path.as_str() {
+                    Some(p) => preview_one(&mut self.client, p)?,
+                    None => None,
+                };
+                match found {
+                    Some((reason, id)) => {
+                        let reason = match reason {
+                            ExistingReason::Path => "path",
+                            ExistingReason::Content => "content",
+                        };
+                        self.duplicate_on_import(
+                            global_id,
+                            photo,
+                            id,
+                            Some(reason),
+                            &sent_path,
+                            path,
+                        )?;
+                    }
+                    None => {
+                        skip(
+                            &mut self.summary,
+                            SkipCode::Rejected,
+                            &format!("LightCraft rejected `{command}`"),
+                        );
+                        self.fail_current();
+                    }
+                }
+            }
+            Err(e) => return Err(e),
+        }
+        Ok(())
+    }
+
+    /// Brings a recorded photo back from LightCraft's trash by importing its
+    /// file again: LightCraft finds the trashed record by path and restores
+    /// it. If it makes a new record instead, the entry points to that one
+    /// with a fresh import's values, and the next run writes it; any other
+    /// answer leaves the photo incomplete.
+    fn restore(&mut self, global_id: &str, path: &Path) -> Result<(), WriteError> {
+        let Some(entry) = self.state.photo(global_id) else {
+            self.fail_current();
+            return Ok(());
+        };
+        let (lightroom_id, old) = (entry.lightroom_id, entry.lightcraft_id.clone());
+        let incomplete = |summary: &mut ApplySummary, code: SkipCode, why: &str| {
+            summary.photos_incomplete.push(
+                Skipped::new(code, format!("photo {lightroom_id}: {why}"))
+                    .about(Subject::Photo(lightroom_id)),
+            );
+        };
+        let Some(params) = import_params(path) else {
+            incomplete(
+                &mut self.summary,
+                SkipCode::PathNotUtf8,
+                "the file path is not valid UTF-8",
+            );
+            self.fail_current();
+            return Ok(());
+        };
+        let sent_path = params["paths"][0].clone();
+        match self.client.execute("library.import", params) {
+            Ok(Outcome::Applied(result)) => match import_id(&result, &sent_path) {
+                ImportResult::Existing { id, .. } if same_id(&id, &old) => {
+                    self.summary.journal.restored.push(id);
+                }
+                ImportResult::Imported(id) => {
+                    self.summary.journal.created_photos.push(id.clone());
+                    self.state
+                        .record(global_id, lightroom_id, id, PhotoFields::imported_default());
+                    self.state.record_develop_hash(global_id, None);
+                    self.save_state(true)?;
+                    incomplete(
+                        &mut self.summary,
+                        SkipCode::NoLightcraftId,
+                        "LightCraft imported the file as a new photo instead of restoring \
+                         it from the trash; its values are written by the next run",
+                    );
+                    self.fail_current();
+                }
+                _ => {
+                    incomplete(
+                        &mut self.summary,
+                        SkipCode::ImportFailed,
+                        "could not be restored from LightCraft's trash",
+                    );
+                    self.fail_current();
+                }
+            },
+            Ok(Outcome::AppliedNotSaved(_)) => {
+                self.summary.not_saved += 1;
+                incomplete(
+                    &mut self.summary,
+                    SkipCode::AppliedNotSaved,
+                    "`library.import` was applied but not saved while restoring it",
+                );
+                self.fail_current();
+            }
+            Err(WriteError::Command { command, .. }) => {
+                incomplete(
                     &mut self.summary,
                     SkipCode::Rejected,
-                    &format!("LightCraft rejected `{command}`"),
+                    &format!("LightCraft rejected `{command}` while restoring it"),
                 );
                 self.fail_current();
             }
             Err(e) => return Err(e),
         }
         Ok(())
+    }
+
+    /// Handles a file `library.import` reports as already in the library
+    /// (`reason` `path` or `content`).
+    fn duplicate_on_import(
+        &mut self,
+        global_id: &str,
+        photo: &Photo,
+        id: Value,
+        reason: Option<&str>,
+        sent_path: &Value,
+        path: &Path,
+    ) -> Result<(), WriteError> {
+        // A duplicate by content of a photo another Lightroom photo already
+        // maps to (or that the check found for another photo of this run):
+        // two different photos, one record. Give this photo its own record
+        // instead of sharing.
+        let claimed = reason == Some("content")
+            && (self
+                .state
+                .photos()
+                .any(|(gid, e)| gid != global_id && same_id(&e.lightcraft_id, &id))
+                || self
+                    .found
+                    .iter()
+                    .any(|(gid, (found, _))| gid != global_id && same_id(found, &id)));
+        if claimed {
+            self.same_content_copy(global_id, photo, &id, sent_path, path)
+        } else {
+            self.adopt_while_importing(global_id, photo, id, path)
+        }
     }
 
     /// Takes over a photo the check before writing found in the library: no
@@ -2036,7 +2261,7 @@ impl Run<'_> {
         id: Value,
         path: &Path,
     ) -> Result<(), WriteError> {
-        let live = read_one(self.client, &id)?;
+        let live = read_one(&mut self.client, &id)?;
         let choice = match &live {
             Some(_) => self.decisions.choice_for(global_id),
             None => ExistingChoice::Skip,

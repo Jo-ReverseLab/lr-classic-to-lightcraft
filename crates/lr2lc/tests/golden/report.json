@@ -69,7 +69,9 @@
     "copyrights": 1,
     "creators": 3,
     "titles": 5,
-    "titles_unreadable": 4
+    "titles_unreadable": 4,
+    "cloud_only": 0,
+    "cloud_only_bytes": 0
   },
   "collections": {
     "read": 47,

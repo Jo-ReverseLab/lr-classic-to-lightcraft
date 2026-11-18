@@ -1,7 +1,7 @@
 //! Command-line argument parsing.
 
 use lr2lc_core::labels::LabelChoice;
-use lr2lc_core::{Areas, ExistingChoice};
+use lr2lc_core::{Areas, ExistingChoice, RemovedChoice};
 use model::{PathMapping, PathMappings};
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -48,6 +48,10 @@ Options:
                    develop-if-empty (default: fill empty fields, write
                    development only if LightCraft has none) or skip
                    (leave the photo as it is)
+  --removed CHOICE What to do with photos lr2lc wrote that were deleted in
+                   LightCraft since (checked with --apply): reimport
+                   (default: restore from the trash or import again) or
+                   leave (write nothing for them)
   --probe-white-balance
                    Read the original file to derive a white-balance scale
                    (not implemented yet: the run stops with exit code 2)
@@ -87,6 +91,8 @@ pub struct RunOptions {
     pub anonymize: bool,
     /// What happens to photos LightCraft already has (`--existing`).
     pub existing: ExistingChoice,
+    /// What happens to written photos deleted in LightCraft (`--removed`).
+    pub removed: RemovedChoice,
 }
 
 /// The default control port of the LightCraft app.
@@ -109,6 +115,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
     let mut areas: Option<Areas> = None;
     let mut anonymize = false;
     let mut existing: Option<ExistingChoice> = None;
+    let mut removed: Option<RemovedChoice> = None;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("-h" | "--help") => return Ok(Command::Help),
@@ -170,6 +177,16 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
                     .ok_or("--existing value is not valid UTF-8")?;
                 existing = Some(value.parse().map_err(|e| format!("--existing: {e}"))?);
             }
+            Some("--removed") => {
+                if removed.is_some() {
+                    return Err("--removed given more than once".to_string());
+                }
+                let value = args
+                    .next()
+                    .ok_or("--removed needs a choice: reimport or leave")?;
+                let value = value.to_str().ok_or("--removed value is not valid UTF-8")?;
+                removed = Some(value.parse().map_err(|e| format!("--removed: {e}"))?);
+            }
             Some("--report") => {
                 if report.is_some() {
                     return Err("--report given more than once".to_string());
@@ -219,6 +236,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
         areas: areas.unwrap_or_default(),
         anonymize,
         existing: existing.unwrap_or_default(),
+        removed: removed.unwrap_or_default(),
     }))
 }
 
@@ -436,6 +454,7 @@ mod tests {
             "--script",
             "--overwrite-develop",
             "--existing",
+            "--removed",
             "--probe-white-balance",
             "--help",
             "--version",
@@ -484,6 +503,22 @@ mod tests {
             parse(&["c.lrcat", "--existing"])
                 .unwrap_err()
                 .contains("--existing needs a choice")
+        );
+    }
+
+    #[test]
+    fn removed_takes_one_choice_once() {
+        assert_eq!(run(&["c.lrcat"]).removed, RemovedChoice::Reimport);
+        assert_eq!(
+            run(&["--removed", "leave", "c.lrcat"]).removed,
+            RemovedChoice::Leave
+        );
+        let err = parse(&["--removed", "keep", "c.lrcat"]).unwrap_err();
+        assert!(err.contains("--removed: unknown choice `keep`"), "{err}");
+        assert!(
+            parse(&["--removed", "leave", "--removed", "leave", "c.lrcat"])
+                .unwrap_err()
+                .contains("--removed given more than once")
         );
     }
 }

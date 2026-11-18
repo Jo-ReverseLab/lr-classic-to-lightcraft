@@ -22628,6 +22628,8 @@
   "photos": {
     "by_code": {},
     "captions": 0,
+    "cloud_only": 0,
+    "cloud_only_bytes": 0,
     "converted": 1000,
     "copyrights": 0,
     "creators": 0,

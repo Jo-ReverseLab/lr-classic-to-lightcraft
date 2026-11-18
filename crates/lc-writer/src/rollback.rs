@@ -67,6 +67,9 @@ pub struct Journal {
     /// Photos the library already had that this run took over. Nothing is
     /// removed for them; their fields are set back to these values.
     pub adopted: Vec<AdoptedPhoto>,
+    /// Photos this run restored from LightCraft's trash; Cancel moves them
+    /// back there.
+    pub restored: Vec<Value>,
 }
 
 impl Journal {
@@ -80,6 +83,7 @@ impl Journal {
             && self.quick.is_empty()
             && self.fields.is_empty()
             && self.developed.is_empty()
+            && self.restored.is_empty()
     }
 }
 
@@ -96,6 +100,8 @@ pub struct RollbackSummary {
     /// Photos already in the library before the run whose development
     /// settings stay as the run wrote them.
     pub develop_not_reset: usize,
+    /// Photos the run had restored from LightCraft's trash, moved back.
+    pub photos_trashed_again: usize,
     /// Commands LightCraft refused, by name; their part stays as it is.
     pub failed: Vec<String>,
     /// The mapping file was set back to its state before the run.
@@ -284,6 +290,14 @@ pub fn rollback(
             &mut out,
         )? {
             out.photos_removed = ids.len();
+        }
+    }
+    // Photos restored from the trash go back there (`photo.delete` moves
+    // to Recently Deleted).
+    if !journal.restored.is_empty() {
+        let ids = &journal.restored;
+        if on_selection(sink, ids, "photo.delete", json!({"ids": ids}), &mut out)? {
+            out.photos_trashed_again = ids.len();
         }
     }
     // Keywords, deepest first.

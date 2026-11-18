@@ -270,6 +270,8 @@ const PHOTO_AREA_KEYS: &[&str] = &[
     "creators",
     "titles",
     "titles_unreadable",
+    "cloud_only",
+    "cloud_only_bytes",
 ];
 
 const FLAG_KEYS: &[&str] = &["pick", "reject", "none", "unknown"];

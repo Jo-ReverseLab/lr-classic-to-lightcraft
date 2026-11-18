@@ -461,6 +461,24 @@ impl State {
         self.quick.members.extend(members);
     }
 
+    /// Forgets a photo lr2lc wrote that is gone from LightCraft: its entry
+    /// and its recorded album, stack and Quick Collection memberships, so
+    /// the next plan imports it and adds it to them again as a new photo.
+    /// Returns whether it was recorded.
+    pub fn forget_photo(&mut self, global_id: &str) -> bool {
+        if self.photos.remove(global_id).is_none() {
+            return false;
+        }
+        for entry in self.collections.values_mut() {
+            entry.members.retain(|g| g != global_id);
+        }
+        for entry in self.stacks.values_mut() {
+            entry.members.retain(|g| g != global_id);
+        }
+        self.quick.members.remove(global_id);
+        true
+    }
+
     /// The entry of a stack, by Lightroom id.
     pub fn stack(&self, lightroom_id: i64) -> Option<&StackEntry> {
         self.stacks.get(&lightroom_id)

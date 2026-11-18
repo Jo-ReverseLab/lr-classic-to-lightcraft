@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 use args::{Command, RunOptions, USAGE, parse_args};
 use lr2lc_core::labels::LabelMode;
 use lr2lc_core::report_file::{self, Kind, ReportTarget};
-use lr2lc_core::{ExistingDecisions, Job, NoProgress, finish, prepare};
+use lr2lc_core::{ExistingDecisions, Job, NoProgress, RemovedDecisions, finish, prepare};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -115,6 +115,7 @@ fn run(options: &RunOptions, labels: &LabelMode, targets: &Targets) -> Result<()
         areas: options.areas,
         anonymize: options.anonymize,
         existing: ExistingDecisions::all(options.existing),
+        removed: RemovedDecisions::all(options.removed),
     };
     let prepared = prepare(&job, &mut NoProgress)?;
     if let (Some(target), Some(given)) = (&targets.script, &options.script) {
@@ -161,6 +162,7 @@ mod tests {
             areas: lr2lc_core::Areas::ALL,
             anonymize: false,
             existing: Default::default(),
+            removed: Default::default(),
         }
     }
 

@@ -64,6 +64,18 @@ impl Log {
                 Entry::new(status, area, Stage::Rollback, Subject::None, message).code(code);
             self.entries.push(raw(entry, recommendation));
         };
+        if r.photos_trashed_again > 0 {
+            push(
+                Status::Adjusted,
+                Area::Photos,
+                format!(
+                    "Run cancelled: {} moved back to LightCraft's trash",
+                    counted(r.photos_trashed_again, "restored photo")
+                ),
+                "rolled_back",
+                None,
+            );
+        }
         for (n, area, what) in [
             (r.photos_removed, Area::Photos, "photo"),
             (r.albums_removed, Area::Collections, "album"),
@@ -207,6 +219,23 @@ impl Namer<'_> {
             ),
         };
         let private = |value: Option<String>| value.filter(|_| !self.anonymize);
+        // LightCraft's own message of a rejected command; it may quote a
+        // path, which an anonymized log replaces.
+        let reason = match (entry.reason, entry.detail) {
+            (reason, None) => reason,
+            (reason, Some(detail)) => {
+                let detail = if self.anonymize {
+                    without_paths(&detail)
+                } else {
+                    detail
+                };
+                let said = format!("LightCraft said: {detail}");
+                Some(match reason {
+                    Some(reason) => format!("{reason} {said}"),
+                    None => said,
+                })
+            }
+        };
         LogEntry {
             status: entry.status.as_str(),
             area: entry.area.as_str(),
@@ -214,7 +243,7 @@ impl Namer<'_> {
             item,
             message: entry.message,
             code: entry.code,
-            reason: entry.reason,
+            reason,
             recommendation,
             source: private(entry.source),
             result: private(entry.result),
@@ -235,8 +264,61 @@ fn skip(skipped: &Skipped, area: Area, stage: Stage, failed: bool) -> RawEntry {
     };
     let entry = Entry::new(status, area, stage, skipped.subject.clone(), g.message)
         .code(skipped.code.as_str())
-        .reason(skipped.reason.clone());
+        .reason(skipped.reason.clone())
+        .detail(skipped.detail.clone());
     raw(entry, g.recommendation)
+}
+
+/// `text` with every file path replaced by `<path>`: a quoted text holding
+/// a `/` or `\`, or an unquoted path (starting with `/`, `~/` or a drive
+/// letter like `C:\`) up to the next `: `, `, `, `)` or the end.
+pub fn without_paths(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if matches!(c, '\'' | '"' | '`' | '‘' | '“') {
+            let close = match c {
+                '‘' => '’',
+                '“' => '”',
+                other => other,
+            };
+            if let Some(len) = chars[i + 1..].iter().position(|&d| d == close) {
+                let inner = &chars[i + 1..i + 1 + len];
+                if inner.iter().any(|&d| d == '/' || d == '\\') {
+                    out.push(c);
+                    out.push_str("<path>");
+                    out.push(close);
+                    i += len + 2;
+                    continue;
+                }
+            }
+        }
+        let starts_word = i == 0 || matches!(chars[i - 1], ' ' | '(' | '=' | '[' | '\t');
+        let drive = c.is_ascii_alphabetic()
+            && chars.get(i + 1) == Some(&':')
+            && matches!(chars.get(i + 2), Some('\\' | '/'));
+        let path = c == '/' || (c == '~' && chars.get(i + 1) == Some(&'/')) || drive;
+        if starts_word && path {
+            let mut end = i + 1;
+            while end < chars.len() {
+                let next = chars.get(end + 1);
+                let stop = matches!(chars[end], ')' | ']')
+                    || (matches!(chars[end], ':' | ',' | ';') && matches!(next, None | Some(' ')));
+                if stop {
+                    break;
+                }
+                end += 1;
+            }
+            out.push_str("<path>");
+            i = end;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
 }
 
 fn raw(entry: Entry, recommendation: Option<&'static str>) -> RawEntry {
@@ -348,6 +430,29 @@ fn entries_unnamed(sources: &Sources<'_>) -> Vec<RawEntry> {
         for skipped in report.skipped_items() {
             out.push(skip(skipped, area, Stage::Read, false));
         }
+    }
+    let importing = crate::job::imported_photos(sources.plan, sources.input);
+    for (id, bytes) in &o.cloud_only.photos {
+        if !importing.contains(id) {
+            continue;
+        }
+        let entry = Entry::new(
+            Status::Adjusted,
+            Area::Photos,
+            Stage::Read,
+            Subject::Photo(*id),
+            "Original is only in the cloud, not downloaded",
+        )
+        .code("original_in_cloud")
+        .reason(format!(
+            "The file ({}) is a placeholder on this computer; LightCraft has to download it \
+             while importing.",
+            crate::output::megabytes(*bytes)
+        ));
+        out.push(raw(
+            entry,
+            Some("Download the originals first (Finder: Download Now); otherwise the import is slow and may fail."),
+        ));
     }
     for name in sources.not_selected {
         let entry = Entry::new(
@@ -685,4 +790,58 @@ pub fn counts(entries: &[RawEntry]) -> BTreeMap<&'static str, usize> {
         *out.entry(e.entry.status.as_str()).or_insert(0) += 1;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_are_replaced_quoted_or_not() {
+        assert_eq!(
+            without_paths("could not read \"/Users/example/My Photos/a.CR3\": timed out"),
+            "could not read \"<path>\": timed out"
+        );
+        assert_eq!(
+            without_paths("cannot open /Volumes/Disk/a b.jpg: no such file"),
+            "cannot open <path>: no such file"
+        );
+        assert_eq!(
+            without_paths("bad file C:\\Photos\\a.jpg, skipped"),
+            "bad file <path>, skipped"
+        );
+        assert_eq!(without_paths("see ~/Pictures/x"), "see <path>");
+        assert_eq!(without_paths("no photos selected"), "no photos selected");
+        assert_eq!(without_paths("rate 3/5 'pick'"), "rate 3/5 'pick'");
+    }
+
+    #[test]
+    fn an_app_message_is_shown_in_the_reason_without_paths_when_anonymized() {
+        let skipped = Skipped::new(
+            SkipCode::Rejected,
+            "photo 1: LightCraft rejected `library.import`",
+        )
+        .about(Subject::Photo(1))
+        .detail("could not read \"/Users/example/a.CR3\"");
+        let log = Log {
+            entries: vec![skip(&skipped, Area::Photos, Stage::Photos, false)],
+            ..Log::default()
+        };
+        let named = &log.render(false)[0];
+        assert_eq!(
+            named.reason.as_deref(),
+            Some(
+                "photo 1: LightCraft rejected `library.import` LightCraft said: \
+                 could not read \"/Users/example/a.CR3\""
+            )
+        );
+        let anonymous = &log.render(true)[0];
+        assert_eq!(
+            anonymous.reason.as_deref(),
+            Some(
+                "photo 1: LightCraft rejected `library.import` LightCraft said: \
+                 could not read \"<path>\""
+            )
+        );
+    }
 }

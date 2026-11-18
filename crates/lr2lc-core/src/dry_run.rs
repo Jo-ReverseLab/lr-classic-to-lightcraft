@@ -5,7 +5,7 @@
 use crate::labels::{self, LabelCounts, LabelMode};
 use anyhow::{Context, Result, bail};
 use lc_writer::progress::{NoProgress, Phase, Progress};
-use lr_reader::{Catalog, KeywordData, checksum, drop_missing_originals};
+use lr_reader::{Catalog, CloudOnly, KeywordData, check_originals, checksum};
 use model::{
     Collection, CollectionKind, Flag, Folder, Keyword, MappedPath, PathMappings, Photo,
     QuickCollection, Rating, Report, SkipCode, Skipped, SmartCollection, Stack, Subject,
@@ -58,6 +58,9 @@ pub struct Outcome {
     pub titles: usize,
     /// Converted photos whose title blob cannot be read.
     pub titles_unreadable: usize,
+    /// Converted photos whose original is only in the cloud (not
+    /// downloaded); importing them makes LightCraft download each one.
+    pub cloud_only: CloudOnly,
     /// What the writer gets: the converted photos (paths mapped), the
     /// converted keywords and the keywords of each converted photo.
     pub converted: Converted,
@@ -246,6 +249,7 @@ pub fn run_with(
     phase(progress, Phase::Checksum)?;
     let before = checksum(path).context("cannot read catalog file")?;
     phase(progress, Phase::Reading)?;
+    let cloud_only: CloudOnly;
     let (
         catalog_version,
         folders,
@@ -359,7 +363,8 @@ pub fn run_with(
             }
         }
         phase(progress, Phase::CheckingOriginals)?;
-        let mut kept_photos = drop_missing_originals(kept_before_originals, &mut photos);
+        let (mut kept_photos, cloud) = check_originals(kept_before_originals, &mut photos);
+        cloud_only = cloud;
         let labels = labels::apply(&mut kept_photos, &photo_data.color_labels, label_mode);
         for _ in &kept_photos {
             photos.converted();
@@ -489,6 +494,7 @@ pub fn run_with(
         creators,
         titles,
         titles_unreadable,
+        cloud_only,
         converted,
     })
 }

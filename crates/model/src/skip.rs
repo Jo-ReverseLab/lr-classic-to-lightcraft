@@ -90,6 +90,9 @@ pub enum SkipCode {
     /// the separate LightCraft record (a copy linked to its own file) could
     /// not be made.
     SameContent,
+    /// A photo lr2lc wrote that was deleted in LightCraft and is left as it
+    /// is (`--removed leave`): nothing is written for it.
+    RemovedInLightcraft,
     // Dry run: path mapping.
     /// A path mapping would climb out of the new prefix via `..`; the path is
     /// left unchanged and the element is not converted.
@@ -104,7 +107,7 @@ pub enum SkipCode {
 
 impl SkipCode {
     /// Every code, in declaration order.
-    pub const ALL: [SkipCode; 59] = [
+    pub const ALL: [SkipCode; 60] = [
         SkipCode::NoRootFolder,
         SkipCode::RootFolderNotFound,
         SkipCode::RootFolderNoPath,
@@ -161,6 +164,7 @@ impl SkipCode {
         SkipCode::ImportFailed,
         SkipCode::Rejected,
         SkipCode::SameContent,
+        SkipCode::RemovedInLightcraft,
         SkipCode::PathMappingEscaped,
         SkipCode::PathMappingCollision,
         SkipCode::Unspecified,
@@ -225,6 +229,7 @@ impl SkipCode {
             SkipCode::ImportFailed => "import_failed",
             SkipCode::Rejected => "rejected",
             SkipCode::SameContent => "same_content",
+            SkipCode::RemovedInLightcraft => "removed_in_lightcraft",
             SkipCode::PathMappingEscaped => "path_mapping_escaped",
             SkipCode::PathMappingCollision => "path_mapping_collision",
             SkipCode::Unspecified => "unspecified",
@@ -248,6 +253,11 @@ pub struct Skipped {
     /// What was skipped, by id; [`Subject::None`] where the skip site does
     /// not name it.
     pub subject: Subject,
+    /// LightCraft's own error message for a rejected command. It may quote
+    /// a path or a name, so it never goes into `reason` or the report's
+    /// skip lists; only the run log shows it (with paths replaced when
+    /// anonymized).
+    pub detail: Option<String>,
 }
 
 impl SkipCode {
@@ -281,7 +291,14 @@ impl Skipped {
             reason,
             code,
             subject: Subject::None,
+            detail: None,
         }
+    }
+
+    /// Adds the app's own message (see [`Skipped::detail`]).
+    pub fn detail(mut self, message: impl Into<String>) -> Self {
+        self.detail = Some(message.into());
+        self
     }
 
     /// Names what was skipped.

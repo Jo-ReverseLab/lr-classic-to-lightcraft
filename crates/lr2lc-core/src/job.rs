@@ -1,14 +1,16 @@
 //! One conversion run, split into steps a front end can drive: [`prepare`]
-//! reads the catalog and plans the writer commands, [`check_existing`]
-//! (optional, before writing) lists the photos LightCraft already has so the
-//! front end can ask what to do with them, [`finish`] writes them (with
-//! `apply` and a library) or keeps the plan, and [`Finished`] holds
-//! everything a front end shows or saves afterwards.
+//! reads the catalog and plans the writer commands, [`check_library`]
+//! (optional, before writing) lists the photos LightCraft already has and
+//! the recorded photos deleted in LightCraft, so the front end can ask what
+//! to do with them, [`finish`] writes them (with `apply` and a library) or
+//! keeps the plan, and [`Finished`] holds everything a front end shows or
+//! saves afterwards.
 //!
-//! A front end that asks about existing photos runs, on its worker thread:
-//! `prepare` → `check_existing` → (ask, then set [`Job::existing`]) →
-//! [`Prepared::set_existing`] → `finish`. Without `set_existing`, `finish`
-//! runs the check itself and applies `Job::existing` without asking.
+//! A front end that asks runs, on its worker thread: `prepare` →
+//! `check_library` → (ask, then set [`Job::existing`] and [`Job::removed`])
+//! → [`Prepared::set_check`] → `finish`. Without `set_check`, `finish` runs
+//! the check itself and applies `Job::existing` and `Job::removed` without
+//! asking.
 
 use crate::dry_run::{self, Names, Outcome};
 use crate::labels::LabelMode;
@@ -17,7 +19,7 @@ use crate::output;
 use crate::writer::{self, DevelopJson, WriterJson};
 use lc_writer::apply::{Aborted, ApplySummary};
 use lc_writer::control::{CommandSink, Timing, WriteError};
-use lc_writer::existing::{ExistingDecisions, ExistingPhoto};
+use lc_writer::existing::{ExistingDecisions, LibraryCheck, RemovedDecisions};
 use lc_writer::plan::{Areas, Plan, WriteInput};
 use lc_writer::progress::Progress;
 use lc_writer::state::State;
@@ -48,6 +50,9 @@ pub struct Job {
     /// What happens to new photos LightCraft already has (default for all:
     /// `develop-if-empty`; a front end may set a choice per photo).
     pub existing: ExistingDecisions,
+    /// What happens to recorded photos deleted in LightCraft (default for
+    /// all: `reimport`; a front end may set a choice per photo).
+    pub removed: RemovedDecisions,
 }
 
 impl Job {
@@ -112,9 +117,9 @@ pub struct Prepared {
     pub plan: Plan,
     /// Names for the run log.
     pub names: Names,
-    /// The photos LightCraft already has, when a front end checked before
-    /// finishing ([`Prepared::set_existing`]).
-    existing: Option<Vec<ExistingPhoto>>,
+    /// What the check before writing found, when a front end ran it
+    /// ([`Prepared::set_check`]).
+    check: Option<LibraryCheck>,
 }
 
 /// Reads the catalog, loads the mapping file and plans the writer commands,
@@ -144,15 +149,54 @@ pub fn prepare(job: &Job, progress: &mut dyn Progress) -> Result<Prepared, RunEr
         state,
         plan,
         names,
-        existing: None,
+        check: None,
     })
 }
 
+/// The Lightroom ids of the photos `plan` imports as files.
+pub(crate) fn imported_photos(plan: &Plan, input: &WriteInput) -> std::collections::BTreeSet<i64> {
+    let gids: BTreeSet<&str> = plan
+        .steps
+        .iter()
+        .filter_map(|s| match s {
+            lc_writer::plan::Step::Import { global_id, .. } => Some(global_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    input
+        .photos
+        .iter()
+        .filter(|p| p.global_id.as_deref().is_some_and(|g| gids.contains(g)))
+        .map(|p| p.lightroom_id)
+        .collect()
+}
+
 impl Prepared {
-    /// Hands the result of [`check_existing`] to [`finish`], which then
-    /// does not check again and applies [`Job::existing`] to these photos.
-    pub fn set_existing(&mut self, found: Vec<ExistingPhoto>) {
-        self.existing = Some(found);
+    /// Converted photos whose original is only in the cloud (macOS
+    /// "dataless", e.g. iCloud Drive), with their sizes.
+    pub fn cloud_only(&self) -> &lr_reader::CloudOnly {
+        &self.outcome.cloud_only
+    }
+
+    /// Of [`Prepared::cloud_only`], the photos this run imports as files
+    /// (new in the library), and their size together in bytes: LightCraft
+    /// has to download each of them while importing. A front end warns
+    /// before the transfer when the count is not 0.
+    pub fn cloud_only_to_import(&self) -> (usize, u64) {
+        let importing = imported_photos(&self.plan, &self.input);
+        self.outcome
+            .cloud_only
+            .photos
+            .iter()
+            .filter(|(id, _)| importing.contains(id))
+            .fold((0, 0), |(n, b), (_, bytes)| (n + 1, b + bytes))
+    }
+
+    /// Hands the result of [`check_library`] to [`finish`], which then
+    /// does not check again and applies [`Job::existing`] and
+    /// [`Job::removed`] to these photos.
+    pub fn set_check(&mut self, found: LibraryCheck) {
+        self.check = Some(found);
     }
 
     /// The planned commands as JSON lines (`--script`).
@@ -216,28 +260,29 @@ pub struct Finished {
 }
 
 /// Asks LightCraft, through the control port on `job.port`, which of the
-/// photos the run would import it already has, with their values there.
+/// photos the run would import it already has (with their values there)
+/// and which recorded photos were deleted in it.
 /// Runs the pre-flight checks first and sends only reading commands
 /// (reported as [`lc_writer::progress::Phase::CheckingLibrary`]). Empty when
-/// `job` does not write. Hand the result to [`Prepared::set_existing`].
-pub fn check_existing(
+/// `job` does not write. Hand the result to [`Prepared::set_check`].
+pub fn check_library(
     job: &Job,
     prepared: &Prepared,
     progress: &mut dyn Progress,
-) -> Result<Vec<ExistingPhoto>, RunError> {
+) -> Result<LibraryCheck, RunError> {
     check_by(job, |target| {
         writer::check(target, &prepared.input, &prepared.state, progress)
     })
 }
 
-/// Like [`check_existing`], through `sink`, for a host that runs
+/// Like [`check_library`], through `sink`, for a host that runs
 /// LightCraft's commands itself; `job.port` is not used.
-pub fn check_existing_with(
+pub fn check_library_with(
     job: &Job,
     prepared: &Prepared,
     sink: &mut dyn CommandSink,
     progress: &mut dyn Progress,
-) -> Result<Vec<ExistingPhoto>, RunError> {
+) -> Result<LibraryCheck, RunError> {
     check_by(job, |target| {
         writer::check_with(sink, target, &prepared.input, &prepared.state, progress)
     })
@@ -245,10 +290,10 @@ pub fn check_existing_with(
 
 fn check_by(
     job: &Job,
-    check: impl FnOnce(&writer::Target<'_>) -> Result<Vec<ExistingPhoto>, WriteError>,
-) -> Result<Vec<ExistingPhoto>, RunError> {
+    check: impl FnOnce(&writer::Target<'_>) -> Result<LibraryCheck, WriteError>,
+) -> Result<LibraryCheck, RunError> {
     let Some(library) = job.writes_to() else {
-        return Ok(Vec::new());
+        return Ok(LibraryCheck::default());
     };
     let target = writer::Target {
         library,
@@ -268,15 +313,16 @@ fn check_by(
 /// Writes the plan (when `job` writes) through the control port on
 /// `job.port`, or keeps it as the dry-run result, then checks that the
 /// catalog is still unchanged. Photos LightCraft already has get
-/// `job.existing`: those of [`Prepared::set_existing`], or, without it,
+/// `job.existing` and recorded photos deleted in LightCraft get
+/// `job.removed`: those of [`Prepared::set_check`], or, without it,
 /// those a check run here finds.
 pub fn finish(
     job: &Job,
     prepared: Prepared,
     progress: &mut dyn Progress,
 ) -> Result<Finished, RunError> {
-    finish_by(job, prepared, |target, input, existing, state, timing| {
-        writer::write(target, input, existing, state, progress, timing)
+    finish_by(job, prepared, |target, input, check, state, timing| {
+        writer::write(target, input, check, state, progress, timing)
     })
 }
 
@@ -288,8 +334,8 @@ pub fn finish_with(
     sink: &mut dyn CommandSink,
     progress: &mut dyn Progress,
 ) -> Result<Finished, RunError> {
-    finish_by(job, prepared, |target, input, existing, state, timing| {
-        writer::write_to(sink, target, input, existing, state, progress, timing)
+    finish_by(job, prepared, |target, input, check, state, timing| {
+        writer::write_to(sink, target, input, check, state, progress, timing)
     })
 }
 
@@ -299,7 +345,7 @@ fn finish_by(
     write: impl FnOnce(
         &writer::Target<'_>,
         &mut WriteInput,
-        Option<Vec<ExistingPhoto>>,
+        Option<LibraryCheck>,
         State,
         &mut Timing,
     ) -> Result<ApplySummary, Aborted>,
@@ -310,9 +356,10 @@ fn finish_by(
         state,
         plan,
         names,
-        existing,
+        check,
     } = prepared;
     input.existing_decisions = job.existing.clone();
+    input.removed_decisions = job.removed.clone();
     let mut applied = None;
     let mut timing = Timing::new();
     let (writer_summary, writer, develop, stop) = match job.writes_to() {
@@ -329,7 +376,7 @@ fn finish_by(
                 allow_xmp: job.allow_xmp,
             };
             // A run that stops still reports what it did (Principle 4).
-            let (summary, stop) = match write(&target, &mut input, existing, state, &mut timing) {
+            let (summary, stop) = match write(&target, &mut input, check, state, &mut timing) {
                 Ok(summary) => (summary, None),
                 Err(aborted) => (*aborted.summary, Some(aborted.error)),
             };
@@ -476,6 +523,7 @@ impl Finished {
                     quick_removed: r.quick_removed,
                     fields_restored: r.fields_restored,
                     develop_not_reset: r.develop_not_reset,
+                    photos_trashed_again: r.photos_trashed_again,
                     failed: r.failed.len(),
                     mapping_restored: r.mapping_restored,
                 }),

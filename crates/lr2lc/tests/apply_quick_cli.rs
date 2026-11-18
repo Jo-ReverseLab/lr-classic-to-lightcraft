@@ -90,11 +90,15 @@ fn n(v: &Value) -> usize {
     v.as_u64().unwrap_or_else(|| panic!("not a number: {v}")) as usize
 }
 
+/// Quick Collection commands: the target, the toggle and the reads of an
+/// album's members (the check before writing also reads the library's
+/// photo ids, without an album filter).
 fn quick_commands(fake: &FakeLightCraft, from: usize) -> usize {
     fake.commands()[from..]
         .iter()
-        .filter(|(c, _)| {
-            ["album.setTarget", "album.toggleTarget", "catalog.query"].contains(&c.as_str())
+        .filter(|(c, p)| {
+            ["album.setTarget", "album.toggleTarget"].contains(&c.as_str())
+                || (c == "catalog.query" && p["filter"].get("album").is_some())
         })
         .count()
 }

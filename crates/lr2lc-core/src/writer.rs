@@ -6,7 +6,7 @@ use crate::output::group_reasons;
 use anyhow::{Context, Result};
 use lc_writer::apply::{Aborted, ApplySummary, apply_partial_with};
 use lc_writer::control::{CommandSink, ControlClient, TimedSink, Timing, WriteError, preflight};
-use lc_writer::existing::{ExistingCounts, ExistingPhoto, find_existing};
+use lc_writer::existing::{ExistingCounts, LibraryCheck, RemovedCounts, check_library};
 use lc_writer::plan::{Conflict, MovedPhoto, Plan, RemovedPhoto, RenamedKeyword, Step, WriteInput};
 use lc_writer::progress::Progress;
 use lc_writer::state::{State, state_path};
@@ -226,6 +226,8 @@ pub struct AppliedJson {
     /// Photos LightCraft already had (`photos_existing`), by the choice made
     /// for them.
     existing: ExistingCounts,
+    /// Recorded photos deleted in LightCraft, by the choice made for them.
+    removed_in_lightcraft: RemovedCounts,
     /// Imported photos whose file has the same bytes as another photo; each
     /// became its own record (a copy linked to its own file).
     photos_same_content: usize,
@@ -375,6 +377,8 @@ pub fn input(converted: Converted) -> WriteInput {
         // Found when writing, after connecting (see `write`).
         existing: Vec::new(),
         existing_decisions: Default::default(),
+        removed: Vec::new(),
+        removed_decisions: Default::default(),
     }
 }
 
@@ -409,7 +413,7 @@ pub fn planned(plan: &Plan) -> PlannedJson {
             Step::Import { .. } => out.photos += 1,
             Step::VirtualCopy { .. } => out.photos += 1,
             // Only an applied run adopts; its photos count as existing.
-            Step::Adopt { .. } => {}
+            Step::Adopt { .. } | Step::Restore { .. } => {}
             Step::Update { .. } => out.updates += 1,
             Step::CreateAlbum { params, .. } => {
                 if params["folder"] == true {
@@ -459,6 +463,7 @@ pub fn applied_json(s: &ApplySummary, aborted: Option<&WriteError>) -> WriterJso
         photos_imported: s.photos_imported,
         photos_existing: s.photos_existing,
         existing: s.existing,
+        removed_in_lightcraft: s.removed_in_lightcraft,
         photos_same_content: s.photos_same_content,
         photos_updated: s.photos_updated,
         photos_unchanged: s.photos_unchanged,
@@ -593,6 +598,7 @@ pub fn planned_summary(plan: &Plan) -> String {
     );
     develop_line(&mut out, &planned_develop(plan));
     let _ = writeln!(out, "existing: checked when transferring");
+    let _ = writeln!(out, "removed in LightCraft: checked when transferring");
     out
 }
 
@@ -612,6 +618,15 @@ pub fn applied_summary(s: &ApplySummary) -> String {
         s.not_saved
     );
     existing_line(&mut out, &s.existing);
+    let r = &s.removed_in_lightcraft;
+    let _ = writeln!(
+        out,
+        "removed in LightCraft: {} (imported again {}, restored from the trash {}, left {})",
+        r.found,
+        r.reimported - r.restored,
+        r.restored,
+        r.left
+    );
     let _ = writeln!(
         out,
         "written collections: folders created {}, albums created {}, already in the library {}, \
@@ -751,30 +766,22 @@ pub struct Target<'a> {
     pub allow_xmp: bool,
 }
 
-/// Connects, runs the pre-flight checks and writes `input`. `existing` is
-/// the result of [`check`] when the caller already ran it; `None` runs the
-/// check here, after the pre-flight checks (`input.existing_decisions`
-/// then decide alone). A run that stops hands back the numbers up to the
+/// Connects, runs the pre-flight checks and writes `input`. `check` is the
+/// result of [`check`] when the caller already ran it; `None` runs the
+/// check here, after the pre-flight checks (`input.existing_decisions` and
+/// `input.removed_decisions` then decide alone). A run that stops hands back the numbers up to the
 /// stop; they are all 0 when the connection, the pre-flight checks or the
 /// check fail.
 pub fn write(
     target: &Target<'_>,
     input: &mut WriteInput,
-    existing: Option<Vec<ExistingPhoto>>,
+    check: Option<LibraryCheck>,
     state: State,
     progress: &mut dyn Progress,
     timing: &mut Timing,
 ) -> Result<ApplySummary, Aborted> {
     let mut client = ControlClient::connect(target.port).map_err(before_writing)?;
-    write_to(
-        &mut client,
-        target,
-        input,
-        existing,
-        state,
-        progress,
-        timing,
-    )
+    write_to(&mut client, target, input, check, state, progress, timing)
 }
 
 /// Like [`write`], through `sink` instead of a new control-port
@@ -783,7 +790,7 @@ pub fn write_to(
     sink: &mut dyn CommandSink,
     target: &Target<'_>,
     input: &mut WriteInput,
-    existing: Option<Vec<ExistingPhoto>>,
+    check: Option<LibraryCheck>,
     mut state: State,
     progress: &mut dyn Progress,
     timing: &mut Timing,
@@ -792,10 +799,12 @@ pub fn write_to(
     let mut sink = TimedSink::new(sink);
     let result = preflight(&mut sink, target.library, target.allow_xmp)
         .and_then(|()| {
-            input.existing = match existing {
+            let found = match check {
                 Some(found) => found,
-                None => find_existing(&mut sink, input, &state, progress)?,
+                None => check_library(&mut sink, input, &state, progress)?,
             };
+            input.existing = found.existing;
+            input.removed = found.removed;
             Ok(())
         })
         .map_err(before_writing)
@@ -805,13 +814,14 @@ pub fn write_to(
 }
 
 /// Connects, runs the pre-flight checks and asks LightCraft which photos of
-/// `input` it already has. Sends only reading commands.
+/// `input` it already has and which recorded ones it lost. Sends only
+/// reading commands.
 pub fn check(
     target: &Target<'_>,
     input: &WriteInput,
     state: &State,
     progress: &mut dyn Progress,
-) -> Result<Vec<ExistingPhoto>, WriteError> {
+) -> Result<LibraryCheck, WriteError> {
     let mut client = ControlClient::connect(target.port)?;
     check_with(&mut client, target, input, state, progress)
 }
@@ -823,9 +833,9 @@ pub fn check_with(
     input: &WriteInput,
     state: &State,
     progress: &mut dyn Progress,
-) -> Result<Vec<ExistingPhoto>, WriteError> {
+) -> Result<LibraryCheck, WriteError> {
     preflight(sink, target.library, target.allow_xmp)?;
-    find_existing(sink, input, state, progress)
+    check_library(sink, input, state, progress)
 }
 
 /// A stop before anything was written: all numbers are 0.

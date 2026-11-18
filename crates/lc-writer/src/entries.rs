@@ -25,6 +25,33 @@ pub enum StepOutcome {
     AdoptedWhileImporting(ExistingChoice),
 }
 
+/// The log code of a recorded photo deleted in LightCraft.
+pub const REMOVED_IN_LIGHTCRAFT: &str = "removed_in_lightcraft";
+
+/// The log entry of a recorded photo deleted in LightCraft that is brought
+/// back: restored from the trash (`trashed`) or imported again.
+pub fn removed_entry(global_id: &str, path: &std::path::Path, trashed: bool) -> Entry {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    Entry::new(
+        Status::Transferred,
+        Area::Photos,
+        Stage::Photos,
+        Subject::PhotoGlobal(global_id.to_owned()),
+        if trashed {
+            "Was in LightCraft's trash; restored"
+        } else {
+            "Deleted in LightCraft; imported again"
+        },
+    )
+    .code(REMOVED_IN_LIGHTCRAFT)
+    .reason("lr2lc had written this photo before; it was deleted in LightCraft since. Choice: reimport.")
+    .item(name)
+    .source(path.display().to_string())
+}
+
 /// The log code of a photo LightCraft already had and lr2lc adopted.
 pub const EXISTING_ADOPTED: &str = "existing_adopted";
 
@@ -81,6 +108,7 @@ pub fn stage_of(step: &Step) -> Stage {
         Step::CreateKeyword { .. } => Stage::Keywords,
         Step::Import { .. }
         | Step::Adopt { .. }
+        | Step::Restore { .. }
         | Step::VirtualCopy { .. }
         | Step::Update { .. }
         | Step::DevelopSet { .. }
@@ -125,6 +153,13 @@ pub fn step_entries(step: &Step, outcome: StepOutcome) -> Vec<Entry> {
             choice,
             ..
         } => vec![adopted_entry(global_id, path, *choice, false)],
+        Step::Restore { global_id, path } => {
+            let mut entry = removed_entry(global_id, path, true);
+            if dry {
+                entry.message = "In LightCraft's trash; will be restored".to_owned();
+            }
+            vec![entry]
+        }
         Step::VirtualCopy { global_id, .. } => vec![Entry::new(
             ok,
             Area::VirtualCopies,

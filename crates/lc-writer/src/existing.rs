@@ -11,10 +11,14 @@
 //! only: afterwards the photo is a known photo and is reconciled like any
 //! other.
 //!
+//! [`check_library`] also finds the photos lr2lc wrote that were deleted in
+//! LightCraft since ([`RemovedInLightCraft`]); [`RemovedDecisions`] say
+//! whether they are imported again or left alone.
+//!
 //! Only `library.importPreview`, `catalog.query` and `photo.inspect` are
 //! sent here; nothing is changed in the library.
 
-use crate::apply::id_text;
+use crate::apply::{id_text, parse_query_page};
 use crate::control::{CommandSink, Outcome, WriteError};
 use crate::live::{LivePhoto, read_credits, read_summaries};
 use crate::plan::{WriteInput, import_candidates};
@@ -22,7 +26,7 @@ use crate::progress::{Phase, Progress};
 use crate::state::State;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 /// Files per `library.importPreview`.
@@ -188,6 +192,244 @@ pub struct ExistingPhoto {
     pub live: LivePhoto,
 }
 
+/// What happens to a photo lr2lc wrote that was deleted in LightCraft.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemovedChoice {
+    /// Bring it back: a photo in LightCraft's trash is restored (its import
+    /// finds it there), one deleted for good is imported again as a new
+    /// photo, with its memberships. The default.
+    #[default]
+    Reimport,
+    /// Keep the mapping entry and write nothing for the photo; it is
+    /// reported (`removed_in_lightcraft`).
+    Leave,
+}
+
+impl RemovedChoice {
+    /// Every choice, in the order a front end lists them.
+    pub const ALL: [RemovedChoice; 2] = [RemovedChoice::Reimport, RemovedChoice::Leave];
+
+    /// The name as `--removed` takes it and the report gives it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RemovedChoice::Reimport => "reimport",
+            RemovedChoice::Leave => "leave",
+        }
+    }
+}
+
+impl std::fmt::Display for RemovedChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for RemovedChoice {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        RemovedChoice::ALL
+            .into_iter()
+            .find(|c| c.as_str() == s)
+            .ok_or_else(|| {
+                format!(
+                    "unknown choice `{s}` (one of {})",
+                    RemovedChoice::ALL.map(RemovedChoice::as_str).join(", ")
+                )
+            })
+    }
+}
+
+/// The choices for photos deleted in LightCraft, for one run.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemovedDecisions {
+    /// The choice for every photo without its own entry.
+    pub default: RemovedChoice,
+    /// Choices per photo, by Lightroom global id.
+    pub per_photo: BTreeMap<String, RemovedChoice>,
+}
+
+impl RemovedDecisions {
+    /// The same choice for every photo.
+    pub fn all(choice: RemovedChoice) -> RemovedDecisions {
+        RemovedDecisions {
+            default: choice,
+            per_photo: BTreeMap::new(),
+        }
+    }
+
+    /// The choice for the photo with this global id.
+    pub fn choice_for(&self, global_id: &str) -> RemovedChoice {
+        self.per_photo
+            .get(global_id)
+            .copied()
+            .unwrap_or(self.default)
+    }
+}
+
+/// A photo the mapping file records and the catalog still has, but that
+/// LightCraft no longer lists, or lists only in its trash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemovedInLightCraft {
+    /// Lightroom global id of the photo.
+    pub global_id: String,
+    /// The photo's id in the Lightroom catalog.
+    pub lightroom_id: i64,
+    /// The photo's file in Lightroom.
+    pub path: PathBuf,
+    /// The file name of `path`, for display.
+    pub file_name: String,
+    /// The id the mapping file records.
+    pub lightcraft_id: Value,
+    /// In LightCraft's trash (it can be restored); otherwise deleted for
+    /// good.
+    pub trashed: bool,
+    /// A virtual copy (made again from its master, never imported).
+    pub virtual_copy: bool,
+}
+
+/// Photos deleted in LightCraft, by what this run did with them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemovedCounts {
+    /// Photos lr2lc wrote that LightCraft no longer lists or lists only in
+    /// its trash.
+    pub found: usize,
+    /// Brought back: imported (or made) again, or restored from the trash.
+    pub reimported: usize,
+    /// Of `reimported`, the photos restored from the trash (same record).
+    pub restored: usize,
+    /// Left as they are (`--removed leave`); also in `photos_skipped`.
+    pub left: usize,
+}
+
+/// What the check before writing found.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct LibraryCheck {
+    /// New photos LightCraft already has.
+    pub existing: Vec<ExistingPhoto>,
+    /// Photos lr2lc wrote that were deleted in LightCraft.
+    pub removed: Vec<RemovedInLightCraft>,
+}
+
+/// Page size of the id-only `catalog.query` reads.
+const ID_PAGE: usize = 1000;
+
+/// The ids (as text) LightCraft lists outside (`deleted` false) or inside
+/// its trash, read page by page.
+fn listed_ids(
+    client: &mut dyn CommandSink,
+    deleted: bool,
+    progress: &mut dyn Progress,
+) -> Result<BTreeSet<String>, WriteError> {
+    let mut out = BTreeSet::new();
+    let mut offset = 0;
+    loop {
+        if progress.cancelled() {
+            return Err(WriteError::Cancelled);
+        }
+        let filter = if deleted {
+            json!({"deleted": true})
+        } else {
+            json!({})
+        };
+        let value = match client.execute(
+            "catalog.query",
+            json!({"filter": filter, "offset": offset, "limit": ID_PAGE}),
+        )? {
+            Outcome::Applied(value) => value,
+            Outcome::AppliedNotSaved(_) => {
+                return Err(WriteError::Protocol(
+                    "catalog.query answered like a writing command".into(),
+                ));
+            }
+        };
+        let page = parse_query_page(&value)?;
+        let count = page.ids.len();
+        out.extend(page.ids.iter().filter_map(id_text));
+        offset += count;
+        if count == 0 || count < ID_PAGE || offset >= page.total {
+            return Ok(out);
+        }
+    }
+}
+
+/// The mapped photos of `input` that LightCraft no longer lists or lists
+/// only in its trash, sorted by global id. Sends nothing when the mapping
+/// file knows no photo of the input.
+pub fn find_removed(
+    client: &mut dyn CommandSink,
+    input: &WriteInput,
+    state: &State,
+    progress: &mut dyn Progress,
+) -> Result<Vec<RemovedInLightCraft>, WriteError> {
+    let mut mapped: BTreeMap<&str, &model::Photo> = BTreeMap::new();
+    for p in &input.photos {
+        if let Some(gid) = p.global_id.as_deref()
+            && state.photo(gid).is_some()
+        {
+            mapped.entry(gid).or_insert(p);
+        }
+    }
+    if mapped.is_empty() {
+        return Ok(Vec::new());
+    }
+    let listed = listed_ids(client, false, progress)?;
+    let trash = listed_ids(client, true, progress)?;
+    let mut out = Vec::new();
+    for (gid, photo) in mapped {
+        let Some(entry) = state.photo(gid) else {
+            continue;
+        };
+        let Some(key) = id_text(&entry.lightcraft_id) else {
+            continue;
+        };
+        if listed.contains(&key) {
+            continue;
+        }
+        out.push(RemovedInLightCraft {
+            global_id: gid.to_string(),
+            lightroom_id: photo.lightroom_id,
+            path: photo.path.clone(),
+            file_name: photo
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            lightcraft_id: entry.lightcraft_id.clone(),
+            trashed: trash.contains(&key),
+            virtual_copy: entry.copy_of.is_some(),
+        });
+    }
+    Ok(out)
+}
+
+/// The whole check before writing: photos deleted in LightCraft
+/// ([`find_removed`]), then new photos LightCraft already has
+/// ([`find_existing`]). A photo deleted for good counts as new for the
+/// second part, so a file the person imported again by hand is found and
+/// taken over instead of imported twice.
+pub fn check_library(
+    client: &mut dyn CommandSink,
+    input: &WriteInput,
+    state: &State,
+    progress: &mut dyn Progress,
+) -> Result<LibraryCheck, WriteError> {
+    let removed = find_removed(client, input, state, progress)?;
+    let existing = if removed.iter().any(|r| !r.trashed && !r.virtual_copy) {
+        let mut without = state.clone();
+        for r in removed.iter().filter(|r| !r.trashed && !r.virtual_copy) {
+            without.forget_photo(&r.global_id);
+        }
+        find_existing(client, input, &without, progress)?
+    } else {
+        find_existing(client, input, state, progress)?
+    };
+    Ok(LibraryCheck { existing, removed })
+}
+
 /// Finds the photos of `input` that a run would import and that LightCraft
 /// already has, with their current values, sorted by global id. Reports
 /// [`Phase::CheckingLibrary`] per file; a cancel between two blocks stops
@@ -296,6 +538,24 @@ pub fn find_existing(
     }
     found.sort_by(|a, b| a.global_id.cmp(&b.global_id));
     Ok(found)
+}
+
+/// Whether LightCraft has the file `path` now (`library.importPreview` of
+/// that one file): its reason and the photo's id. `None` when it has not,
+/// or when it refuses the preview.
+pub(crate) fn preview_one(
+    client: &mut dyn CommandSink,
+    path: &str,
+) -> Result<Option<(ExistingReason, Value)>, WriteError> {
+    let answer = match client.execute("library.importPreview", json!({"paths": [path]})) {
+        Ok(Outcome::Applied(value)) => value,
+        Ok(Outcome::AppliedNotSaved(_)) | Err(WriteError::Command { .. }) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    Ok(parse_preview(&answer)?
+        .into_iter()
+        .find(|(p, _, _)| p == path)
+        .map(|(_, reason, id)| (reason, id)))
 }
 
 /// The current values of one photo LightCraft reported as a duplicate while

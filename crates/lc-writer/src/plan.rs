@@ -48,7 +48,10 @@
 //!   depends on its [`ExistingChoice`], with the photo's LightCraft values
 //!   as the live side and a fresh import as the last imported side.
 
-use crate::existing::{ExistingChoice, ExistingCounts, ExistingDecisions, ExistingPhoto};
+use crate::existing::{
+    ExistingChoice, ExistingCounts, ExistingDecisions, ExistingPhoto, RemovedChoice, RemovedCounts,
+    RemovedDecisions, RemovedInLightCraft,
+};
 use crate::live::{LivePhoto, LiveState};
 use crate::smart::{convertible, translate};
 use crate::state::{EntryKind, PhotoFields, State, hex_hash, keyword_text, snapshot};
@@ -157,6 +160,11 @@ pub struct WriteInput {
     /// What happens to each photo of `existing`, and to a photo found only
     /// while importing (the default).
     pub existing_decisions: ExistingDecisions,
+    /// Recorded photos deleted in LightCraft, from
+    /// [`crate::existing::find_removed`]. Empty in a dry run.
+    pub removed: Vec<RemovedInLightCraft>,
+    /// What happens to each photo of `removed`.
+    pub removed_decisions: RemovedDecisions,
 }
 
 /// The parts of a catalog a run can leave out. A part that is not selected
@@ -318,6 +326,15 @@ pub enum Step {
         path: PathBuf,
         /// What is written to the photo.
         choice: ExistingChoice,
+    },
+    /// Bring a recorded photo back from LightCraft's trash: its file is
+    /// imported again (`library.import`, which restores the trashed record
+    /// LightCraft finds by path), before the photo's updates.
+    Restore {
+        /// Lightroom global id of the photo.
+        global_id: String,
+        /// The photo's file.
+        path: PathBuf,
     },
     /// Create one virtual copy from its master (`photo.virtualCopy`). The
     /// copy is created at most once: the step is planned only when the copy
@@ -520,6 +537,8 @@ pub struct Plan {
     /// (`develop-if-empty` and edited in LightCraft); a subset of
     /// `develop_not_applied_ids`.
     existing_develop_kept_ids: Vec<String>,
+    /// Recorded photos deleted in LightCraft, by choice.
+    removed_in_lightcraft: RemovedCounts,
     /// Planned white-balance writes of a Kelvin value: whether they are
     /// carried depends on LightCraft's scale for the photo, which only the
     /// applied run can ask.
@@ -761,6 +780,11 @@ impl Plan {
         self.existing
     }
 
+    /// The recorded photos deleted in LightCraft, by choice.
+    pub fn removed_in_lightcraft(&self) -> RemovedCounts {
+        self.removed_in_lightcraft
+    }
+
     /// Global ids of the adopted photos whose development settings in
     /// LightCraft are kept (`develop-if-empty`, edited in LightCraft). They
     /// are also in [`Plan::develop_not_applied_ids`].
@@ -807,6 +831,12 @@ impl Plan {
                 // Nothing is sent for an adopted photo. A script is written
                 // from a dry run, which never adopts.
                 Step::Adopt { .. } => selected = None,
+                Step::Restore { path, .. } => {
+                    selected = None;
+                    if let Some(params) = import_params(path) {
+                        push("library.import", params);
+                    }
+                }
                 Step::VirtualCopy {
                     master_global_id, ..
                 } => {
@@ -980,7 +1010,55 @@ pub fn plan(input: &WriteInput, state: &State, library_keywords: &BTreeSet<Strin
     if areas.collections {
         plan_smart(input, state, &mut out);
     }
+    leave_out_removed(input, state, &mut out);
     out
+}
+
+/// The recorded photos deleted in LightCraft that stay as they are
+/// ([`RemovedChoice::Leave`]).
+fn left_in_lightcraft<'a>(input: &'a WriteInput, state: &State) -> BTreeSet<&'a str> {
+    input
+        .removed
+        .iter()
+        .filter(|r| input.removed_decisions.choice_for(&r.global_id) == RemovedChoice::Leave)
+        .filter(|r| state.photo(&r.global_id).is_some())
+        .map(|r| r.global_id.as_str())
+        .collect()
+}
+
+/// Counts the photos deleted in LightCraft and takes the ones left as they
+/// are out of every membership step: nothing is sent for them.
+fn leave_out_removed(input: &WriteInput, state: &State, out: &mut Plan) {
+    for r in &input.removed {
+        let counts = &mut out.removed_in_lightcraft;
+        counts.found += 1;
+        match input.removed_decisions.choice_for(&r.global_id) {
+            RemovedChoice::Leave => counts.left += 1,
+            RemovedChoice::Reimport => {
+                counts.reimported += 1;
+                if r.trashed && !r.virtual_copy {
+                    counts.restored += 1;
+                }
+            }
+        }
+    }
+    let left = left_in_lightcraft(input, state);
+    if left.is_empty() {
+        return;
+    }
+    out.steps.retain_mut(|step| match step {
+        Step::AddMembers { gids, .. }
+        | Step::RemoveMembers { gids, .. }
+        | Step::QuickAdd { gids } => {
+            gids.retain(|g| !left.contains(g.as_str()));
+            !gids.is_empty()
+        }
+        Step::GroupStack { gids, .. } => {
+            gids.retain(|g| !left.contains(g.as_str()));
+            gids.len() >= 2
+        }
+        _ => true,
+    });
 }
 
 /// Whether reconciling at least one known photo needs the live values from
@@ -1283,6 +1361,14 @@ fn plan_photos(
         .iter()
         .map(|e| (e.global_id.as_str(), e))
         .collect();
+    let left = left_in_lightcraft(input, state);
+    let restore: BTreeSet<&str> = input
+        .removed
+        .iter()
+        .filter(|r| r.trashed && !r.virtual_copy)
+        .filter(|r| input.removed_decisions.choice_for(&r.global_id) == RemovedChoice::Reimport)
+        .map(|r| r.global_id.as_str())
+        .collect();
 
     for gid in order {
         let p = by_gid[gid];
@@ -1321,8 +1407,27 @@ fn plan_photos(
             .get(&p.lightroom_id)
             .map(Vec::as_slice)
             .unwrap_or_default();
+        if left.contains(gid) {
+            out.skipped.push(
+                Skipped::new(
+                    SkipCode::RemovedInLightcraft,
+                    format!(
+                        "photo {}: deleted in LightCraft; left as it is",
+                        p.lightroom_id
+                    ),
+                )
+                .about(Subject::Photo(p.lightroom_id)),
+            );
+            continue;
+        }
         let mut new = snapshot_with_renames(p, keywords, renamed);
         let known = state.photo(gid).is_some();
+        if known && restore.contains(gid) {
+            out.steps.push(Step::Restore {
+                global_id: gid.to_string(),
+                path: p.path.clone(),
+            });
+        }
         if let Some(found) = existing.get(gid).filter(|_| !known && p.master.is_none()) {
             let choice = input.existing_decisions.choice_for(gid);
             out.steps.push(Step::Adopt {

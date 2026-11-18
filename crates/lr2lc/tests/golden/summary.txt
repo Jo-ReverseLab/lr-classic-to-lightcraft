@@ -10,6 +10,7 @@ keywords: read 17, would convert 12, skipped 5
 keyword assignments: read 37, would convert 21, skipped 16
 keyword synonyms: read 6, would convert 2, skipped 4
 videos: skipped 3
+originals only in the cloud (not downloaded): 0 (0.0 MB)
 stack details: collapsed 1 (written expanded), no top photo 1
 keyword attributes: persons 1, not exported 1, no parents on export 0, no synonyms on export 0, unknown type 0, unused 2, trimmed by LightCraft 0
 skipped photos:
@@ -124,5 +125,6 @@ writer smart albums: smart albums to create 1, already in the library 0, rules c
 writer smart albums no longer translatable (left as is in LightCraft): 0
 develop: photos with settings 0, commands planned 0, written 0, unmapped fields 0 (0 listed), changed and not applied 0, overwritten 0, photos with camera profile 0, photos with masks 0, photos with spots 0, custom white balance 0 (to check 0, written 0, not carried 0)
 existing: checked when transferring
+removed in LightCraft: checked when transferring
 photos: 21 in the catalog, transferred 15, unchanged 0, skipped 6, conflict 0, error 0
 log entries (one per photo, field, keyword and album): adjusted 0, conflict 0, error 0, skipped 85, transferred 97
