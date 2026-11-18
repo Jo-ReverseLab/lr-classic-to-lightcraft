@@ -470,7 +470,8 @@ with a cloud icon in Finder). lr2lc only reads the file's status, never its
 bytes, and does not download anything. LightCraft has to download each such
 original while it imports it, which takes long for large raw files and can
 fail. The summary has one line `originals only in the cloud (not
-downloaded): N (X MB)`, `report.json` has `photos.cloud_only` and
+downloaded): N (X MB)` (followed by a line recommending to download them
+first when N is not 0), `report.json` has `photos.cloud_only` and
 `photos.cloud_only_bytes`, and the log has one `original_in_cloud` entry
 per such photo the run imports. Download them first (Finder: Download Now)
 before a transfer.
