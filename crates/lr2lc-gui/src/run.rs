@@ -6,12 +6,16 @@
 
 use crate::logdata::{LogData, ScanSummary};
 use lr2lc_core::log::{Log, LogEntry};
-use lr2lc_core::{CommandSink, ErrorKind, Job, Phase, Progress, finish, finish_with, prepare};
+use lr2lc_core::{
+    CommandSink, ErrorKind, ExistingDecisions, ExistingPhoto, Job, Phase, Progress, check_existing,
+    check_existing_with, finish, finish_with, prepare,
+};
 use model::{Entry, Stage};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::time::Duration;
 
 /// What a running conversion reports.
 #[derive(Debug)]
@@ -22,12 +26,38 @@ pub enum Event {
     Advance(usize),
     /// The catalog is read and planned: steps per stage.
     Planned(BTreeMap<Stage, usize>),
+    /// The library check found something the person decides before
+    /// anything is written; the run waits for an [`Answer`].
+    Question(Box<Question>),
     /// A step finished while writing.
     Entry(Box<LogEntry>),
     /// The run stopped and is being taken back (Cancel).
     RollingBack,
     /// The run ended, successfully or not.
     Done(Box<RunResult>),
+}
+
+/// What the library check found before writing.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Question {
+    /// Photos the run would import that LightCraft already has.
+    pub existing: Vec<ExistingPhoto>,
+}
+
+impl Question {
+    /// Whether there is nothing to ask.
+    pub fn is_empty(&self) -> bool {
+        self.existing.is_empty()
+    }
+}
+
+/// The person's answer to a [`Question`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum Answer {
+    /// Write, with these choices.
+    Go(ExistingDecisions),
+    /// End the run; nothing was written.
+    Abort,
 }
 
 /// The end of a run: what the window shows and can save.
@@ -69,6 +99,9 @@ pub struct ChannelProgress {
     total: usize,
     /// Names entries as they arrive, once the catalog is read.
     live: Option<Log>,
+    /// Where the person's answer to a [`Question`] arrives; without it the
+    /// job's own choices apply and nobody is asked.
+    answers: Option<Receiver<Answer>>,
 }
 
 impl ChannelProgress {
@@ -79,6 +112,7 @@ impl ChannelProgress {
             roll_back: Arc::new(AtomicBool::new(false)),
             total: 0,
             live: None,
+            answers: None,
         }
     }
 }
@@ -87,6 +121,37 @@ impl ChannelProgress {
     /// Takes the run back once it stopped or ended (Cancel).
     pub fn set_roll_back(&mut self, on: bool) {
         self.roll_back.store(on, Ordering::Relaxed);
+    }
+
+    /// Asks before writing: a [`Question`] goes out as an event and the run
+    /// waits for its answer on `answers`.
+    pub fn set_answers(&mut self, answers: Receiver<Answer>) {
+        self.answers = Some(answers);
+    }
+
+    /// Sends `question` and waits for the answer; a Stop or Cancel, or a
+    /// window that went away, ends the run.
+    fn ask(&self, question: Question) -> Answer {
+        let Some(answers) = &self.answers else {
+            return Answer::Abort;
+        };
+        if self
+            .events
+            .send(Event::Question(Box::new(question)))
+            .is_err()
+        {
+            return Answer::Abort;
+        }
+        loop {
+            if self.cancelled() {
+                return Answer::Abort;
+            }
+            match answers.recv_timeout(Duration::from_millis(100)) {
+                Ok(answer) => return answer,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return Answer::Abort,
+            }
+        }
     }
 }
 
@@ -135,7 +200,7 @@ pub fn execute_as(
     sink: Option<&mut dyn CommandSink>,
     scan: bool,
 ) -> RunResult {
-    let prepared = match prepare(job, progress) {
+    let mut prepared = match prepare(job, progress) {
         Ok(prepared) => prepared,
         Err(e) => return RunResult::failed(job.apply, e.kind, e.to_string()),
     };
@@ -149,6 +214,33 @@ pub fn execute_as(
         .events
         .send(Event::Planned(prepared.stage_totals()));
     let mut sink = sink;
+    // Before writing: what LightCraft already has, and what the person
+    // wants done with it. Only reads; nothing is written until answered.
+    let mut job = job.clone();
+    if !scan && progress.answers.is_some() && job.writes_to().is_some() {
+        let found = match sink.as_deref_mut() {
+            Some(sink) => check_existing_with(&job, &prepared, sink, progress),
+            None => check_existing(&job, &prepared, progress),
+        };
+        let question = match found {
+            Ok(existing) => Question { existing },
+            Err(e) => return RunResult::failed(job.apply, e.kind, e.to_string()),
+        };
+        if !question.is_empty() {
+            match progress.ask(question.clone()) {
+                Answer::Go(decisions) => job.existing = decisions,
+                Answer::Abort => {
+                    return RunResult::failed(
+                        job.apply,
+                        ErrorKind::Cancelled,
+                        "Transfer cancelled before anything was written".to_owned(),
+                    );
+                }
+            }
+        }
+        prepared.set_existing(question.existing);
+    }
+    let job = &job;
     let finished = match sink.as_deref_mut() {
         Some(sink) => finish_with(job, prepared, sink, progress),
         None => finish(job, prepared, progress),
@@ -201,16 +293,19 @@ pub struct Running {
     pub events: Receiver<Event>,
     cancel: Arc<AtomicBool>,
     roll_back: Arc<AtomicBool>,
+    answers: Sender<Answer>,
 }
 
 impl Running {
     /// Starts `job` on a new thread, writing through the control port.
     pub fn spawn(job: Job) -> Running {
         let (tx, events) = channel();
+        let (answers, answer_rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let roll_back = Arc::new(AtomicBool::new(false));
         let mut progress = ChannelProgress::new(tx.clone(), cancel.clone());
         progress.roll_back = roll_back.clone();
+        progress.set_answers(answer_rx);
         std::thread::spawn(move || {
             let result = execute(&job, &mut progress, None);
             let _ = tx.send(Event::Done(Box::new(result)));
@@ -219,7 +314,13 @@ impl Running {
             events,
             cancel,
             roll_back,
+            answers,
         }
+    }
+
+    /// Hands the person's answer to the waiting run.
+    pub fn answer(&self, answer: Answer) {
+        let _ = self.answers.send(answer);
     }
 
     /// Asks the run to stop at the next safe point; with `roll_back` it

@@ -8,7 +8,7 @@ use lr2lc_core::Job;
 use lr2lc_core::probe::{LibraryAction, Probe};
 use lr2lc_gui::app::{App, Tab};
 use lr2lc_gui::host::Host;
-use lr2lc_gui::run::{ChannelProgress, Event, RunResult, execute};
+use lr2lc_gui::run::{Answer, ChannelProgress, Event, Question, RunResult, execute};
 use lr2lc_gui::settings::Settings;
 use lr2lc_gui::theme;
 use std::path::PathBuf;
@@ -30,6 +30,8 @@ struct Scripted {
     new_folder: Option<PathBuf>,
     actions: Vec<LibraryAction>,
     action_answer: Option<Result<Probe, String>>,
+    answers: Vec<Answer>,
+    shown: Vec<serde_json::Value>,
 }
 
 impl Host for Scripted {
@@ -54,6 +56,12 @@ impl Host for Scripted {
     }
     fn poll(&mut self) -> Vec<Event> {
         std::mem::take(&mut self.events)
+    }
+    fn answer(&mut self, answer: Answer) {
+        self.answers.push(answer);
+    }
+    fn show_photo(&mut self, _port: u16, id: serde_json::Value) {
+        self.shown.push(id);
     }
     fn scan(&mut self, _job: Job) {
         self.scans += 1;
@@ -315,6 +323,23 @@ fn render_screens() {
             h.render()
                 .unwrap()
                 .save(dir.join(format!("log-{theme_name}-{width}.png")))
+                .unwrap();
+            // The question before writing: for all, then per photo.
+            let mut h = asked(&w);
+            h.state_mut().app.settings.theme = mode;
+            h.set_size(egui::vec2(width, 1100.0));
+            theme::install_fonts(&h.ctx);
+            theme::apply(&h.ctx, mode);
+            h.run_steps(6);
+            h.render()
+                .unwrap()
+                .save(dir.join(format!("existing-{theme_name}-{width}.png")))
+                .unwrap();
+            h.get_by_label("Decide per photo").click();
+            h.run_steps(4);
+            h.render()
+                .unwrap()
+                .save(dir.join(format!("existing-each-{theme_name}-{width}.png")))
                 .unwrap();
         }
     }
@@ -730,4 +755,216 @@ fn a_quiet_lightcraft_is_pointed_out() {
     }
     h.run_steps(2);
     h.get_by_label("Show LightCraft");
+}
+
+/// Two photos LightCraft already has; the second one edited there.
+fn two_existing() -> Question {
+    let photo = |n: i64, edited: bool| lr2lc_core::ExistingPhoto {
+        global_id: format!("GID-{n}"),
+        lightroom_id: n,
+        path: PathBuf::from(format!("/Users/example/Pictures/IMG_{n}.CR3")),
+        file_name: format!("IMG_{n}.CR3"),
+        lightcraft_id: serde_json::json!(700 + n),
+        reason: lr2lc_core::ExistingReason::Path,
+        live: lr2lc_core::LivePhoto {
+            rating: 3,
+            flag: "none".to_owned(),
+            label: None,
+            title: None,
+            keywords: Vec::new(),
+            caption: None,
+            copyright: None,
+            creator: None,
+            edited,
+        },
+    };
+    Question {
+        existing: vec![photo(1, false), photo(2, true)],
+    }
+}
+
+/// Starts a transfer in the scripted window and lets the check find
+/// [`two_existing`].
+fn asked(w: &World) -> Harness<'static, State> {
+    let mut h = harness(ready(w), 1280.0);
+    h.run_steps(4);
+    h.get_by_label("Transfer now").click();
+    h.run_steps(3);
+    h.state_mut()
+        .host
+        .events
+        .push(Event::Question(Box::new(two_existing())));
+    h.run_steps(3);
+    h
+}
+
+#[test]
+fn photos_already_in_lightcraft_are_asked_about_before_writing() {
+    let w = world();
+    let mut h = asked(&w);
+    h.get_by_label("2 photos are already in LightCraft");
+    h.get_by_label("waiting for your choice");
+    assert!(h.state().host.answers.is_empty(), "nothing answered yet");
+    // The safe choice is preselected; one click applies it to all.
+    h.get_by_label("Continue transfer").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state().host.answers,
+        vec![Answer::Go(lr2lc_core::ExistingDecisions::all(
+            lr2lc_core::ExistingChoice::DevelopIfEmpty
+        ))]
+    );
+    assert!(h.state().app.run.as_ref().unwrap().question.is_none());
+    assert!(h.query_by_label("Continue transfer").is_none());
+
+    // Another choice for all.
+    let mut h = asked(&w);
+    h.get_by_label("Skip").click();
+    h.run_steps(2);
+    h.get_by_label("Continue transfer").click();
+    h.run_steps(2);
+    assert_eq!(
+        h.state().host.answers,
+        vec![Answer::Go(lr2lc_core::ExistingDecisions::all(
+            lr2lc_core::ExistingChoice::Skip
+        ))]
+    );
+}
+
+#[test]
+fn each_photo_can_be_decided_and_shown_in_lightcraft() {
+    let w = world();
+    let mut h = asked(&w);
+    h.get_by_label("Decide per photo").click();
+    h.run_steps(3);
+    h.get_by_label("IMG_2.CR3");
+    h.get_all_by_label("Show in LightCraft")
+        .nth(1)
+        .unwrap()
+        .click();
+    h.run_steps(2);
+    assert_eq!(h.state().host.shown, vec![serde_json::json!(702)]);
+    // Only the edited one is listed with the filter on.
+    h.get_by_label("Only photos edited in LightCraft").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("IMG_1.CR3").is_none());
+    h.get_by_label("Only photos edited in LightCraft").click();
+    h.run_steps(3);
+    // Choose per photo (the combo box is set through the state here).
+    h.state_mut()
+        .app
+        .run
+        .as_mut()
+        .unwrap()
+        .question
+        .as_mut()
+        .unwrap()
+        .per_photo[1] = lr2lc_core::ExistingChoice::Skip;
+    h.run_steps(2);
+    h.get_by_label("Continue transfer").click();
+    h.run_steps(2);
+    let Answer::Go(decisions) = &h.state().host.answers[0] else {
+        panic!("{:?}", h.state().host.answers);
+    };
+    assert_eq!(
+        decisions.default,
+        lr2lc_core::ExistingChoice::DevelopIfEmpty
+    );
+    assert_eq!(
+        decisions.choice_for("GID-1"),
+        lr2lc_core::ExistingChoice::DevelopIfEmpty
+    );
+    assert_eq!(
+        decisions.choice_for("GID-2"),
+        lr2lc_core::ExistingChoice::Skip
+    );
+}
+
+#[test]
+fn cancelling_the_question_writes_nothing() {
+    let w = world();
+    let mut h = asked(&w);
+    h.get_by_label("Cancel transfer").click();
+    h.run_steps(3);
+    assert_eq!(h.state().host.answers, vec![Answer::Abort]);
+    assert!(h.state().app.run.as_ref().unwrap().cancelling);
+}
+
+/// The worker side against the fake: the check asks, the answer decides.
+fn transfer_with_answer(answer: Answer) -> (RunResult, Vec<Event>, Vec<serde_json::Value>) {
+    use lc_test_support::fake_lightcraft::{Config, FakeLightCraft, SeedPhoto};
+    let w = world();
+    let mut settings = settings(&w);
+    let probe_job = settings.job(true).unwrap();
+    let prepared = lr2lc_core::prepare(&probe_job, &mut lr2lc_core::NoProgress).unwrap();
+    let first = prepared
+        .input
+        .photos
+        .iter()
+        .filter(|p| p.global_id.is_some() && p.master.is_none())
+        .min_by_key(|p| p.global_id.clone())
+        .unwrap();
+    let mut config = Config::new(&w.library);
+    config.seed_photos = vec![SeedPhoto {
+        rating: 3,
+        edited: true,
+        ..SeedPhoto::plain(7)
+    }];
+    config.file_contents.insert(
+        "/Users/example/Pictures/seed-7.jpg".to_owned(),
+        "same bytes".into(),
+    );
+    config.file_contents.insert(
+        first.path.to_string_lossy().into_owned(),
+        "same bytes".into(),
+    );
+    let fake = FakeLightCraft::start(config);
+    settings.port = fake.port();
+    let job = settings.job(true).unwrap();
+    let (tx, rx) = channel();
+    let (answers, answer_rx) = channel();
+    answers.send(answer).unwrap();
+    let mut progress = ChannelProgress::new(tx, Arc::new(AtomicBool::new(false)));
+    progress.set_answers(answer_rx);
+    let result = execute(&job, &mut progress, None);
+    let events: Vec<Event> = rx.try_iter().collect();
+    let photos = fake
+        .photos()
+        .values()
+        .map(|id| serde_json::json!(id))
+        .collect();
+    (result, events, photos)
+}
+
+#[test]
+fn the_run_waits_for_the_answer_and_applies_it() {
+    let (result, events, _) = transfer_with_answer(Answer::Go(lr2lc_core::ExistingDecisions::all(
+        lr2lc_core::ExistingChoice::Skip,
+    )));
+    assert!(result.error.is_none(), "{:?}", result.error);
+    let asked: Vec<&Question> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Question(q) => Some(&**q),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0].existing.len(), 1);
+    assert_eq!(asked[0].existing[0].lightcraft_id, serde_json::json!(7));
+    assert!(asked[0].existing[0].live.edited);
+    let report: serde_json::Value = serde_json::from_str(&result.report_text).unwrap();
+    assert_eq!(
+        report["writer"]["existing"]["skip"], 1,
+        "{}",
+        report["writer"]
+    );
+}
+
+#[test]
+fn cancelling_before_writing_leaves_the_library_alone() {
+    let (result, _, photos) = transfer_with_answer(Answer::Abort);
+    let (kind, _) = result.error.expect("the run reports the cancel");
+    assert_eq!(kind, lr2lc_core::ErrorKind::Cancelled);
+    assert_eq!(photos, vec![serde_json::json!(7)], "nothing imported");
 }

@@ -4,7 +4,7 @@
 //! its activity list and its command dispatch, and tests use a scripted
 //! host.
 
-use crate::run::{ChannelProgress, Event, RunResult, Running, execute_as};
+use crate::run::{Answer, ChannelProgress, Event, RunResult, Running, execute_as};
 use lr2lc_core::Job;
 use lr2lc_core::probe::{LibraryAction, Probe};
 use std::path::PathBuf;
@@ -30,6 +30,11 @@ pub trait Host {
     fn cancel(&mut self, roll_back: bool);
     /// The events since the last call.
     fn poll(&mut self) -> Vec<Event>;
+    /// Answers the running job's [`Event::Question`].
+    fn answer(&mut self, answer: Answer);
+    /// Selects LightCraft photo `id` and brings LightCraft forward, so the
+    /// person can look at it.
+    fn show_photo(&mut self, port: u16, id: serde_json::Value);
 
     /// Starts a read-only scan of the catalog (a dry run) for the summary.
     fn scan(&mut self, job: Job);
@@ -106,6 +111,20 @@ impl Host for StandaloneHost {
         if let Some(running) = &self.running {
             running.cancel(roll_back);
         }
+    }
+
+    fn answer(&mut self, answer: Answer) {
+        if let Some(running) = &self.running {
+            running.answer(answer);
+        }
+    }
+
+    fn show_photo(&mut self, port: u16, id: serde_json::Value) {
+        // Selecting is quick; off the UI thread all the same.
+        std::thread::spawn(move || {
+            let _ = lr2lc_core::probe::select_photo(port, &id);
+        });
+        self.show_lightcraft();
     }
 
     fn poll(&mut self) -> Vec<Event> {

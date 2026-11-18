@@ -1,7 +1,8 @@
 //! A quick, read-only look at the running LightCraft app, for a front end's
 //! status line: is the control port answering, which library is open, and
 //! does it write XMP sidecars automatically. Sends only `library.info` and
-//! `library.xmpPreferences`; changes nothing.
+//! `library.xmpPreferences`; changes nothing. Also the library actions a
+//! front end offers: open or create a library, select one photo to show it.
 
 use lc_writer::control::{CommandSink, ControlClient, Outcome, WriteError};
 use serde_json::{Value, json};
@@ -87,6 +88,25 @@ pub fn library_action_with(
     };
     match sink.execute(command, params)? {
         Outcome::Applied(_) => probe_with(sink),
+        Outcome::AppliedNotSaved(message) => Err(WriteError::Command {
+            command: command.to_owned(),
+            message,
+        }),
+    }
+}
+
+/// Selects photo `id` in the app on `port` and makes it the active one, so
+/// the person can look at it there. Changes only the selection.
+pub fn select_photo(port: u16, id: &Value) -> Result<(), WriteError> {
+    let mut client = ControlClient::connect_with_timeout(port, Duration::from_secs(5))?;
+    select_photo_with(&mut client, id)
+}
+
+/// Like [`select_photo`], through any sink.
+pub fn select_photo_with(sink: &mut dyn CommandSink, id: &Value) -> Result<(), WriteError> {
+    let command = "library.select";
+    match sink.execute(command, lc_writer::plan::select_params(id))? {
+        Outcome::Applied(_) => Ok(()),
         Outcome::AppliedNotSaved(message) => Err(WriteError::Command {
             command: command.to_owned(),
             message,

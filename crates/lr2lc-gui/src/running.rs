@@ -56,13 +56,14 @@ fn phases(run: &RunState) -> Vec<PhaseRow> {
     if run.kind == Kind::DryRun {
         return out;
     }
-    // 2. Reading the library (only when a known photo changed).
-    let library = if run.reading_library {
+    // 2. Checking and reading the library: which photos it has already
+    // (before a transfer) and their values (when a known photo changed).
+    let busy = run.checking_library || run.reading_library || run.question.is_some();
+    let touched = run.library_checked || run.library_read;
+    let library = if busy {
         State::Running
-    } else if run.library_read && run.phase_total > 0 && !run.writing {
-        State::Done
     } else if run.writing || finished {
-        if run.library_read {
+        if touched {
             State::Done
         } else {
             State::NotNeeded
@@ -71,15 +72,20 @@ fn phases(run: &RunState) -> Vec<PhaseRow> {
         State::Waiting
     };
     out.push(PhaseRow {
-        name: "Read LightCraft library",
+        name: "Check LightCraft library",
         state: library,
         note: match library {
+            State::Running if run.question.is_some() => "waiting for your choice".to_owned(),
+            State::Running if run.checking_library => {
+                format!("{} of {} files", run.phase_done, run.phase_total)
+            }
             State::Running => format!("{} of {} photos", run.phase_done, run.phase_total),
             State::NotNeeded => "not needed".to_owned(),
             State::Done => "done".to_owned(),
             _ => "waiting".to_owned(),
         },
         fraction: match library {
+            State::Running if run.question.is_some() => 1.0,
             State::Running if run.phase_total > 0 => run.phase_done as f32 / run.phase_total as f32,
             State::Done | State::NotNeeded => 1.0,
             _ => 0.0,
@@ -298,6 +304,22 @@ pub fn ui(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
             live_log(ui, t, run, &mut action);
         }
     });
+    // The question before writing, over the screen until answered.
+    if let Some(run) = &mut app.run
+        && let Some(question) = &mut run.question
+    {
+        match crate::existing::ui(ui, t, question) {
+            Some(crate::existing::Action::Answer(answer)) => {
+                run.question = None;
+                if answer == crate::run::Answer::Abort {
+                    run.cancelling = true;
+                }
+                host.answer(answer);
+            }
+            Some(crate::existing::Action::Show(id)) => host.show_photo(app.settings.port, id),
+            None => {}
+        }
+    }
     match action {
         Some(Action::ShowLightCraft) => host.show_lightcraft(),
         Some(Action::Stop) => {

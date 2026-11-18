@@ -41,6 +41,11 @@ pub struct RunState {
     /// Phase totals and progress of the current phase.
     pub phase_total: usize,
     pub phase_done: usize,
+    /// The library is being checked for photos it already has.
+    pub checking_library: bool,
+    pub library_checked: bool,
+    /// What the check found, while the person decides.
+    pub question: Option<crate::existing::QuestionState>,
     /// The library is being read (a second transfer).
     pub reading_library: bool,
     pub library_read: bool,
@@ -532,6 +537,9 @@ impl App {
             stage_totals: None,
             phase_total: 0,
             phase_done: 0,
+            checking_library: false,
+            library_checked: false,
+            question: None,
             reading_library: false,
             library_read: false,
             written: 0,
@@ -711,12 +719,26 @@ impl App {
         };
         run.last_event = Local::now();
         match event {
+            Event::Phase(Phase::CheckingLibrary, total) => {
+                run.checking_library = true;
+                run.phase_total = total;
+                run.phase_done = 0;
+            }
+            Event::Question(question) => {
+                run.checking_library = false;
+                run.library_checked = true;
+                run.question = Some(crate::existing::QuestionState::new(*question));
+            }
             Event::Phase(Phase::ReadingLibrary, total) => {
+                run.library_checked |= run.checking_library;
+                run.checking_library = false;
                 run.reading_library = true;
                 run.phase_total = total;
                 run.phase_done = 0;
             }
             Event::Phase(Phase::Writing, total) => {
+                run.library_checked |= run.checking_library;
+                run.checking_library = false;
                 run.library_read = run.reading_library;
                 run.reading_library = false;
                 run.writing = true;

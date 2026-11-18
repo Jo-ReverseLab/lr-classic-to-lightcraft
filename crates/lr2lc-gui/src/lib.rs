@@ -19,6 +19,7 @@
 
 pub mod app;
 pub mod checks;
+pub mod existing;
 pub mod history;
 pub mod host;
 pub mod icons;
