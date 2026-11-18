@@ -501,6 +501,7 @@ pub fn apply_partial_with(
         superseded: BTreeSet::new(),
         inserted: std::collections::VecDeque::new(),
         late_choice: None,
+        after_error: false,
     };
     for entry in reimported {
         run.progress.entry(&entry);
@@ -803,6 +804,8 @@ struct Run<'a> {
     inserted: std::collections::VecDeque<Step>,
     /// The choice of the photo the last import found in the library.
     late_choice: Option<ExistingChoice>,
+    /// The last import answered with an error, yet LightCraft has the file.
+    after_error: bool,
 }
 
 /// Trimmed name, Lightroom parent and translated rules (as JSON text) of a
@@ -903,7 +906,10 @@ impl Run<'_> {
             self.report_failures(&before, step);
         } else if !after.unfinished {
             let outcome = match self.late_choice.take() {
-                Some(choice) => StepOutcome::AdoptedWhileImporting(choice),
+                Some(choice) => StepOutcome::AdoptedWhileImporting {
+                    choice,
+                    after_error: self.after_error,
+                },
                 None if after.existing > before.existing => StepOutcome::Existing,
                 None if after.not_carried > before.not_carried => StepOutcome::NotCarried,
                 None => StepOutcome::Done,
@@ -914,6 +920,7 @@ impl Run<'_> {
             }
         }
         self.late_choice = None;
+        self.after_error = false;
         Ok(())
     }
 
@@ -2046,12 +2053,17 @@ impl Run<'_> {
                     )?;
                 }
                 ImportResult::Failed => {
-                    skip(
-                        &mut self.summary,
-                        SkipCode::ImportFailed,
-                        "`library.import` reported the file as failed",
-                    );
-                    self.fail_current();
+                    if let Some(message) = failure_message(&result, &sent_path) {
+                        self.client.rejection = Some(message);
+                    }
+                    if !self.recheck_after_error(global_id, photo, &sent_path, path)? {
+                        skip(
+                            &mut self.summary,
+                            SkipCode::ImportFailed,
+                            "`library.import` reported the file as failed",
+                        );
+                        self.fail_current();
+                    }
                 }
                 ImportResult::NoId => {
                     skip(
@@ -2073,42 +2085,48 @@ impl Run<'_> {
                 self.fail_current();
             }
             Err(WriteError::Command { command, .. }) => {
-                // LightCraft may finish an import it answered with an error
-                // (a cloud-only original it had to download): look once
-                // whether the file is in the library now, and take it over
-                // instead of importing it again on the next run.
-                let found = match sent_path.as_str() {
-                    Some(p) => preview_one(&mut self.client, p)?,
-                    None => None,
-                };
-                match found {
-                    Some((reason, id)) => {
-                        let reason = match reason {
-                            ExistingReason::Path => "path",
-                            ExistingReason::Content => "content",
-                        };
-                        self.duplicate_on_import(
-                            global_id,
-                            photo,
-                            id,
-                            Some(reason),
-                            &sent_path,
-                            path,
-                        )?;
-                    }
-                    None => {
-                        skip(
-                            &mut self.summary,
-                            SkipCode::Rejected,
-                            &format!("LightCraft rejected `{command}`"),
-                        );
-                        self.fail_current();
-                    }
+                if !self.recheck_after_error(global_id, photo, &sent_path, path)? {
+                    skip(
+                        &mut self.summary,
+                        SkipCode::Rejected,
+                        &format!("LightCraft rejected `{command}`"),
+                    );
+                    self.fail_current();
                 }
             }
             Err(e) => return Err(e),
         }
         Ok(())
+    }
+
+    /// LightCraft may finish an import it answered with an error or as
+    /// failed (a cloud-only original it was still downloading): look once
+    /// with `library.importPreview` whether the file is in the library now
+    /// and, if so, take it over like a photo found while importing, so the
+    /// next run never imports it again. Returns whether it was taken over.
+    fn recheck_after_error(
+        &mut self,
+        global_id: &str,
+        photo: &Photo,
+        sent_path: &Value,
+        path: &Path,
+    ) -> Result<bool, WriteError> {
+        let rejection = self.client.rejection.take();
+        let found = match sent_path.as_str() {
+            Some(p) => preview_one(&mut self.client, p)?,
+            None => None,
+        };
+        self.client.rejection = rejection;
+        let Some((reason, id)) = found else {
+            return Ok(false);
+        };
+        let reason = match reason {
+            ExistingReason::Path => "path",
+            ExistingReason::Content => "content",
+        };
+        self.after_error = true;
+        self.duplicate_on_import(global_id, photo, id, Some(reason), sent_path, path)?;
+        Ok(true)
     }
 
     /// Brings a recorded photo back from LightCraft's trash by importing its
@@ -3127,6 +3145,24 @@ fn import_id(result: &Value, sent_path: &Value) -> ImportResult {
         }
         _ => ImportResult::NoId,
     }
+}
+
+/// LightCraft's message for the file `sent_path` in the `failed` list of an
+/// import result (`[[path, error]]` or `[{path, error}]`).
+fn failure_message(result: &Value, sent_path: &Value) -> Option<String> {
+    result
+        .get("failed")?
+        .as_array()?
+        .iter()
+        .find_map(|f| match f {
+            Value::Array(pair) if pair.first() == Some(sent_path) => {
+                pair.get(1)?.as_str().map(str::to_owned)
+            }
+            Value::Object(o) if o.get("path") == Some(sent_path) => {
+                o.get("error")?.as_str().map(str::to_owned)
+            }
+            _ => None,
+        })
 }
 
 /// A photo id is a number or a non-empty text.

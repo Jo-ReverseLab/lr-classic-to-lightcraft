@@ -21,8 +21,12 @@ pub enum StepOutcome {
     /// this photo in Kelvin.
     NotCarried,
     /// An import found the photo already in the library (not by the check
-    /// before writing); it was adopted with this choice.
-    AdoptedWhileImporting(ExistingChoice),
+    /// before writing); it was adopted with this choice. `after_error`: the
+    /// import answered with an error, yet LightCraft had the photo.
+    AdoptedWhileImporting {
+        choice: ExistingChoice,
+        after_error: bool,
+    },
 }
 
 /// The log code of a recorded photo deleted in LightCraft.
@@ -55,13 +59,23 @@ pub fn removed_entry(global_id: &str, path: &std::path::Path, trashed: bool) -> 
 /// The log code of a photo LightCraft already had and lr2lc adopted.
 pub const EXISTING_ADOPTED: &str = "existing_adopted";
 
+/// How a photo LightCraft already had was found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Found {
+    /// By the check before writing.
+    ByCheck,
+    /// `library.import` reported it as a duplicate.
+    WhileImporting,
+    /// `library.import` answered with an error, but LightCraft had it.
+    AfterError,
+}
+
 /// The log entry of a photo LightCraft already had, adopted with `choice`.
-/// `late` when it was found only while importing.
 fn adopted_entry(
     global_id: &str,
     path: &std::path::Path,
     choice: ExistingChoice,
-    late: bool,
+    found: Found,
 ) -> Entry {
     let what = match choice {
         ExistingChoice::Overwrite => {
@@ -86,8 +100,15 @@ fn adopted_entry(
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
     let mut reason = format!("Choice: {choice}.");
-    if late {
-        reason.push_str(" Found only while importing, so the default choice applied.");
+    match found {
+        Found::ByCheck => {}
+        Found::WhileImporting => {
+            reason.push_str(" Found only while importing, so the default choice applied.")
+        }
+        Found::AfterError => reason.push_str(
+            " The import reported an error, but LightCraft has the photo; it was taken over \
+             with the default choice.",
+        ),
     }
     Entry::new(
         status,
@@ -141,8 +162,17 @@ pub fn step_entries(step: &Step, outcome: StepOutcome) -> Vec<Entry> {
             .item(path.replace('|', " › ")),
         ],
         Step::Import { global_id, path } if !dry => {
-            if let StepOutcome::AdoptedWhileImporting(choice) = outcome {
-                return vec![adopted_entry(global_id, path, choice, true)];
+            if let StepOutcome::AdoptedWhileImporting {
+                choice,
+                after_error,
+            } = outcome
+            {
+                let how = if after_error {
+                    Found::AfterError
+                } else {
+                    Found::WhileImporting
+                };
+                return vec![adopted_entry(global_id, path, choice, how)];
             }
             import_entries(global_id, path, outcome)
         }
@@ -152,7 +182,7 @@ pub fn step_entries(step: &Step, outcome: StepOutcome) -> Vec<Entry> {
             path,
             choice,
             ..
-        } => vec![adopted_entry(global_id, path, *choice, false)],
+        } => vec![adopted_entry(global_id, path, *choice, Found::ByCheck)],
         Step::Restore { global_id, path } => {
             let mut entry = removed_entry(global_id, path, true);
             if dry {

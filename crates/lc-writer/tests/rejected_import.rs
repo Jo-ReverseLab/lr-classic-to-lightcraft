@@ -76,6 +76,19 @@ fn an_import_finished_despite_an_error_is_taken_over_in_the_same_run() {
     assert!(s.photos_skipped.is_empty(), "{:?}", s.photos_skipped);
     assert_eq!((s.photos_existing, s.photos_imported), (1, 0));
     assert_eq!(s.existing.found_while_importing, 1);
+    let entry = s
+        .entries
+        .iter()
+        .find(|e| e.code == Some("existing_adopted"))
+        .expect("an adopted entry");
+    assert!(
+        entry
+            .reason
+            .as_deref()
+            .unwrap()
+            .contains("The import reported an error, but LightCraft has the photo"),
+        "{entry:?}"
+    );
     let id = fake.photos()[CLOUD];
     assert_eq!(fake.photo_fields(id).unwrap().rating, 4, "empty, filled");
     let state = State::load(&env.state_file).unwrap();
@@ -135,4 +148,24 @@ fn an_import_the_app_finishes_later_is_found_by_the_next_check() {
     assert_eq!(imports(&fake), 1, "not imported a second time");
     assert_eq!(fake.photos().len(), 1);
     assert_eq!(fake.photo_fields(id).unwrap().rating, 4);
+}
+
+#[test]
+fn an_import_answered_as_failed_is_checked_once_more_too() {
+    let env = env();
+    let mut config = Config::new(&env.library);
+    config.import_failed_for = Some("IMG_0001".into());
+    let fake = FakeLightCraft::start(config);
+    // LightCraft has the file although it answers the import as failed.
+    let id = fake.add_photo(CLOUD);
+    let mut state = State::default();
+    let mut client = ControlClient::connect(fake.port()).unwrap();
+    let s = apply(&mut client, &input(), &mut state, &env.state_file).unwrap();
+    assert!(s.photos_skipped.is_empty(), "{:?}", s.photos_skipped);
+    assert_eq!(s.photos_existing, 1);
+    assert_eq!(
+        state.photo("g1").unwrap().lightcraft_id,
+        serde_json::json!(id)
+    );
+    assert_eq!(fake.photos().len(), 1);
 }
