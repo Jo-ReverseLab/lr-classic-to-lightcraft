@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/images/logo.png" alt="" width="96">
+
 # lr2lc
 
 **Move your Adobe Lightroom Classic catalog into [LightCraft](https://github.com/storytold/lightcraft),<br>with keywords, albums, ratings and edits. Safe to run again.**

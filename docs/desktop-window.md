@@ -11,6 +11,8 @@ and talks to LightCraft over the control port, like the command line.
 cargo run --release -p lr2lc-gui   # needs Rust 1.95 or later
 ```
 
+<img src="images/window-tour.gif" alt="A short tour: the Transfer page, the question before writing and the run log" width="880">
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/window-transfer-dark.png">
   <img src="images/window-transfer-light.png" alt="The Transfer page: catalog checks, target library, parts to transfer, summary" width="880">
