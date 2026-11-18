@@ -66,6 +66,9 @@ The first release is 0.1.0.
 
 ### Changed
 
+- README: new section “What works and what does not” near the top; all known
+  limits in one place, grouped by area and linked to their issues. Newly
+  listed: a rotation or mirror made in Lightroom is not carried over.
 - Faster `--apply` on large catalogs: from 100 imports on, files are sent
   to LightCraft in batches of 64 before the per-photo steps, and the mapping
   file is saved at most once a second for records a later run finds again
