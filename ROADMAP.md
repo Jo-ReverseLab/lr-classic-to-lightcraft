@@ -12,9 +12,9 @@ Released as `v0.1.0`. Everything it converts is described in the
 
 ## 0.2.0 – desktop window and fixes from the first live tests
 
-The first runs against the real LightCraft app (0.14.0 and 0.21.1, macOS)
-confirmed the counts, re-sync and develop sliders, and found these gaps.
-Done (see [CHANGELOG.md](CHANGELOG.md)):
+Released as `v0.2.0`. The first runs against the real LightCraft app
+(0.14.0 and 0.21.1, macOS) confirmed the counts, re-sync and develop
+sliders, and found these gaps. Done (see [CHANGELOG.md](CHANGELOG.md)):
 
 - Desktop window `lr2lc-gui` with dry run, transfer, Stop, Cancel (taking
   a run back) and the run log
