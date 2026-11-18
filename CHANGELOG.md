@@ -15,10 +15,23 @@ The first release is 0.1.0.
   `develop-if-empty`: fill empty fields, keep LightCraft's development
   settings of an edited photo). The summary line `existing:` and
   `writer.existing` in `report.json` count them; the log has one
-  `existing_adopted` entry per photo. Library API: `check_existing`,
-  `check_existing_with`, `Prepared::set_existing`, `Job::existing`,
+  `existing_adopted` entry per photo. Library API: `check_library`,
+  `check_library_with`, `Prepared::set_check`, `Job::existing`,
   `Phase::CheckingLibrary`.
-
+- `--removed reimport|leave`: photos lr2lc wrote that were deleted in
+  LightCraft since are found before writing; by default one in the trash
+  is restored and one deleted for good is imported again with its albums,
+  stacks and Quick Collection membership; `leave` writes nothing for them.
+  Counted in `writer.removed_in_lightcraft`. Library API: `LibraryCheck`
+  (from `check_library`) lists both kinds of photos; `Job::removed`.
+- Originals that are only in the cloud (macOS “dataless”, e.g. iCloud
+  Drive) are counted (`photos.cloud_only`, `photos.cloud_only_bytes`, one
+  summary line) and each one the run imports gets an `original_in_cloud`
+  log entry recommending to download it first. Library API:
+  `Prepared::cloud_only`, `Prepared::cloud_only_to_import`.
+- The run log shows LightCraft's own message for a rejected command at
+  the end of the entry's reason (paths replaced by `<path>` with
+  `--anonymize`).
 - Window: **Stop** keeps what a transfer did so far; **Cancel** takes the
   run back (library records it added removed, fields and members set back,
   mapping file restored; development settings of photos that were already
@@ -132,7 +145,14 @@ The first release is 0.1.0.
   stars, texts and development settings silently overwritten with the
   Lightroom values. It is now found before writing and handled by
   `--existing`; a duplicate reported only while importing is read back
-  first and gets the default choice. Cancel sets such a photo's fields back
+  first and gets the default choice.
+- A photo whose `library.import` LightCraft answered with an error but
+  finished anyway (a cloud-only original it had to download) was imported
+  again by the next run, leaving two records. lr2lc now checks the file
+  once more right after the error and takes it over, and the next run's
+  check finds an import finished later.
+- Photos deleted in LightCraft counted as unchanged and were never
+  imported again; see `--removed`. Cancel sets such a photo's fields back
   to its own values, not to empty ones.
 - Batched imports could give two photos each other's LightCraft id when
   LightCraft listed a file it had only browsed first; ids are now matched

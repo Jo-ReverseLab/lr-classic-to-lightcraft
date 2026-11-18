@@ -60,9 +60,9 @@ matching skipped list.
 | `writer` | object | always | see [writer](#writer) |
 | `anonymized` | bool | always | `true` with `--anonymize`: entries hold no name, path or value |
 | `photo_counts` | object | always | each photo counted once: `total`, `transferred`, `unchanged`, `skipped`, `conflict`, `error` |
-| `rollback` | object | only after Cancel in the window | counts of what was taken back: `photos_removed`, `albums_removed`, `keywords_removed`, `stacks_ungrouped`, `members_restored`, `quick_removed`, `fields_restored`, `develop_not_reset`, `failed`, `mapping_restored` |
+| `rollback` | object | only after Cancel in the window | counts of what was taken back: `photos_removed`, `albums_removed`, `keywords_removed`, `stacks_ungrouped`, `members_restored`, `quick_removed`, `fields_restored`, `develop_not_reset`, `photos_trashed_again` (restored from the trash by the run, moved back), `failed`, `mapping_restored` |
 | `entry_counts` | object | always | entries per status: `adjusted`, `conflict`, `error`, `skipped`, `transferred` |
-| `entries` | array | always | the run log, see the README section “Run log”; each entry has `status`, `area`, `stage`, `item`, `message` and optionally `code`, `reason`, `recommendation`, `source`, `result`, `photo`. Besides the skip codes, entries use `existing_adopted` (a photo LightCraft already had, taken over; `reason` names the choice; status `skipped` for `skip`, else `transferred`) and `existing_develop_kept` (its development settings were kept) |
+| `entries` | array | always | the run log, see the README section “Run log”; each entry has `status`, `area`, `stage`, `item`, `message` and optionally `code`, `reason`, `recommendation`, `source`, `result`, `photo`. A `reason` of a command LightCraft rejected ends with `LightCraft said: ` and the app's message; with `--anonymize` every path in it is replaced by `<path>` (the writer's skip lists never hold it). Besides the skip codes, entries use `original_in_cloud` (status `adjusted`, stage `read`: the original is only in the cloud and the run imports it), `removed_in_lightcraft` (a photo deleted in LightCraft, imported again or restored), `existing_adopted` (a photo LightCraft already had, taken over; `reason` names the choice; status `skipped` for `skip`, else `transferred`) and `existing_develop_kept` (its development settings were kept) |
 | `timing` | object | apply | per LightCraft command `{count, ms}`: how often it was sent and the total time waiting for its answers |
 | `not_selected` | array of strings | only with `--skip` | areas left out, in the order `keywords`, `ratings`, `labels`, `flags`, `texts`, `collections`, `stacks`, `virtual-copies`, `develop`; absent when nothing is left out |
 
@@ -101,6 +101,8 @@ Carries the area fields (`read`, `converted`, `skipped`, `by_code`) plus:
 | `photos.creators` | integer | always | converted photos with a creator; name never reported |
 | `photos.titles` | integer | always | converted photos with a title; text never reported |
 | `photos.titles_unreadable` | integer | always | converted photos whose title blob could not be read |
+| `photos.cloud_only` | integer | always | converted photos whose original is only in the cloud (macOS “dataless”, e.g. iCloud Drive; always 0 elsewhere); LightCraft has to download each one it imports |
+| `photos.cloud_only_bytes` | integer | always | their file size together, in bytes |
 
 `photos.videos` is a subset of `photos.skipped` (videos are also listed there).
 
@@ -296,6 +298,7 @@ LightCraft, so the planned section carries none.
 | `writer.keywords_created` | integer | apply | |
 | `writer.photos_imported` | integer | apply | |
 | `writer.photos_existing` | integer | apply | photos LightCraft already had (not in the mapping file); taken over instead of imported |
+| `writer.removed_in_lightcraft` | object | apply | photos lr2lc wrote that LightCraft no longer lists or lists only in its trash: `found`, `reimported` (imported or made again, or restored), `restored` (part of `reimported`: restored from the trash, same record), `left` (`--removed leave`; also in `photos_skipped` with `removed_in_lightcraft`) |
 | `writer.existing` | object | apply | `photos_existing` by choice (`--existing`): `found` (= `photos_existing`), `overwrite`, `develop`, `develop_if_empty`, `skip` (the four add up to `found`), `develop_kept` (`develop-if-empty` photos edited in LightCraft whose settings were kept; also in `develop.not_applied`), `found_while_importing` (part of `found`: reported as duplicates only by the import, not by the check before writing; they got the default choice) |
 | `writer.photos_same_content` | integer | apply | imported photos whose file has the same bytes as another photo of the catalog; each became its own record (a copy linked to its own file). Part of `photos_imported` |
 | `writer.photos_updated` | integer | apply | known photos, at least one update sent |
@@ -381,7 +384,9 @@ Reasons never expose user data. They carry fixed text plus Lightroom ids only.
 - No colour-label text — only counts, the set name, and the Lightroom id in
   `custom_reasons`.
 - No LightCraft ids — they live in the mapping file, never in the report.
-- No app error messages (which may quote paths) are copied into reasons.
+- No app error messages (which may quote paths) are copied into the
+  writer's reasons. Only the run log shows them, at the end of an entry's
+  `reason`, with paths replaced by `<path>` under `--anonymize`.
 
 ## Skip codes
 
@@ -418,7 +423,9 @@ cannot send as UTF-8).
 
 Writer: `keyword_changed`, `no_global_id`,
 `no_lightcraft_id`, `ambiguous`, `parent_not_created`, `parent_failed`,
-`no_id_returned`, `applied_not_saved`, `import_failed`, `rejected`.
+`no_id_returned`, `applied_not_saved`, `import_failed`, `rejected`,
+`same_content`, `removed_in_lightcraft` (deleted in LightCraft and left as
+it is with `--removed leave`).
 
 Catch-all (kept for callers that skip without a specific code): `unspecified`.
 

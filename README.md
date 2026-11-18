@@ -215,6 +215,7 @@ setting.
 | `--allow-xmp` | Write even if the library writes XMP sidecars next to the originals |
 | `--overwrite-develop` | Also rewrite the development settings of known photos that changed in Lightroom |
 | `--existing CHOICE` | What to do with photos LightCraft already has but lr2lc did not write: `overwrite`, `develop`, `develop-if-empty` (default) or `skip` |
+| `--removed CHOICE` | What to do with photos lr2lc wrote that were deleted in LightCraft: `reimport` (default) or `leave` |
 | `--probe-white-balance` | Read an original file to derive the white-balance scale (not implemented yet: the run stops with exit code 2) |
 | `--map OLD=NEW` | Replace a path prefix, repeatable |
 | `--skip AREAS` | Leave parts of the catalog out (comma-separated, see below) |
@@ -226,8 +227,8 @@ setting.
 Each option is described below.
 
 Every option except `--map` may be given at most once. Repeating one of
-`--library`, `--script`, `--report`, `--port`, `--label-set`, `--skip` or
-`--existing` ends with
+`--library`, `--script`, `--report`, `--port`, `--label-set`, `--skip`,
+`--existing` or `--removed` ends with
 exit code 2 before anything is read. `--report` and `--script` must not
 name the same file either; if they do, lr2lc stops with exit code 2 so the
 two outputs cannot overwrite each other.
@@ -450,6 +451,19 @@ requested from the LightCraft project
 ([storytold/lightcraft#4392](https://github.com/storytold/lightcraft/issues/4392));
 once it exists, lr2lc will offer it as an option.
 
+### Originals only in the cloud
+
+On macOS, iCloud Drive (and other file providers) can keep a file on disk as
+a placeholder whose bytes are downloaded on first use (“dataless”, shown
+with a cloud icon in Finder). lr2lc only reads the file's status, never its
+bytes, and does not download anything. LightCraft has to download each such
+original while it imports it, which takes long for large raw files and can
+fail. The summary has one line `originals only in the cloud (not
+downloaded): N (X MB)`, `report.json` has `photos.cloud_only` and
+`photos.cloud_only_bytes`, and the log has one `original_in_cloud` entry
+per such photo the run imports. Download them first (Finder: Download Now)
+before a transfer.
+
 ### `--skip AREAS`
 
 Leaves parts of the catalog out of the run. `AREAS` is a comma-separated
@@ -644,11 +658,14 @@ they apply `code` (the skip code), `reason`, `recommendation`, `source`
 (the value in Lightroom), `result` (the value in LightCraft) and `photo`
 (the photo's Lightroom id). Messages, reasons and recommendations never
 contain a name, a path or a value; those are only in `item`, `source` and
-`result`.
+`result`. The one exception: when LightCraft rejects a command, the
+entry's `reason` ends with `LightCraft said: …` and LightCraft's own
+message, which may quote a file path.
 
 The report holds names, paths and values by default. `--anonymize` leaves
 them out: `item` becomes an id such as `photo 7` or `collection 3`,
-`source` and `result` are dropped, and `anonymized` is `true`. Use it before
+`source` and `result` are dropped, every path in LightCraft's messages is
+replaced by `<path>`, and `anonymized` is `true`. Use it before
 sharing a report. The readable summary never holds a name, path or value.
 
 ### Writer plan in the dry run
@@ -1044,6 +1061,33 @@ importing N)`; a dry run does not connect and says `existing: checked when
 transferring`. `report.json` carries the counts in `writer.existing`, and
 the run log has one entry per photo with the code `existing_adopted`
 (`existing_develop_kept` when its development settings were kept).
+
+### `--removed CHOICE`
+
+With `--apply`, the check before writing also reads which photos
+LightCraft lists (ids only, inside and outside its trash). A photo lr2lc
+wrote that is still in the catalog but that LightCraft no longer lists, or
+lists only in its trash, was deleted in LightCraft:
+
+- `reimport` (default): a photo in the trash is restored by importing its
+  file again (LightCraft brings the same record back); a photo deleted for
+  good is forgotten in the mapping file and imported again as a new photo,
+  with its albums, stacks and Quick Collection membership (a virtual copy
+  is made again from its master);
+- `leave`: the mapping file keeps it and nothing is sent for it; it is
+  skipped with the code `removed_in_lightcraft`.
+
+The choice applies to this run only. The summary has one line `removed in
+LightCraft: N (imported again N, restored from the trash N, left N)`
+(`removed in LightCraft: checked when transferring` in a dry run), and
+`report.json` has `writer.removed_in_lightcraft`. Cancel in the window moves
+photos it restored back to the trash.
+
+A `library.import` that LightCraft answers with an error is checked once
+more (`library.importPreview` of that file): if LightCraft imported the file
+after all, the photo is taken over like a photo found while importing. If
+LightCraft finishes such an import only later, the next run's check finds
+it, so the file is never imported twice.
 
 ### Mapping file
 
