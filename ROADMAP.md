@@ -1,8 +1,8 @@
 # Roadmap
 
 Where lr2lc stands and what comes next. Details and progress are in the
-[issues](https://github.com/Ben-ReverseLab/lr2lc/issues) and their
-[milestones](https://github.com/Ben-ReverseLab/lr2lc/milestones). Finished
+[issues](https://github.com/Jo-ReverseLab/lr2lc/issues) and their
+[milestones](https://github.com/Jo-ReverseLab/lr2lc/milestones). Finished
 work is listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## 0.1.0 – first public release

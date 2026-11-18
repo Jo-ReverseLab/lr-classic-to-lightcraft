@@ -84,7 +84,7 @@ window uses the Inter font (SIL Open Font License, see
 
 Not available yet: **Retry this photo** and **Overwrite with Lightroom
 state** in the Log are disabled until lr2lc can run a single photo
-([#36](https://github.com/Ben-ReverseLab/lr2lc/issues/36)). There is no
+([#36](https://github.com/Jo-ReverseLab/lr2lc/issues/36)). There is no
 pause, and the spinner does not follow the system's reduced-motion
 setting.
 
