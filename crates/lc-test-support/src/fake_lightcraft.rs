@@ -16,8 +16,9 @@ use std::time::Duration;
 
 /// The commands that only read or only change the selection; everything else
 /// may change the library.
-pub const READ_COMMANDS: [&str; 8] = [
+pub const READ_COMMANDS: [&str; 9] = [
     "photo.inspect",
+    "library.importPreview",
     "library.select",
     "catalog.query",
     "albums.list",
@@ -153,8 +154,12 @@ pub struct SeedPhoto {
     pub creator: Option<String>,
     /// Whether LightCraft has the photo in the trash ("Recently Deleted").
     /// A deleted photo is listed only by `catalog.query {deleted: true}`, but
-    /// `photo.inspect` still answers for it.
+    /// `photo.inspect` still answers for it. Importing its file restores it,
+    /// like LightCraft's default.
     pub deleted: bool,
+    /// Whether the photo has development settings (`edited` in
+    /// `catalog.query`).
+    pub edited: bool,
 }
 
 impl SeedPhoto {
@@ -172,6 +177,7 @@ impl SeedPhoto {
             copyright: None,
             creator: None,
             deleted: false,
+            edited: false,
         }
     }
 }
@@ -391,6 +397,9 @@ impl FakeLightCraft {
                 seed.id,
             );
             library.seeds.insert(seed.id, seed.clone());
+            if seed.edited {
+                library.edited.insert(seed.id);
+            }
         }
         for (index, photo) in &config.seed_members {
             let id = 5001 + *index as u64;
@@ -757,6 +766,35 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
         }
         "album.toggleTarget" => toggle_target(config, lib, params),
         "catalog.query" => catalog_query(config, lib, params),
+        // The duplicate check of `library.import`, adding nothing.
+        "library.importPreview" => {
+            let paths = params["paths"].as_array().ok_or("paths missing")?;
+            let mut candidates = Vec::new();
+            for path in paths {
+                let path = path.as_str().ok_or("path is not text")?;
+                let name = std::path::Path::new(path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let mut item = json!({"path": path, "name": name, "kind": "image"});
+                if let Some((existing, reason)) = duplicate_of(config, lib, path) {
+                    item["duplicate"] = json!(reason);
+                    item["existing"] = json!(existing);
+                }
+                candidates.push(item);
+            }
+            let duplicates = candidates
+                .iter()
+                .filter(|c| c.get("existing").is_some())
+                .count();
+            Ok(json!({
+                "candidates": candidates,
+                "duplicates": duplicates,
+                "scanned": paths.len(),
+                "scanLimited": false,
+                "skipped": 0,
+            }))
+        }
         "photo.inspect" => {
             let id = params["ids"][0]
                 .as_i64()
@@ -879,27 +917,17 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             {
                 return Ok(json!({"imported": [], "duplicates": [], "failed": 1}));
             }
-            if let Some(existing) = lib.photos.get(path) {
-                return Ok(json!({
-                    "imported": [],
-                    "duplicates": [{"path": path, "existing": existing, "reason": "path"}],
-                    "failed": 0,
-                }));
-            }
-            if let Some(content) = config.file_contents.get(path) {
-                let twin = lib
-                    .photos
-                    .iter()
-                    .filter(|(other, _)| config.file_contents.get(*other) == Some(content))
-                    .map(|(_, id)| *id)
-                    .min();
-                if let Some(existing) = twin {
-                    return Ok(json!({
-                        "imported": [],
-                        "duplicates": [{"path": path, "existing": existing, "reason": "content"}],
-                        "failed": 0,
-                    }));
+            if let Some((existing, reason)) = duplicate_of(config, lib, path) {
+                // A duplicate of a photo in the trash is restored.
+                let mut duplicate = json!({"path": path, "existing": existing, "reason": reason});
+                let mut answer = json!({"imported": [], "failed": 0});
+                if let Some(seed) = lib.seeds.get_mut(&existing).filter(|s| s.deleted) {
+                    seed.deleted = false;
+                    duplicate["existingDeleted"] = json!(true);
+                    answer["restored"] = json!([existing]);
                 }
+                answer["duplicates"] = json!([duplicate]);
+                return Ok(answer);
             }
             let id = lib.next_id;
             lib.next_id += 1;
@@ -1617,11 +1645,28 @@ fn toggle_target(config: &Config, lib: &mut Library, params: &Value) -> Result<V
     }))
 }
 
+/// The photo of the library that importing `path` would find again: the
+/// one with this path, else the one with the lowest id whose file has the
+/// same content; with the reason `path` or `content`.
+fn duplicate_of(config: &Config, lib: &Library, path: &str) -> Option<(i64, &'static str)> {
+    if let Some(existing) = lib.photos.get(path) {
+        return Some((*existing, "path"));
+    }
+    let content = config.file_contents.get(path)?;
+    lib.photos
+        .iter()
+        .filter(|(other, _)| config.file_contents.get(*other) == Some(content))
+        .map(|(_, id)| *id)
+        .min()
+        .map(|id| (id, "content"))
+}
+
 /// `catalog.query {filter?, offset?, limit?}` -> `{total, photos:[{id,
 /// fileName}]}` (the file name of the imported path); `filter.album` lists the members of that album, sorted by
 /// photo id (not by insertion order, like the real app); without it all
 /// photos. `filter.deleted: true` lists only photos in the trash, a missing
-/// or false `deleted` only photos outside it. The default `limit` is 200.
+/// or false `deleted` only photos outside it; `filter.only: [ids]` keeps
+/// only these photos. The default `limit` is 200.
 fn catalog_query(config: &Config, lib: &Library, params: &Value) -> Result<Value, String> {
     let deleted = params["filter"]["deleted"].as_bool().unwrap_or(false);
     let mut ids: Vec<i64> = match params["filter"].get("album") {
@@ -1632,6 +1677,15 @@ fn catalog_query(config: &Config, lib: &Library, params: &Value) -> Result<Value
         }
         None => lib.photos.values().copied().collect(),
     };
+    if let Some(only) = params["filter"].get("only") {
+        let only: Vec<i64> = only
+            .as_array()
+            .ok_or("only must be a list")?
+            .iter()
+            .filter_map(Value::as_i64)
+            .collect();
+        ids.retain(|id| only.contains(id));
+    }
     // A photo without a seed is a plain, non-deleted photo.
     ids.retain(|id| {
         config.ignore_deleted_filter || lib.seeds.get(id).is_none_or(|seed| seed.deleted == deleted)
