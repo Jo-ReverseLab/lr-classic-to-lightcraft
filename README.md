@@ -529,7 +529,7 @@ Writes a machine-readable report to `FILE` after the run:
 
 ```json
 {
-  "tool_version": "0.1.0",
+  "tool_version": "0.2.0",
   "catalog_version": "1500000",
   "dry_run": true,
   "catalog_unchanged": true,

@@ -1654,14 +1654,14 @@ dependencies = [
 
 [[package]]
 name = "lc-test-support"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "lc-writer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "lc-test-support",
  "model",
@@ -1757,7 +1757,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "lr-reader"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "lrcat-fixtures",
@@ -1770,7 +1770,7 @@ dependencies = [
 
 [[package]]
 name = "lr2lc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "lc-test-support",
@@ -1784,7 +1784,7 @@ dependencies = [
 
 [[package]]
 name = "lr2lc-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "lc-test-support",
@@ -1799,7 +1799,7 @@ dependencies = [
 
 [[package]]
 name = "lr2lc-gui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "dirs",
@@ -1819,7 +1819,7 @@ dependencies = [
 
 [[package]]
 name = "lrcat-fixtures"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "rusqlite",
@@ -1872,7 +1872,7 @@ dependencies = [
 
 [[package]]
 name = "model"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "moxcms"

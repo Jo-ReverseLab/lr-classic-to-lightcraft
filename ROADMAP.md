@@ -8,32 +8,38 @@ work is listed in [CHANGELOG.md](CHANGELOG.md).
 ## 0.1.0 – first public release
 
 Released as `v0.1.0`. Everything it converts is described in the
-[README](README.md#status). Remaining step: make the repository public (#2).
+[README](README.md#status).
 
-## 0.2.0 – fixes from the first live tests
+## 0.2.0 – desktop window and fixes from the first live tests
 
 The first runs against the real LightCraft app (0.14.0 and 0.21.1, macOS)
 confirmed the counts, re-sync and develop sliders, and found these gaps.
-Fixed on `main` (see [CHANGELOG.md](CHANGELOG.md)):
+Done (see [CHANGELOG.md](CHANGELOG.md)):
 
+- Desktop window `lr2lc-gui` with dry run, transfer, Stop, Cancel (taking
+  a run back) and the run log
+- Photos LightCraft already has are found before writing and handled by
+  choice (`--existing`; the window asks), never overwritten silently
+- Photos deleted in LightCraft since an earlier run are found and imported
+  again or left (`--removed`; the window asks)
+- An import LightCraft rejects but finishes later is not duplicated;
+  LightCraft's own error text is kept in the log
+- Originals only in iCloud are found and pointed out before the transfer
 - Photos with identical file content collapse into one LightCraft photo (#17)
 - A virtual copy inherits keywords of its master (#3)
 - Keyword names with leading or trailing spaces are trimmed silently (#4)
 - Colour label names outside the active label set now behave as in Lightroom (#5)
+- Smart rules on rating 0 checked against Lightroom's counts (#6)
 - Report every unmapped development field with a photo count (#7)
 - Handle the control port's idle-close notice (#8)
-
-Open:
-
-- Smart rules on rating 0 also match unrated photos in LightCraft; needs a
-  check of how Lightroom counts them (#6)
 
 ## 0.3.0 – development settings, part 2
 
 - White balance temperature and tint, using the scale LightCraft reports
   for each photo (#9, done)
-- Confirm and map the remaining development fields: red eye, lens blur,
-  point color, manual chromatic aberration, crop flip, enhance (#10)
+- Map the remaining development fields, shapes confirmed in Lightroom:
+  lens blur, point color, manual chromatic aberration (defringe), enhance
+  (denoise), mirroring (crop flip); red eye still to confirm (#10)
 - AI masks and aggregate masks (#11; brush groups and background done,
   objects and people parts open)
 - Brush spots and remove areas (#12; brush spots done, generative Remove

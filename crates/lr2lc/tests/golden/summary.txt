@@ -1,4 +1,4 @@
-lr2lc 0.1.0 dry run: nothing is written (use --apply to convert)
+lr2lc 0.2.0 dry run: nothing is written (use --apply to convert)
 catalog version 1500000
 folders: read 6, would convert 6, skipped 0
 photos: read 21, would convert 15, skipped 6

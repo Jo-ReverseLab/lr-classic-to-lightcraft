@@ -7,6 +7,11 @@ The first release is 0.1.0.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-18
+
+Desktop window, photos already in or deleted from LightCraft, and the
+fixes from the first live tests.
+
 ### Added
 
 - `--existing overwrite|develop|develop-if-empty|skip`: with `--apply`,
