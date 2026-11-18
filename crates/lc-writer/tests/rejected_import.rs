@@ -169,3 +169,51 @@ fn an_import_answered_as_failed_is_checked_once_more_too() {
     );
     assert_eq!(fake.photos().len(), 1);
 }
+
+#[test]
+fn a_rejected_develop_command_keeps_lightcrafts_message() {
+    let env = env();
+    let mut config = Config::new(&env.library);
+    config.failures.push(Failure {
+        command: "develop.set".into(),
+        photo_id: None,
+        message: "cannot render \"/Users/example/Pictures/cloud/IMG_0001.CR3\"".into(),
+    });
+    let fake = FakeLightCraft::start(config);
+    let mut develop = model::Develop::default();
+    develop.controls.insert("exposure".into(), 0.5);
+    let mut input = input();
+    input.photos[0] = input.photos[0].clone().with_develop(develop);
+    let mut state = State::default();
+    let mut client = ControlClient::connect(fake.port()).unwrap();
+    let s = apply(&mut client, &input, &mut state, &env.state_file).unwrap();
+    let [incomplete] = &s.photos_incomplete[..] else {
+        panic!("{:?}", s.photos_incomplete)
+    };
+    assert_eq!(incomplete.code, SkipCode::Rejected);
+    assert!(
+        !incomplete.reason.contains("render"),
+        "{}",
+        incomplete.reason
+    );
+    assert_eq!(
+        incomplete.detail.as_deref(),
+        Some("cannot render \"/Users/example/Pictures/cloud/IMG_0001.CR3\"")
+    );
+}
+
+#[test]
+fn a_failed_import_keeps_lightcrafts_message() {
+    let env = env();
+    let mut config = Config::new(&env.library);
+    config.import_failed_for = Some("IMG_0001".into());
+    let fake = FakeLightCraft::start(config);
+    let mut state = State::default();
+    let mut client = ControlClient::connect(fake.port()).unwrap();
+    let s = apply(&mut client, &input(), &mut state, &env.state_file).unwrap();
+    let [skipped] = &s.photos_skipped[..] else {
+        panic!("{:?}", s.photos_skipped)
+    };
+    assert_eq!(skipped.code, SkipCode::ImportFailed);
+    assert!(skipped.detail.is_some(), "{skipped:?}");
+}

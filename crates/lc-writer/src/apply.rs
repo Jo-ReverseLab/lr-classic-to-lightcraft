@@ -723,7 +723,8 @@ fn match_by_name(
 }
 
 /// Passes commands on and keeps LightCraft's message of the last rejected
-/// one, for the log entry of the step that failed.
+/// (or not saved) one, for the log entry of the step that failed. The
+/// control port's replies carry only a text, no error code.
 struct Recording<'a> {
     inner: &'a mut dyn CommandSink,
     rejection: Option<String>,
@@ -732,8 +733,11 @@ struct Recording<'a> {
 impl CommandSink for Recording<'_> {
     fn execute(&mut self, command: &str, params: Value) -> Result<Outcome, WriteError> {
         let result = self.inner.execute(command, params);
-        if let Err(WriteError::Command { message, .. }) = &result {
-            self.rejection = Some(message.clone());
+        match &result {
+            Err(WriteError::Command { message, .. }) | Ok(Outcome::AppliedNotSaved(message)) => {
+                self.rejection = Some(message.clone());
+            }
+            _ => {}
         }
         result
     }
@@ -947,7 +951,13 @@ impl Run<'_> {
         for (list, was) in lists.into_iter().zip(before.lists) {
             for skipped in list.iter_mut().skip(was) {
                 if skipped.detail.is_none()
-                    && matches!(skipped.code, SkipCode::Rejected | SkipCode::SameContent)
+                    && matches!(
+                        skipped.code,
+                        SkipCode::Rejected
+                            | SkipCode::SameContent
+                            | SkipCode::ImportFailed
+                            | SkipCode::AppliedNotSaved
+                    )
                 {
                     skipped.detail = Some(message.clone());
                 }

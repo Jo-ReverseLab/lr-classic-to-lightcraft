@@ -302,3 +302,51 @@ fn check_library_reports_photos_deleted_in_lightcraft() {
         "removed in LightCraft: 1 (imported again 0, restored from the trash 0, left 1)"
     ));
 }
+
+#[test]
+fn the_report_keeps_lightcrafts_message_without_paths_when_anonymized() {
+    let mut s = setup();
+    let mut config = Config::new(s.job.library.as_deref().unwrap());
+    config
+        .failures
+        .push(lc_test_support::fake_lightcraft::Failure {
+            command: "photo.rate".into(),
+            photo_id: None,
+            message: "photo locked: \"/Users/example/Pictures/a.jpg\" is read-only".into(),
+        });
+    let fake = FakeLightCraft::start(config);
+    s.job.port = fake.port();
+    let prepared = prepare(&s.job, &mut NoProgress).unwrap();
+    let done = finish(&s.job, prepared, &mut NoProgress).unwrap();
+    let reason = |anonymize: bool| -> String {
+        let report: Value = serde_json::from_str(&done.report_json_as(anonymize)).unwrap();
+        report["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["code"] == "rejected")
+            .expect("a rejected entry")["reason"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let named = reason(false);
+    assert!(
+        named.contains("LightCraft rejected `photo.rate`"),
+        "{named}"
+    );
+    assert!(
+        named.contains("LightCraft said: photo locked: \"/Users/example/Pictures/a.jpg\""),
+        "{named}"
+    );
+    let anonymous = reason(true);
+    assert!(
+        anonymous.ends_with("LightCraft said: photo locked: \"<path>\" is read-only"),
+        "{anonymous}"
+    );
+    // The writer's own skip list keeps fixed text.
+    let report: Value = serde_json::from_str(&done.report_json_as(false)).unwrap();
+    for item in report["writer"]["photos_incomplete"].as_array().unwrap() {
+        assert!(!item["reason"].as_str().unwrap().contains("/Users"));
+    }
+}

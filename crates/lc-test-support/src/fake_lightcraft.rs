@@ -948,9 +948,7 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                     )?;
                     imported.extend(one["imported"].as_array().cloned().unwrap_or_default());
                     duplicates.extend(one["duplicates"].as_array().cloned().unwrap_or_default());
-                    if one["failed"].as_u64().unwrap_or(0) > 0 {
-                        failed.push(json!([path, "cannot be read"]));
-                    }
+                    failed.extend(one["failed"].as_array().cloned().unwrap_or_default());
                 }
                 if config.batch_ids_reversed {
                     imported.reverse();
@@ -965,7 +963,12 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
                 .as_deref()
                 .is_some_and(|t| path.contains(t))
             {
-                return Ok(json!({"imported": [], "duplicates": [], "failed": 1}));
+                // Like the real app: `[[path, error]]`.
+                return Ok(json!({
+                    "imported": [],
+                    "duplicates": [],
+                    "failed": [[path, "cannot be read: unsupported file"]],
+                }));
             }
             if let Some((existing, reason)) = duplicate_of(config, lib, path) {
                 // A duplicate of a photo in the trash is restored.
