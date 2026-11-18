@@ -1,6 +1,6 @@
 # LightCraft control port
 
-> **Status:** Implemented in `crates/lc-writer/src/control.rs`: the client, the pre-flight checks and handling of the save-failure reply. `ui.inspect` is sent as a port method, not through `engine.execute`. LightCraft must be started with `--control <port>`. Items marked as assumptions were not verified against a running app.
+> **Status:** Implemented in `crates/lc-writer/src/control.rs`: the client, the pre-flight checks and handling of the save-failure reply. `ui.inspect` is sent as a port method, not through `engine.execute`. LightCraft must be started with `--control <port>`. Items marked as assumptions were not verified against a running app. Section 7 lists the commands of the library check before writing (0.2.0), checked live.
 
 All paths are relative to the LightCraft source root (the LightCraft source checkout, read only). Anything not backed by a file:line is marked *(assumption)*.
 
@@ -68,6 +68,33 @@ Note: `photo.virtualCopy` copies the settings of the source photo; a copy create
 - Best mapping route: **`library.import` result**. `duplicates` entries carry `{path, existing, reason}` (`library.rs:1638`), so for files already known you get path → existing id directly, and for files just imported you have `imported` (ids). Whether `imported` elements are plain ids or `{path,id}` objects is **not verified** (`lightcraft-import.md:14` says "photoId…"); the doc string lists `imported` without shape. Open: check `crates/engine/src/import.rs` report construction. To get a path → id map robustly, import **one file per call**, or import then query.
 - Query alternative: `library.filter` takes a `Filter` with `text` (free text over filename, title, caption, keywords…, `crates/catalog/src/query.rs:22-24`) and `libraryFolder` (`query.rs:46-49`). These match by file name or folder, not by exact full path, and change what the UI shows. No dedicated "find by path" command was found in `crates/engine/src/cmd/*.rs` (grep for `find`/`byPath` returned only `library.findSimilar` and `library.findMissing`). Whether a list command (e.g. `library.list`) returns paths: **not checked**.
 - Path matching rules: path keys for the Lightroom importer are `\`→`/` and lower-cased only on Windows (`crates/engine/src/lightroom_catalog.rs:36-39`; from `lightcraft-import.md:36`). lr2lc should apply path mapping (principle 6) first and pass absolute paths exactly as it will later compare them.
+
+## 7. Library check before writing (since 0.2.0)
+
+Used by `crates/lc-writer/src/existing.rs`. Checked live against LightCraft 0.21.1 on 2026-11-18
+(`existing-live` run: photos imported by hand, one edited; photos trashed and deleted for good).
+
+- **`library.importPreview {paths}`**: read-only duplicate check with the same rules as
+  `library.import` (path first, then content). It reports per path whether LightCraft already has
+  the file (`duplicate`) and the existing photo id (`existing`). lr2lc asks in blocks of 64 paths.
+  An app that rejects the command gives an empty check, so duplicates surface only during the import.
+- **`catalog.query {filter, offset, limit}`**: pages of photo summaries (`id`, `fileName`, rating,
+  flag, label, title, keywords, and `edited` as a bool), with `total`. The `{only: [ids]}` filter
+  reads given photos. `{deleted: true}` lists only the trash, and `{}` lists the photos outside it.
+  A photo with an XMP sidecar next to its file counts as `edited` straight after import, because
+  the sidecar's settings are read.
+- **`photo.delete {ids}`** moves photos to the trash. **`photo.deletePermanently {ids}`** removes
+  them for good. Both act on the selection, so `library.select` comes first.
+- **Restoring from the trash**: `library.import` of a trashed photo's file brings back the same
+  record (same id, `restored`), not a new photo.
+- **`library.select {ids, active}`** selects one photo and makes it the active one. lr2lc uses it
+  before every `photo.*` command and for the window's **Show in LightCraft**.
+- **`develop.set {control, value, ids}`** takes LightCraft's control ids, such as
+  `light.exposure`. An unknown id is rejected with `unknown control`.
+- **Failed imports**: `library.import` lists failures as `failed: [[path, error]]`. With originals
+  that exist only in iCloud, an import can be reported as failed (LightCraft was still downloading)
+  and still finish later. lr2lc therefore asks `library.importPreview` once more after a failure,
+  and the next run's check finds the photo by path.
 
 ## Open questions
 

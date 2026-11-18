@@ -94,6 +94,14 @@ Photos
   belongs to them; LightCraft offers no way yet to add them as offline
   records over the control port (see [Missing originals](#missing-originals),
   [#23](https://github.com/Jo-ReverseLab/lr2lc/issues/23)).
+- Originals that are only in iCloud (or another cloud drive) are
+  downloaded by LightCraft one by one while importing, often many seconds
+  per photo. lr2lc only points them out and downloads nothing itself (see
+  [Originals only in the cloud](#originals-only-in-the-cloud)); download
+  them first.
+- The choices for photos LightCraft already has and for photos deleted in
+  LightCraft (`--existing`, `--removed`, the window's question) hold for
+  one run; they are not remembered.
 - Videos are skipped
   ([#15](https://github.com/Jo-ReverseLab/lr2lc/issues/15)).
 - A virtual copy whose master is not converted (for example a video) is
@@ -141,6 +149,8 @@ Development settings (see [Development settings](#development-settings))
 
 Window
 
+- The per-photo list of photos LightCraft already has shows LightCraft's
+  values (stars, edited or not), not Lightroom's.
 - **Retry this photo** and **Overwrite with Lightroom state** are disabled
   until lr2lc can run a single photo
   ([#36](https://github.com/Jo-ReverseLab/lr2lc/issues/36)).

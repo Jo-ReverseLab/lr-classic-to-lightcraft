@@ -1,5 +1,9 @@
 # Release checklist for the first public release (0.1.0)
 
+> Historical: describes the state before 0.1.0. For later releases the gate in
+> `.github/workflows/release.yml` is the same (tag = workspace version, the
+> version appears in `CHANGELOG.md`, no `tasks/`).
+
 A checklist, not a script. Nothing in it has been executed; it describes
 `main` at `600765f`. Commands are read-only unless a step says otherwise.
 `path:line` refers to this repository at that commit; counts come from the
