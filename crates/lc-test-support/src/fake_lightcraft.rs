@@ -219,6 +219,10 @@ pub struct Config {
     pub not_saved_updates: bool,
     /// `library.import` of a path containing this text answers `failed: 1`.
     pub import_failed_for: Option<String>,
+    /// `library.import` of a path containing this text adds the photo but
+    /// answers with an error, like an app that timed out downloading a
+    /// cloud-only original and finished the import afterwards.
+    pub import_rejected_but_added_for: Option<String>,
     /// Behave like the real app: `photo.rate`, `photo.flag`, `photo.label`
     /// and `photo.setMeta` fail with `no photos selected` while the selection
     /// is empty, `library.select` sets it and `library.import` selects the
@@ -293,6 +297,7 @@ impl Config {
             keywords: BTreeSet::new(),
             not_saved_updates: false,
             import_failed_for: None,
+            import_rejected_but_added_for: None,
             selection_gate: true,
             album_failures: Vec::new(),
             albums: Vec::new(),
@@ -588,6 +593,51 @@ impl FakeLightCraft {
         } else {
             Err(format!("unknown method: {command}"))
         }
+    }
+
+    /// Adds a photo for `path` as an import would, without a received
+    /// command (an import the app finished after reporting an error).
+    /// Returns its id.
+    pub fn add_photo(&self, path: &str) -> i64 {
+        let mut lib = self.shared.library.lock().unwrap();
+        let id = lib.next_id;
+        lib.next_id += 1;
+        lib.photos.insert(path.to_string(), id);
+        lib.seeds.insert(id, SeedPhoto::plain(id));
+        id
+    }
+
+    /// Deletes a photo for good, like a user emptying the trash: it is
+    /// gone from every query, album and stack.
+    pub fn delete_permanently(&self, id: i64) {
+        let mut lib = self.shared.library.lock().unwrap();
+        lib.photos.retain(|_, p| *p != id);
+        lib.seeds.remove(&id);
+        lib.edited.remove(&id);
+        for album in lib.albums.values_mut() {
+            album.photos.retain(|p| *p != id);
+        }
+        for st in lib.stacks.values_mut() {
+            st.photos.retain(|p| *p != id);
+        }
+        lib.stacks.retain(|_, st| st.photos.len() >= 2);
+    }
+
+    /// Moves a photo to the trash, like a user deleting it in LightCraft:
+    /// only `catalog.query {deleted: true}` lists it; importing its file
+    /// restores it.
+    pub fn trash(&self, id: i64) {
+        let mut lib = self.shared.library.lock().unwrap();
+        lib.seeds
+            .entry(id)
+            .or_insert_with(|| SeedPhoto::plain(id))
+            .deleted = true;
+    }
+
+    /// Whether a photo is in the trash.
+    pub fn is_trashed(&self, id: i64) -> bool {
+        let lib = self.shared.library.lock().unwrap();
+        lib.seeds.get(&id).is_some_and(|s| s.deleted)
     }
 
     /// The file path a photo is linked to.
@@ -940,6 +990,15 @@ fn run(shared: &Shared, lib: &mut Library, command: &str, params: &Value) -> Res
             }
             if config.not_saved_creates {
                 return Err("saved in memory but not written to disk: disk full".into());
+            }
+            if config
+                .import_rejected_but_added_for
+                .as_deref()
+                .is_some_and(|t| path.contains(t))
+            {
+                return Err(format!(
+                    "import timed out while reading \"{path}\": the file is not downloaded"
+                ));
             }
             if config.import_no_id {
                 return Ok(json!({"imported": [], "duplicates": [], "failed": 0}));
