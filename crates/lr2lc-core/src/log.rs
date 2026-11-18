@@ -431,7 +431,35 @@ fn entries_unnamed(sources: &Sources<'_>) -> Vec<RawEntry> {
         }
     }
 
-    for gid in plan.develop_not_applied_ids() {
+    // An applied run planned again with the library's state; its list is
+    // the one that counts.
+    let (not_applied, kept) = match sources.applied {
+        Some(s) => (
+            &s.develop_not_applied_ids[..],
+            &s.existing_develop_kept_ids[..],
+        ),
+        None => (
+            plan.develop_not_applied_ids(),
+            plan.existing_develop_kept_ids(),
+        ),
+    };
+    for gid in not_applied {
+        if kept.contains(gid) {
+            let entry = Entry::new(
+                Status::Skipped,
+                Area::Develop,
+                Stage::Photos,
+                Subject::PhotoGlobal(gid.clone()),
+                "Already edited in LightCraft; its development settings are kept",
+            )
+            .code("existing_develop_kept")
+            .reason("The photo was already in LightCraft with its own development settings, and the choice was develop-if-empty.");
+            out.push(raw(
+                entry,
+                Some("Choose “develop” or “overwrite” for this photo (--existing develop) to write the Lightroom settings."),
+            ));
+            continue;
+        }
         let entry = Entry::new(
             Status::Conflict,
             Area::Develop,

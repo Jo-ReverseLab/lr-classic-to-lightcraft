@@ -104,6 +104,15 @@ fn of<'a>(commands: &'a Commands, name: &str) -> Vec<&'a Value> {
         .collect()
 }
 
+/// The `catalog.query` calls that read an album's members (a run that
+/// finds photos already in the library also reads those photos back).
+fn album_queries(commands: &Commands) -> Vec<&Value> {
+    of(commands, "catalog.query")
+        .into_iter()
+        .filter(|p| p["filter"].get("album").is_some())
+        .collect()
+}
+
 fn pos(commands: &Commands, name: &str) -> usize {
     commands
         .iter()
@@ -221,7 +230,7 @@ fn members_that_lightcraft_already_has_are_never_sent() {
     std::fs::remove_file(&env.state_file).unwrap();
     let (s, commands) = ok(&fake, &env, &i);
     assert_eq!(of(&commands, "album.setTarget").len(), 1);
-    assert_eq!(of(&commands, "catalog.query").len(), 1);
+    assert_eq!(album_queries(&commands).len(), 1);
     assert!(
         of(&commands, "album.toggleTarget").is_empty(),
         "{commands:?}"
@@ -246,7 +255,7 @@ fn members_are_read_page_by_page() {
     assert_eq!(quick_members(&fake).len(), 250);
     std::fs::remove_file(&env.state_file).unwrap();
     let (s, commands) = ok(&fake, &env, &i);
-    let queries = of(&commands, "catalog.query");
+    let queries = album_queries(&commands);
     let offsets: Vec<u64> = queries
         .iter()
         .map(|q| q["offset"].as_u64().unwrap_or(0))

@@ -42,8 +42,13 @@
 //!   on both sides is a conflict, never written and reported by photo and
 //!   field only ([`Conflict`]). Keyword memberships that left a photo in
 //!   Lightroom are only counted ([`Plan::keywords_removed`]);
-//!   `removeKeywords` is never sent.
+//!   `removeKeywords` is never sent;
+//! - a new photo that LightCraft already has ([`WriteInput::existing`]) is
+//!   adopted instead of imported ([`Step::Adopt`]); what is then written
+//!   depends on its [`ExistingChoice`], with the photo's LightCraft values
+//!   as the live side and a fresh import as the last imported side.
 
+use crate::existing::{ExistingChoice, ExistingCounts, ExistingDecisions, ExistingPhoto};
 use crate::live::{LivePhoto, LiveState};
 use crate::smart::{convertible, translate};
 use crate::state::{EntryKind, PhotoFields, State, hex_hash, keyword_text, snapshot};
@@ -145,6 +150,13 @@ pub struct WriteInput {
     pub overwrite_develop: bool,
     /// The parts of the catalog this run writes; everything by default.
     pub areas: Areas,
+    /// New photos LightCraft already has, from
+    /// [`crate::existing::find_existing`]: adopted instead of imported.
+    /// Empty in a dry run.
+    pub existing: Vec<ExistingPhoto>,
+    /// What happens to each photo of `existing`, and to a photo found only
+    /// while importing (the default).
+    pub existing_decisions: ExistingDecisions,
 }
 
 /// The parts of a catalog a run can leave out. A part that is not selected
@@ -293,6 +305,19 @@ pub enum Step {
         global_id: String,
         /// The photo's file.
         path: PathBuf,
+    },
+    /// Take over a photo LightCraft already has instead of importing its
+    /// file: no command is sent, the mapping file records the LightCraft id.
+    /// The photo's updates and develop steps follow as planned for `choice`.
+    Adopt {
+        /// Lightroom global id of the photo.
+        global_id: String,
+        /// The photo's id in LightCraft.
+        lightcraft_id: Value,
+        /// The photo's file in Lightroom.
+        path: PathBuf,
+        /// What is written to the photo.
+        choice: ExistingChoice,
     },
     /// Create one virtual copy from its master (`photo.virtualCopy`). The
     /// copy is created at most once: the step is planned only when the copy
@@ -489,6 +514,12 @@ pub struct Plan {
     /// Converted photos with a custom white balance (temperature or tint
     /// stored with mode `custom`). Only counted, never named or valued.
     develop_white_balance_custom: usize,
+    /// New photos LightCraft already has, by choice.
+    existing: ExistingCounts,
+    /// Global ids of the found photos whose development settings were kept
+    /// (`develop-if-empty` and edited in LightCraft); a subset of
+    /// `develop_not_applied_ids`.
+    existing_develop_kept_ids: Vec<String>,
     /// Planned white-balance writes of a Kelvin value: whether they are
     /// carried depends on LightCraft's scale for the photo, which only the
     /// applied run can ask.
@@ -725,6 +756,18 @@ impl Plan {
         self.develop_white_balance_to_check
     }
 
+    /// The photos LightCraft already has that this plan adopts, by choice.
+    pub fn existing(&self) -> ExistingCounts {
+        self.existing
+    }
+
+    /// Global ids of the adopted photos whose development settings in
+    /// LightCraft are kept (`develop-if-empty`, edited in LightCraft). They
+    /// are also in [`Plan::develop_not_applied_ids`].
+    pub fn existing_develop_kept_ids(&self) -> &[String] {
+        &self.existing_develop_kept_ids
+    }
+
     /// The plan as a script: one JSON line per step, each an
     /// `engine.execute` request, plus one `library.select` line before the
     /// updates of each photo (LightCraft runs photo commands only on a
@@ -761,6 +804,9 @@ impl Plan {
                         push("library.import", params);
                     }
                 }
+                // Nothing is sent for an adopted photo. A script is written
+                // from a dry run, which never adopts.
+                Step::Adopt { .. } => selected = None,
                 Step::VirtualCopy {
                     master_global_id, ..
                 } => {
@@ -1232,6 +1278,11 @@ fn plan_photos(
     // id; the two passes keep that order within each group.
     let mut order: Vec<&str> = by_gid.keys().copied().collect();
     order.sort_by_key(|gid| by_gid[gid].master.is_some());
+    let existing: BTreeMap<&str, &ExistingPhoto> = input
+        .existing
+        .iter()
+        .map(|e| (e.global_id.as_str(), e))
+        .collect();
 
     for gid in order {
         let p = by_gid[gid];
@@ -1272,6 +1323,17 @@ fn plan_photos(
             .unwrap_or_default();
         let mut new = snapshot_with_renames(p, keywords, renamed);
         let known = state.photo(gid).is_some();
+        if let Some(found) = existing.get(gid).filter(|_| !known && p.master.is_none()) {
+            let choice = input.existing_decisions.choice_for(gid);
+            out.steps.push(Step::Adopt {
+                global_id: gid.to_string(),
+                lightcraft_id: found.lightcraft_id.clone(),
+                path: p.path.clone(),
+                choice,
+            });
+            plan_adopted(input.areas, gid, p, &found.live, choice, new, out);
+            continue;
+        }
         let old = match state.photo(gid) {
             Some(entry) => entry.fields.clone(),
             None => {
@@ -1384,6 +1446,89 @@ fn plan_photos(
         .sort_by_key(|c| (c.photo, field_order(&c.field)));
 }
 
+/// The steps after [`Step::Adopt`] for a photo LightCraft already has, by
+/// `choice` (see [`ExistingChoice`]), with `live` its values in LightCraft
+/// and `new` its Lightroom values. Records the fields the mapping file keeps
+/// as the photo's last imported values: what was reconciled, so the next run
+/// compares as for any known photo. A field in conflict, a skipped photo and
+/// an area left out keep a fresh import's value, so the next run fills an
+/// empty field and reports a conflict again, never overwriting LightCraft.
+pub(crate) fn plan_adopted(
+    areas: Areas,
+    global_id: &str,
+    photo: &Photo,
+    live: &LivePhoto,
+    choice: ExistingChoice,
+    mut new: PhotoFields,
+    out: &mut Plan,
+) {
+    let base = PhotoFields::imported_default();
+    let (changes, recorded) = match choice {
+        ExistingChoice::Skip => (Vec::new(), base),
+        ExistingChoice::Overwrite => {
+            // Areas left out keep LightCraft's value; they record a fresh
+            // import's value, like for an imported photo.
+            let current = live.fields();
+            let mut wanted = new.clone();
+            areas.mask(&mut wanted, &current);
+            areas.mask(&mut new, &base);
+            (field_changes(&current, &wanted), new)
+        }
+        ExistingChoice::Develop | ExistingChoice::DevelopIfEmpty => {
+            areas.mask(&mut new, &base);
+            reconcile(&base, &new, live, photo.lightroom_id, &mut out.conflicts)
+        }
+    };
+    out.recorded.insert(global_id.to_string(), recorded);
+    for (command, params) in changes {
+        out.steps.push(Step::Update {
+            global_id: global_id.to_string(),
+            command: command.to_string(),
+            params,
+        });
+    }
+    let develop = photo
+        .develop
+        .as_ref()
+        .filter(|d| areas.develop && has_develop_content(d));
+    if let Some(develop) = develop {
+        match choice {
+            ExistingChoice::Skip => {}
+            ExistingChoice::DevelopIfEmpty if live.edited => {
+                out.develop_not_applied += 1;
+                out.develop_not_applied_ids.push(global_id.to_string());
+                out.existing.develop_kept += 1;
+                out.existing_develop_kept_ids.push(global_id.to_string());
+            }
+            _ => plan_develop(global_id, None, false, develop, false, out),
+        }
+    }
+    out.existing.count(choice);
+    out.conflicts
+        .sort_by_key(|c| (c.photo, field_order(&c.field)));
+}
+
+/// The photos a run would import as files: a global id (the first photo
+/// with it), not in the mapping file, not a virtual copy and with a UTF-8
+/// path. Sorted by global id, as the plan runs them.
+pub(crate) fn import_candidates<'a>(
+    input: &'a WriteInput,
+    state: &State,
+) -> Vec<(&'a str, &'a Photo)> {
+    let mut by_gid: BTreeMap<&str, &Photo> = BTreeMap::new();
+    for p in &input.photos {
+        if let Some(gid) = p.global_id.as_deref() {
+            by_gid.entry(gid).or_insert(p);
+        }
+    }
+    by_gid
+        .into_iter()
+        .filter(|(gid, p)| {
+            state.photo(gid).is_none() && p.master.is_none() && p.path.to_str().is_some()
+        })
+        .collect()
+}
+
 /// The development commands of one photo, in the order they must run:
 /// `develop.set` for slider values, then `develop.merge` for the structured
 /// parts, after the photo's field updates.
@@ -1490,7 +1635,7 @@ fn relative_to_kelvin(steps: f64) -> f64 {
 
 /// Whether the settings hold anything the writer can send. The source hash,
 /// the unmapped names and the deferred flag alone do not.
-fn has_develop_content(develop: &Develop) -> bool {
+pub(crate) fn has_develop_content(develop: &Develop) -> bool {
     !develop.controls.is_empty()
         || !develop.partial.is_empty()
         || develop.white_balance.mode.is_some()
@@ -1784,7 +1929,7 @@ fn plan_removed_and_moved(input: &WriteInput, state: &State, out: &mut Plan) {
 }
 
 /// The position of a field name in the fixed conflict order.
-fn field_order(field: &str) -> usize {
+pub(crate) fn field_order(field: &str) -> usize {
     match field {
         "rating" => 0,
         "flag" => 1,

@@ -1,7 +1,7 @@
 //! Command-line argument parsing.
 
-use lr2lc_core::Areas;
 use lr2lc_core::labels::LabelChoice;
+use lr2lc_core::{Areas, ExistingChoice};
 use model::{PathMapping, PathMappings};
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -40,6 +40,14 @@ Options:
   --overwrite-develop
                    Also rewrite the development settings of known photos
                    that changed in Lightroom (default: left alone)
+  --existing CHOICE
+                   What to do with photos LightCraft already has but lr2lc
+                   did not write (checked with --apply before writing):
+                   overwrite (Lightroom values and development win),
+                   develop (fill empty fields, write development),
+                   develop-if-empty (default: fill empty fields, write
+                   development only if LightCraft has none) or skip
+                   (leave the photo as it is)
   --probe-white-balance
                    Read the original file to derive a white-balance scale
                    (not implemented yet: the run stops with exit code 2)
@@ -77,6 +85,8 @@ pub struct RunOptions {
     pub areas: Areas,
     /// Leave names, paths and values out of the report.
     pub anonymize: bool,
+    /// What happens to photos LightCraft already has (`--existing`).
+    pub existing: ExistingChoice,
 }
 
 /// The default control port of the LightCraft app.
@@ -98,6 +108,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
     let mut probe_white_balance = false;
     let mut areas: Option<Areas> = None;
     let mut anonymize = false;
+    let mut existing: Option<ExistingChoice> = None;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("-h" | "--help") => return Ok(Command::Help),
@@ -147,6 +158,18 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
                 let list = value.to_str().ok_or("--skip value is not valid UTF-8")?;
                 areas = Some(Areas::skipping(list).map_err(|e| format!("--skip: {e}"))?);
             }
+            Some("--existing") => {
+                if existing.is_some() {
+                    return Err("--existing given more than once".to_string());
+                }
+                let value = args.next().ok_or(
+                    "--existing needs a choice: overwrite, develop, develop-if-empty or skip",
+                )?;
+                let value = value
+                    .to_str()
+                    .ok_or("--existing value is not valid UTF-8")?;
+                existing = Some(value.parse().map_err(|e| format!("--existing: {e}"))?);
+            }
             Some("--report") => {
                 if report.is_some() {
                     return Err("--report given more than once".to_string());
@@ -195,6 +218,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
         probe_white_balance,
         areas: areas.unwrap_or_default(),
         anonymize,
+        existing: existing.unwrap_or_default(),
     }))
 }
 
@@ -411,6 +435,7 @@ mod tests {
             "--allow-xmp",
             "--script",
             "--overwrite-develop",
+            "--existing",
             "--probe-white-balance",
             "--help",
             "--version",
@@ -433,6 +458,32 @@ mod tests {
             parse(&["--skip", "develop", "--skip", "flags", "c.lrcat"])
                 .unwrap_err()
                 .contains("--skip given more than once")
+        );
+    }
+
+    #[test]
+    fn existing_takes_one_choice_once() {
+        assert_eq!(run(&["c.lrcat"]).existing, ExistingChoice::DevelopIfEmpty);
+        for (name, choice) in [
+            ("overwrite", ExistingChoice::Overwrite),
+            ("develop", ExistingChoice::Develop),
+            ("develop-if-empty", ExistingChoice::DevelopIfEmpty),
+            ("skip", ExistingChoice::Skip),
+        ] {
+            assert_eq!(run(&["--existing", name, "c.lrcat"]).existing, choice);
+        }
+        let err = parse(&["--existing", "keep", "c.lrcat"]).unwrap_err();
+        assert!(err.contains("--existing: unknown choice `keep`"), "{err}");
+        assert!(err.contains("develop-if-empty"), "{err}");
+        assert!(
+            parse(&["--existing", "skip", "--existing", "skip", "c.lrcat"])
+                .unwrap_err()
+                .contains("--existing given more than once")
+        );
+        assert!(
+            parse(&["c.lrcat", "--existing"])
+                .unwrap_err()
+                .contains("--existing needs a choice")
         );
     }
 }

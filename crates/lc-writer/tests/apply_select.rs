@@ -253,9 +253,18 @@ fn photos_found_as_duplicates_are_selected_before_their_updates() {
     let env = env();
     let fake = seeded(&env);
     std::fs::remove_file(&env.state_file).unwrap(); // the library keeps the photos
-    let (s, commands) = run(&fake, &env, &input());
+    // Found only while importing, they get the default choice; `overwrite`
+    // writes the changed ratings (g2 is unchanged and gets no update).
+    let mut changed = input();
+    changed.photos[0] = photo("g1", 1, 4);
+    changed.photos[2] = photo("g3", 3, 1);
+    changed.photos[3] = photo("g4", 4, 1).with_label(ColorLabel::Blue);
+    changed.existing_decisions =
+        lc_writer::existing::ExistingDecisions::all(lc_writer::existing::ExistingChoice::Overwrite);
+    let (s, commands) = run(&fake, &env, &changed);
     let s = s.unwrap();
     assert_eq!(s.photos_existing, 4, "{s:?}");
+    assert_eq!(s.existing.found_while_importing, 4, "{s:?}");
     // Duplicates select nothing: every photo needs its own select.
     assert_eq!(selects(&commands).len(), 3, "{commands:?}");
     assert!(s.photos_incomplete.is_empty(), "{s:?}");

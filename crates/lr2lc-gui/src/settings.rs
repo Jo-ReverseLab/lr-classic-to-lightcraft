@@ -238,6 +238,8 @@ impl Settings {
             // The report in the run history keeps the names; the person can
             // save an anonymized copy.
             anonymize: false,
+            // Without the question in the window: the safe default.
+            existing: Default::default(),
         })
     }
 }

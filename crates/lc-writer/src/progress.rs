@@ -13,6 +13,8 @@ pub enum Phase {
     CheckingOriginals,
     /// Reading what the library holds now (second run).
     ReadingLibrary,
+    /// Asking LightCraft which of the photos to import it already has.
+    CheckingLibrary,
     /// Sending commands to LightCraft.
     Writing,
 }

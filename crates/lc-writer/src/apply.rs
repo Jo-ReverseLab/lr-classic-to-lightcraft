@@ -72,6 +72,15 @@
 //! - every input photo counts exactly once: imported, existing, updated,
 //!   unchanged or skipped; a stopped run hands back the numbers up to the
 //!   stop ([`Aborted`]);
+//! - a photo LightCraft already has is adopted (`photos_existing`), never
+//!   written blindly: one found by the check before writing
+//!   ([`crate::existing::find_existing`]) gets [`Step::Adopt`] and the steps
+//!   of its choice; one that `library.import` reports as a duplicate only
+//!   while importing (a file that changed after the check, or a caller that
+//!   did not check) is read back (`catalog.query`, `photo.inspect`) and gets
+//!   the default choice of [`WriteInput::existing_decisions`] instead of the
+//!   steps planned for a fresh import. If it cannot be read, nothing is
+//!   written over it (as with `skip`);
 //! - reasons never contain texts from the catalog or from the app's error
 //!   messages (which may quote file paths); they name the command and, for
 //!   photos and collections, the Lightroom id; never a collection name.
@@ -79,11 +88,13 @@
 use crate::albums::{Decision, Existing, Node, parse_album_list};
 use crate::control::{CommandSink, Outcome, WriteError};
 use crate::entries::{StepOutcome, stage_of, step_entries};
+use crate::existing::{ExistingChoice, ExistingCounts, ExistingDecisions, read_one};
 use crate::live::read_live_with;
 use crate::plan::{
-    Areas, Conflict, MovedPhoto, RemovedPhoto, RenamedKeyword, Step, WriteInput, group_params,
-    import_params, members_select_params, needs_live, plan, renamed_keywords, same_members,
-    select_params, smart_skip_reason, snapshot_with_renames,
+    Areas, Conflict, MovedPhoto, Plan, RemovedPhoto, RenamedKeyword, Step, WriteInput, field_order,
+    group_params, has_develop_content, import_params, members_select_params, needs_live, plan,
+    plan_adopted, renamed_keywords, same_members, select_params, smart_skip_reason,
+    snapshot_with_renames,
 };
 use crate::progress::{NoProgress, Phase, Progress};
 use crate::state::{CollectionEntry, EntryKind, PhotoFields, State, hex_hash, keyword_text};
@@ -234,8 +245,15 @@ pub struct ApplySummary {
     /// Known photos whose development settings changed in Lightroom and were
     /// left alone because `--overwrite-develop` was not given.
     pub develop_not_applied: usize,
+    /// Global ids of the photos counted in `develop_not_applied`.
+    pub develop_not_applied_ids: Vec<String>,
     /// Photos written because `--overwrite-develop` was given.
     pub develop_overwritten: usize,
+    /// Photos LightCraft already had (adopted, not imported), by choice.
+    pub existing: ExistingCounts,
+    /// Global ids of the adopted photos whose development settings in
+    /// LightCraft were kept; a subset of `develop_not_applied_ids`.
+    pub existing_develop_kept_ids: Vec<String>,
     /// Names of catalog fields that could not be carried over, sorted, with
     /// the number of converted photos that carry each. Only names and
     /// counts, never values.
@@ -398,7 +416,13 @@ pub fn apply_partial_with(
             develop_photos: plan.develop_photos(),
             develop_planned: plan.develop_planned(),
             develop_not_applied: plan.develop_not_applied(),
+            develop_not_applied_ids: plan.develop_not_applied_ids().to_vec(),
             develop_overwritten: plan.develop_overwritten(),
+            existing: ExistingCounts {
+                develop_kept: plan.existing().develop_kept,
+                ..ExistingCounts::default()
+            },
+            existing_develop_kept_ids: plan.existing_develop_kept_ids().to_vec(),
             develop_unmapped: plan.develop_unmapped().clone(),
             develop_camera_profiles: plan.develop_camera_profiles().clone(),
             develop_photos_with_profile: plan.develop_photos_with_profile(),
@@ -434,6 +458,20 @@ pub fn apply_partial_with(
         album_nodes: None,
         wanting: wanting(input, &plan.steps),
         smart_wanting: smart_wanting(input, &plan.steps),
+        decisions: input.existing_decisions.clone(),
+        found: input
+            .existing
+            .iter()
+            .map(|e| {
+                (
+                    e.global_id.clone(),
+                    (e.lightcraft_id.clone(), e.live.fields()),
+                )
+            })
+            .collect(),
+        superseded: BTreeSet::new(),
+        inserted: std::collections::VecDeque::new(),
+        late_choice: None,
     };
     let result = run.steps(&plan.steps);
     // Whatever waited for its save is written now, on every exit.
@@ -699,6 +737,18 @@ struct Run<'a> {
     wanting: BTreeMap<CollectionKey, usize>,
     /// The number of smart collections to create per [`SmartKey`].
     smart_wanting: BTreeMap<SmartKey, usize>,
+    /// The choices for photos LightCraft already has.
+    decisions: ExistingDecisions,
+    /// The photos the check before writing found, by global id: their
+    /// LightCraft id and their fields in LightCraft before the run.
+    found: BTreeMap<String, (Value, PhotoFields)>,
+    /// Photos found only while importing: the field and develop steps the
+    /// plan made for a fresh import are not sent.
+    superseded: BTreeSet<String>,
+    /// Steps that replace the superseded ones, run right after the import.
+    inserted: std::collections::VecDeque<Step>,
+    /// The choice of the photo the last import found in the library.
+    late_choice: Option<ExistingChoice>,
 }
 
 /// Trimmed name, Lightroom parent and translated rules (as JSON text) of a
@@ -760,6 +810,9 @@ impl Run<'_> {
         self.progress.phase(Phase::Writing, steps.len());
         let mut batched = false;
         for (done, step) in steps.iter().enumerate() {
+            if self.is_superseded(step) {
+                continue;
+            }
             if self.progress.cancelled() && self.starts_unit(step) {
                 // The photo before has all its steps done; the fields of
                 // known photos are recorded only after a whole run, as after
@@ -775,28 +828,49 @@ impl Run<'_> {
                 self.prefetch_imports(&steps[done..])?;
             }
             self.progress.advance(done);
-            let before = self.tally();
-            self.step(step)?;
-            let after = self.tally();
-            if after.lists != before.lists {
-                self.report_failures(&before, step);
-            } else if !after.unfinished {
-                let outcome = if after.existing > before.existing {
-                    StepOutcome::Existing
-                } else if after.not_carried > before.not_carried {
-                    StepOutcome::NotCarried
-                } else {
-                    StepOutcome::Done
-                };
-                for entry in step_entries(step, outcome) {
-                    self.progress.entry(&entry);
-                    self.summary.entries.push(entry);
-                }
+            self.run_step(step)?;
+            while let Some(extra) = self.inserted.pop_front() {
+                self.run_step(&extra)?;
             }
         }
         self.progress.advance(steps.len());
         self.finish_photo()?;
         self.record_converged()
+    }
+
+    /// Runs one step and logs how it ended.
+    fn run_step(&mut self, step: &Step) -> Result<(), WriteError> {
+        let before = self.tally();
+        self.step(step)?;
+        let after = self.tally();
+        if after.lists != before.lists {
+            self.report_failures(&before, step);
+        } else if !after.unfinished {
+            let outcome = match self.late_choice.take() {
+                Some(choice) => StepOutcome::AdoptedWhileImporting(choice),
+                None if after.existing > before.existing => StepOutcome::Existing,
+                None if after.not_carried > before.not_carried => StepOutcome::NotCarried,
+                None => StepOutcome::Done,
+            };
+            for entry in step_entries(step, outcome) {
+                self.progress.entry(&entry);
+                self.summary.entries.push(entry);
+            }
+        }
+        self.late_choice = None;
+        Ok(())
+    }
+
+    /// Whether `step` is a field or develop step planned for a fresh import
+    /// of a photo that turned out to be in the library already.
+    fn is_superseded(&self, step: &Step) -> bool {
+        match step {
+            Step::Update { global_id, .. }
+            | Step::DevelopSet { global_id, .. }
+            | Step::DevelopMerge { global_id, .. }
+            | Step::DevelopWhiteBalance { global_id, .. } => self.superseded.contains(global_id),
+            _ => false,
+        }
     }
 
     /// Saves the mapping file. `force` saves now; otherwise at most once a
@@ -1016,6 +1090,22 @@ impl Run<'_> {
                     develop_pending: false,
                 });
                 self.import(global_id, path)
+            }
+            Step::Adopt {
+                global_id,
+                lightcraft_id,
+                path,
+                choice,
+            } => {
+                self.finish_photo()?;
+                self.current = Some(Current {
+                    global_id: global_id.clone(),
+                    ok: true,
+                    selected: false,
+                    uncounted_update: false,
+                    develop_pending: false,
+                });
+                self.adopt(global_id, lightcraft_id, path, *choice)
             }
             Step::VirtualCopy {
                 global_id,
@@ -1847,18 +1937,21 @@ impl Run<'_> {
                 }
                 ImportResult::Existing { id, reason } => {
                     // A duplicate by content of a photo another Lightroom photo
-                    // already maps to: two different photos, one record. Give
-                    // this photo its own record instead of sharing.
-                    let claimed = reason.as_deref() == Some("content")
-                        && self
-                            .state
-                            .photos()
-                            .any(|(gid, e)| gid != global_id && same_id(&e.lightcraft_id, &id));
+                    // already maps to (or that the check found for another
+                    // photo of this run): two different photos, one record.
+                    // Give this photo its own record instead of sharing.
+                    let claimed =
+                        reason.as_deref() == Some("content")
+                            && (self.state.photos().any(|(gid, e)| {
+                                gid != global_id && same_id(&e.lightcraft_id, &id)
+                            }) || self
+                                .found
+                                .iter()
+                                .any(|(gid, (found, _))| gid != global_id && same_id(found, &id)));
                     if claimed {
                         self.same_content_copy(global_id, photo, &id, &sent_path, path)?;
                     } else {
-                        self.summary.photos_existing += 1;
-                        self.record_import(global_id, photo.lightroom_id, id, path)?;
+                        self.adopt_while_importing(global_id, photo, id, path)?;
                     }
                 }
                 ImportResult::Failed => {
@@ -1898,6 +1991,115 @@ impl Run<'_> {
             }
             Err(e) => return Err(e),
         }
+        Ok(())
+    }
+
+    /// Takes over a photo the check before writing found in the library: no
+    /// command, only the mapping entry (with a fresh import's fields until
+    /// its steps succeed) and, for Cancel, its fields before the run.
+    fn adopt(
+        &mut self,
+        global_id: &str,
+        id: &Value,
+        path: &Path,
+        choice: ExistingChoice,
+    ) -> Result<(), WriteError> {
+        let Some(photo) = self.photos.get(global_id).copied() else {
+            // Not reachable: the plan only adopts input photos.
+            self.fail_current();
+            return Ok(());
+        };
+        if let Some((_, fields)) = self.found.get(global_id) {
+            self.summary
+                .journal
+                .adopted
+                .push(crate::rollback::AdoptedPhoto {
+                    global_id: global_id.to_owned(),
+                    id: id.clone(),
+                    fields: fields.clone(),
+                });
+        }
+        self.summary.photos_existing += 1;
+        self.summary.existing.count(choice);
+        self.record_import(global_id, photo.lightroom_id, id.clone(), path)
+    }
+
+    /// Takes over a photo that `library.import` reported as a duplicate the
+    /// check before writing did not find. Its values are read back and the
+    /// steps planned for a fresh import are replaced by those of the default
+    /// choice (or its own choice, if a front end gave one). A photo that
+    /// cannot be read is linked and left as it is.
+    fn adopt_while_importing(
+        &mut self,
+        global_id: &str,
+        photo: &Photo,
+        id: Value,
+        path: &Path,
+    ) -> Result<(), WriteError> {
+        let live = read_one(self.client, &id)?;
+        let choice = match &live {
+            Some(_) => self.decisions.choice_for(global_id),
+            None => ExistingChoice::Skip,
+        };
+        self.summary.photos_existing += 1;
+        self.summary.existing.count(choice);
+        self.summary.existing.found_while_importing += 1;
+        self.late_choice = Some(choice);
+        self.record_import(global_id, photo.lightroom_id, id.clone(), path)?;
+
+        // The fresh-import steps of this photo are replaced.
+        self.superseded.insert(global_id.to_owned());
+        if self.areas.develop && photo.develop.as_ref().is_some_and(has_develop_content) {
+            self.summary.develop_planned = self.summary.develop_planned.saturating_sub(1);
+        }
+        let Some(live) = live else {
+            // Unknown values: nothing is written, the base stays a fresh
+            // import, so the next run reconciles against LightCraft.
+            self.recorded
+                .insert(global_id.to_owned(), PhotoFields::imported_default());
+            return Ok(());
+        };
+        self.summary
+            .journal
+            .adopted
+            .push(crate::rollback::AdoptedPhoto {
+                global_id: global_id.to_owned(),
+                id,
+                fields: live.fields(),
+            });
+        let keywords = self
+            .photo_keywords
+            .get(&photo.lightroom_id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let new = snapshot_with_renames(photo, keywords, &self.renamed);
+        let mut scratch = Plan::default();
+        plan_adopted(
+            self.areas,
+            global_id,
+            photo,
+            &live,
+            choice,
+            new,
+            &mut scratch,
+        );
+        self.recorded.extend(scratch.recorded_fields_map());
+        self.summary
+            .conflicts
+            .extend(scratch.conflicts().iter().cloned());
+        self.summary
+            .conflicts
+            .sort_by_key(|c| (c.photo, field_order(&c.field)));
+        self.summary.develop_planned += scratch.develop_planned();
+        self.summary.develop_not_applied += scratch.develop_not_applied();
+        self.summary
+            .develop_not_applied_ids
+            .extend(scratch.develop_not_applied_ids().iter().cloned());
+        self.summary.existing.develop_kept += scratch.existing().develop_kept;
+        self.summary
+            .existing_develop_kept_ids
+            .extend(scratch.existing_develop_kept_ids().iter().cloned());
+        self.inserted.extend(scratch.steps);
         Ok(())
     }
 

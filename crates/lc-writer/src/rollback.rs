@@ -5,7 +5,8 @@
 //! Only what this run did is touched, from its [`Journal`]: photos it
 //! imported (records only; LightCraft never deletes an original here),
 //! albums, smart albums and keywords it created, album members and stacks
-//! it changed, and fields it wrote. Development settings written to photos
+//! it changed, and fields it wrote (a photo the library already had and the
+//! run adopted gets the values it had before). Development settings written to photos
 //! that were already in the library cannot be set back through the control
 //! port; they are counted and reported, never hidden.
 
@@ -24,6 +25,15 @@ pub struct FieldWrite {
     pub command: String,
     /// The parameters without `ids`.
     pub params: Value,
+}
+
+/// A photo the library already had that a run took over (adopted), with
+/// its fields before the run: Cancel sets back what the run wrote to it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdoptedPhoto {
+    pub global_id: String,
+    pub id: Value,
+    pub fields: PhotoFields,
 }
 
 /// Photos a run added to an album or took out of it.
@@ -54,6 +64,9 @@ pub struct Journal {
     pub fields: Vec<FieldWrite>,
     /// Photos whose development settings this run wrote.
     pub developed: Vec<Value>,
+    /// Photos the library already had that this run took over. Nothing is
+    /// removed for them; their fields are set back to these values.
+    pub adopted: Vec<AdoptedPhoto>,
 }
 
 impl Journal {
@@ -173,10 +186,17 @@ pub fn rollback(
         if created(&write.id) {
             continue;
         }
-        let fields = before
-            .photo(&write.global_id)
-            .map(|e| e.fields.clone())
-            .unwrap_or_else(PhotoFields::imported_default);
+        // A photo the run adopted gets its own values back, not those of a
+        // fresh import.
+        let adopted = journal
+            .adopted
+            .iter()
+            .find(|a| a.global_id == write.global_id && same(&a.id, &write.id));
+        let fields = match (before.photo(&write.global_id), adopted) {
+            (Some(entry), _) => entry.fields.clone(),
+            (None, Some(adopted)) => adopted.fields.clone(),
+            (None, None) => PhotoFields::imported_default(),
+        };
         if let Some((command, mut params)) = undo_field(write, &fields) {
             params["ids"] = json!([write.id]);
             if on_selection(

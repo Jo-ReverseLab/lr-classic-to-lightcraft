@@ -2,6 +2,7 @@
 //! applied run did. Failures are not described here: they are the skip
 //! lists of the plan and the run, each with its code.
 
+use crate::existing::ExistingChoice;
 use crate::plan::Step;
 use model::{Area, Entry, Stage, Status, Subject};
 use serde_json::Value;
@@ -19,6 +20,59 @@ pub enum StepOutcome {
     /// The custom white balance was not written: LightCraft does not edit
     /// this photo in Kelvin.
     NotCarried,
+    /// An import found the photo already in the library (not by the check
+    /// before writing); it was adopted with this choice.
+    AdoptedWhileImporting(ExistingChoice),
+}
+
+/// The log code of a photo LightCraft already had and lr2lc adopted.
+pub const EXISTING_ADOPTED: &str = "existing_adopted";
+
+/// The log entry of a photo LightCraft already had, adopted with `choice`.
+/// `late` when it was found only while importing.
+fn adopted_entry(
+    global_id: &str,
+    path: &std::path::Path,
+    choice: ExistingChoice,
+    late: bool,
+) -> Entry {
+    let what = match choice {
+        ExistingChoice::Overwrite => {
+            "Already in LightCraft; Lightroom values and development settings written over it"
+        }
+        ExistingChoice::Develop => {
+            "Already in LightCraft; empty fields filled, development settings written"
+        }
+        ExistingChoice::DevelopIfEmpty => {
+            "Already in LightCraft; empty fields filled, development settings written only \
+             where LightCraft has none"
+        }
+        ExistingChoice::Skip => "Already in LightCraft; left as it is",
+    };
+    let status = if choice == ExistingChoice::Skip {
+        Status::Skipped
+    } else {
+        Status::Transferred
+    };
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    let mut reason = format!("Choice: {choice}.");
+    if late {
+        reason.push_str(" Found only while importing, so the default choice applied.");
+    }
+    Entry::new(
+        status,
+        Area::Photos,
+        Stage::Photos,
+        Subject::PhotoGlobal(global_id.to_owned()),
+        what,
+    )
+    .code(EXISTING_ADOPTED)
+    .reason(reason)
+    .item(name)
+    .source(path.display().to_string())
 }
 
 /// The stage a step belongs to.
@@ -26,6 +80,7 @@ pub fn stage_of(step: &Step) -> Stage {
     match step {
         Step::CreateKeyword { .. } => Stage::Keywords,
         Step::Import { .. }
+        | Step::Adopt { .. }
         | Step::VirtualCopy { .. }
         | Step::Update { .. }
         | Step::DevelopSet { .. }
@@ -57,21 +112,19 @@ pub fn step_entries(step: &Step, outcome: StepOutcome) -> Vec<Entry> {
             )
             .item(path.replace('|', " › ")),
         ],
-        Step::Import { global_id, path } => {
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.display().to_string());
-            let message = match outcome {
-                StepOutcome::Existing => "Already in the library; linked to it".to_owned(),
-                _ => say("Imported as a reference", "Will be imported as a reference"),
-            };
-            vec![
-                Entry::new(ok, Area::Photos, Stage::Photos, photo(global_id), message)
-                    .item(name)
-                    .source(path.display().to_string()),
-            ]
+        Step::Import { global_id, path } if !dry => {
+            if let StepOutcome::AdoptedWhileImporting(choice) = outcome {
+                return vec![adopted_entry(global_id, path, choice, true)];
+            }
+            import_entries(global_id, path, outcome)
         }
+        Step::Import { global_id, path } => import_entries(global_id, path, outcome),
+        Step::Adopt {
+            global_id,
+            path,
+            choice,
+            ..
+        } => vec![adopted_entry(global_id, path, *choice, false)],
         Step::VirtualCopy { global_id, .. } => vec![Entry::new(
             ok,
             Area::VirtualCopies,
@@ -270,6 +323,29 @@ pub fn step_entries(step: &Step, outcome: StepOutcome) -> Vec<Entry> {
             ),
         ],
     }
+}
+
+fn import_entries(global_id: &str, path: &std::path::Path, outcome: StepOutcome) -> Vec<Entry> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    let message = match outcome {
+        StepOutcome::Existing => "Already in the library; linked to it",
+        StepOutcome::Planned => "Will be imported as a reference",
+        _ => "Imported as a reference",
+    };
+    vec![
+        Entry::new(
+            Status::Transferred,
+            Area::Photos,
+            Stage::Photos,
+            Subject::PhotoGlobal(global_id.to_owned()),
+            message,
+        )
+        .item(name)
+        .source(path.display().to_string()),
+    ]
 }
 
 fn update_entries(global_id: &str, command: &str, params: &Value, dry: bool) -> Vec<Entry> {

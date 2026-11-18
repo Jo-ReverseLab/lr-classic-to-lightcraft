@@ -1,7 +1,14 @@
 //! One conversion run, split into steps a front end can drive: [`prepare`]
-//! reads the catalog and plans the writer commands, [`finish`] writes them
-//! (with `apply` and a library) or keeps the plan, and [`Finished`] holds
+//! reads the catalog and plans the writer commands, [`check_existing`]
+//! (optional, before writing) lists the photos LightCraft already has so the
+//! front end can ask what to do with them, [`finish`] writes them (with
+//! `apply` and a library) or keeps the plan, and [`Finished`] holds
 //! everything a front end shows or saves afterwards.
+//!
+//! A front end that asks about existing photos runs, on its worker thread:
+//! `prepare` → `check_existing` → (ask, then set [`Job::existing`]) →
+//! [`Prepared::set_existing`] → `finish`. Without `set_existing`, `finish`
+//! runs the check itself and applies `Job::existing` without asking.
 
 use crate::dry_run::{self, Names, Outcome};
 use crate::labels::LabelMode;
@@ -10,6 +17,7 @@ use crate::output;
 use crate::writer::{self, DevelopJson, WriterJson};
 use lc_writer::apply::{Aborted, ApplySummary};
 use lc_writer::control::{CommandSink, Timing, WriteError};
+use lc_writer::existing::{ExistingDecisions, ExistingPhoto};
 use lc_writer::plan::{Areas, Plan, WriteInput};
 use lc_writer::progress::Progress;
 use lc_writer::state::State;
@@ -37,6 +45,9 @@ pub struct Job {
     pub areas: Areas,
     /// Leave every name, path and value of the catalog out of `report.json`.
     pub anonymize: bool,
+    /// What happens to new photos LightCraft already has (default for all:
+    /// `develop-if-empty`; a front end may set a choice per photo).
+    pub existing: ExistingDecisions,
 }
 
 impl Job {
@@ -101,6 +112,9 @@ pub struct Prepared {
     pub plan: Plan,
     /// Names for the run log.
     pub names: Names,
+    /// The photos LightCraft already has, when a front end checked before
+    /// finishing ([`Prepared::set_existing`]).
+    existing: Option<Vec<ExistingPhoto>>,
 }
 
 /// Reads the catalog, loads the mapping file and plans the writer commands,
@@ -130,10 +144,17 @@ pub fn prepare(job: &Job, progress: &mut dyn Progress) -> Result<Prepared, RunEr
         state,
         plan,
         names,
+        existing: None,
     })
 }
 
 impl Prepared {
+    /// Hands the result of [`check_existing`] to [`finish`], which then
+    /// does not check again and applies [`Job::existing`] to these photos.
+    pub fn set_existing(&mut self, found: Vec<ExistingPhoto>) {
+        self.existing = Some(found);
+    }
+
     /// The planned commands as JSON lines (`--script`).
     pub fn script(&self) -> String {
         self.plan.to_script(&self.state)
@@ -194,16 +215,68 @@ pub struct Finished {
     not_selected: Vec<&'static str>,
 }
 
+/// Asks LightCraft, through the control port on `job.port`, which of the
+/// photos the run would import it already has, with their values there.
+/// Runs the pre-flight checks first and sends only reading commands
+/// (reported as [`lc_writer::progress::Phase::CheckingLibrary`]). Empty when
+/// `job` does not write. Hand the result to [`Prepared::set_existing`].
+pub fn check_existing(
+    job: &Job,
+    prepared: &Prepared,
+    progress: &mut dyn Progress,
+) -> Result<Vec<ExistingPhoto>, RunError> {
+    check_by(job, |target| {
+        writer::check(target, &prepared.input, &prepared.state, progress)
+    })
+}
+
+/// Like [`check_existing`], through `sink`, for a host that runs
+/// LightCraft's commands itself; `job.port` is not used.
+pub fn check_existing_with(
+    job: &Job,
+    prepared: &Prepared,
+    sink: &mut dyn CommandSink,
+    progress: &mut dyn Progress,
+) -> Result<Vec<ExistingPhoto>, RunError> {
+    check_by(job, |target| {
+        writer::check_with(sink, target, &prepared.input, &prepared.state, progress)
+    })
+}
+
+fn check_by(
+    job: &Job,
+    check: impl FnOnce(&writer::Target<'_>) -> Result<Vec<ExistingPhoto>, WriteError>,
+) -> Result<Vec<ExistingPhoto>, RunError> {
+    let Some(library) = job.writes_to() else {
+        return Ok(Vec::new());
+    };
+    let target = writer::Target {
+        library,
+        port: job.port,
+        allow_xmp: job.allow_xmp,
+    };
+    check(&target).map_err(|e| {
+        let kind = if matches!(e, WriteError::Cancelled) {
+            ErrorKind::Cancelled
+        } else {
+            ErrorKind::Stopped
+        };
+        RunError::new(kind, &writer::stop_error(&e))
+    })
+}
+
 /// Writes the plan (when `job` writes) through the control port on
 /// `job.port`, or keeps it as the dry-run result, then checks that the
-/// catalog is still unchanged.
+/// catalog is still unchanged. Photos LightCraft already has get
+/// `job.existing`: those of [`Prepared::set_existing`], or, without it,
+/// those a check run here finds.
 pub fn finish(
     job: &Job,
     prepared: Prepared,
     progress: &mut dyn Progress,
 ) -> Result<Finished, RunError> {
-    finish_by(job, prepared, |target, input, state, timing| {
-        writer::write(target, input, state, progress, timing)
+    finish_by(job, prepared, |target, input, existing, state, timing| {
+        writer::write(target, input, existing, state, progress, timing)
     })
 }
 
@@ -215,8 +288,8 @@ pub fn finish_with(
     sink: &mut dyn CommandSink,
     progress: &mut dyn Progress,
 ) -> Result<Finished, RunError> {
-    finish_by(job, prepared, |target, input, state, timing| {
-        writer::write_to(sink, target, input, state, progress, timing)
+    finish_by(job, prepared, |target, input, existing, state, timing| {
+        writer::write_to(sink, target, input, existing, state, progress, timing)
     })
 }
 
@@ -225,18 +298,21 @@ fn finish_by(
     prepared: Prepared,
     write: impl FnOnce(
         &writer::Target<'_>,
-        &WriteInput,
+        &mut WriteInput,
+        Option<Vec<ExistingPhoto>>,
         State,
         &mut Timing,
     ) -> Result<ApplySummary, Aborted>,
 ) -> Result<Finished, RunError> {
     let Prepared {
         mut outcome,
-        input,
+        mut input,
         state,
         plan,
         names,
+        existing,
     } = prepared;
+    input.existing_decisions = job.existing.clone();
     let mut applied = None;
     let mut timing = Timing::new();
     let (writer_summary, writer, develop, stop) = match job.writes_to() {
@@ -253,7 +329,7 @@ fn finish_by(
                 allow_xmp: job.allow_xmp,
             };
             // A run that stops still reports what it did (Principle 4).
-            let (summary, stop) = match write(&target, &input, state, &mut timing) {
+            let (summary, stop) = match write(&target, &mut input, existing, state, &mut timing) {
                 Ok(summary) => (summary, None),
                 Err(aborted) => (*aborted.summary, Some(aborted.error)),
             };

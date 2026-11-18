@@ -15,7 +15,8 @@ use crate::albums::parse_album_list;
 use crate::apply::{QUERY_PAGE, id_text, parse_keyword_list, parse_query_page, same_id};
 use crate::control::{CommandSink, Outcome, WriteError};
 use crate::progress::{NoProgress, Phase, Progress};
-use crate::state::State;
+use crate::state::{PhotoFields, State};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -26,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 /// name (`red`, `yellow`, `green`, `blue`, `purple`) or `None`. Text fields
 /// are `None` when LightCraft has the empty string, since the mapping file
 /// never stores `""`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LivePhoto {
     pub rating: u8,
     pub flag: String,
@@ -40,6 +41,22 @@ pub struct LivePhoto {
     /// LightCraft shows the photo as edited (development settings other
     /// than its defaults). `false` when the answer does not say.
     pub edited: bool,
+}
+
+impl LivePhoto {
+    /// The photo's fields in the shape of the mapping file.
+    pub fn fields(&self) -> PhotoFields {
+        PhotoFields {
+            rating: self.rating,
+            flag: self.flag.clone(),
+            label: self.label.clone(),
+            title: self.title.clone(),
+            caption: self.caption.clone(),
+            copyright: self.copyright.clone(),
+            creator: self.creator.clone(),
+            keywords: self.keywords.clone(),
+        }
+    }
 }
 
 /// One mapped album or album folder as LightCraft has it now.
@@ -109,11 +126,7 @@ pub fn read_live_with(
             return Err(WriteError::Cancelled);
         }
         progress.advance(done);
-        let value = read(client, "photo.inspect", json!({"id": id}))?;
-        let (caption, copyright, creator) = parse_inspect(&value)?;
-        photo.caption = caption;
-        photo.copyright = copyright;
-        photo.creator = creator;
+        read_credits(client, &id, &mut photo)?;
         live.photos.insert(gid, photo);
     }
     live.missing_photos = state
@@ -196,9 +209,65 @@ fn read_photo_streams(
     Ok((present, foreign.len()))
 }
 
+/// Fills caption, copyright and creator of `photo` from `photo.inspect`.
+pub(crate) fn read_credits(
+    client: &mut dyn CommandSink,
+    id: &Value,
+    photo: &mut LivePhoto,
+) -> Result<(), WriteError> {
+    let value = read(client, "photo.inspect", json!({"id": id}))?;
+    let (caption, copyright, creator) = parse_inspect(&value)?;
+    photo.caption = caption;
+    photo.copyright = copyright;
+    photo.creator = creator;
+    Ok(())
+}
+
+/// The summaries of the photos `ids` from `catalog.query {filter: {only:
+/// ids, deleted}}`, read page by page; photos LightCraft does not list are
+/// missing from the answer. Caption, copyright and creator are left `None`.
+pub(crate) fn read_summaries(
+    client: &mut dyn CommandSink,
+    ids: &[Value],
+    deleted: bool,
+) -> Result<Vec<(Value, LivePhoto)>, WriteError> {
+    let mut out = Vec::new();
+    for chunk in ids.chunks(QUERY_PAGE) {
+        let mut filter = json!({"only": chunk});
+        if deleted {
+            filter["deleted"] = json!(true);
+        }
+        let mut offset = 0;
+        loop {
+            let value = read(
+                client,
+                "catalog.query",
+                json!({"filter": filter, "offset": offset, "limit": QUERY_PAGE}),
+            )?;
+            let (total, items) = parse_summary_page(&value)?;
+            let count = items.len();
+            // Only the photos asked for, whatever else the answer lists.
+            out.extend(
+                items
+                    .into_iter()
+                    .filter(|(id, _)| chunk.iter().any(|want| same_id(want, id))),
+            );
+            offset += count;
+            if count == 0 || count < QUERY_PAGE || offset >= total {
+                break;
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Sends a read command; an answer like a writing command is a protocol
 /// error.
-fn read(client: &mut dyn CommandSink, command: &str, params: Value) -> Result<Value, WriteError> {
+pub(crate) fn read(
+    client: &mut dyn CommandSink,
+    command: &str,
+    params: Value,
+) -> Result<Value, WriteError> {
     match client.execute(command, params)? {
         Outcome::Applied(value) => Ok(value),
         Outcome::AppliedNotSaved(_) => Err(WriteError::Protocol(format!(

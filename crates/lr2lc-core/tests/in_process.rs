@@ -31,6 +31,7 @@ fn setup() -> Setup {
         overwrite_develop: false,
         areas: lr2lc_core::Areas::ALL,
         anonymize: false,
+        existing: Default::default(),
     };
     Setup {
         _photos: photos,
