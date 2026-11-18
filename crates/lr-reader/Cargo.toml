@@ -11,7 +11,7 @@ publish = false
 [dependencies]
 flate2 = "1"
 model = { path = "../model" }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 sha2 = "0.10"
 thiserror = "2"
 
