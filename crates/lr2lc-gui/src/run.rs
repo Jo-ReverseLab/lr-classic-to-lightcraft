@@ -7,8 +7,9 @@
 use crate::logdata::{LogData, ScanSummary};
 use lr2lc_core::log::{Log, LogEntry};
 use lr2lc_core::{
-    CommandSink, ErrorKind, ExistingDecisions, ExistingPhoto, Job, Phase, Progress, check_existing,
-    check_existing_with, finish, finish_with, prepare,
+    CommandSink, ErrorKind, ExistingDecisions, ExistingPhoto, Job, Phase, Progress,
+    RemovedDecisions, RemovedInLightCraft, check_library, check_library_with, finish, finish_with,
+    prepare,
 };
 use model::{Entry, Stage};
 use std::collections::BTreeMap;
@@ -37,17 +38,23 @@ pub enum Event {
     Done(Box<RunResult>),
 }
 
-/// What the library check found before writing.
+/// What the person decides before anything is written. Asked twice at
+/// most: originals only in the cloud before the library check (the check
+/// may read the files), then what the check found.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Question {
+    /// Originals this run imports that are only in the cloud: count, bytes.
+    pub cloud_only: (usize, u64),
     /// Photos the run would import that LightCraft already has.
     pub existing: Vec<ExistingPhoto>,
+    /// Photos an earlier run transferred that were deleted in LightCraft.
+    pub removed: Vec<RemovedInLightCraft>,
 }
 
 impl Question {
     /// Whether there is nothing to ask.
     pub fn is_empty(&self) -> bool {
-        self.existing.is_empty()
+        self.cloud_only.0 == 0 && self.existing.is_empty() && self.removed.is_empty()
     }
 }
 
@@ -55,7 +62,10 @@ impl Question {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Answer {
     /// Write, with these choices.
-    Go(ExistingDecisions),
+    Go {
+        existing: ExistingDecisions,
+        removed: RemovedDecisions,
+    },
     /// End the run; nothing was written.
     Abort,
 }
@@ -214,31 +224,44 @@ pub fn execute_as(
         .events
         .send(Event::Planned(prepared.stage_totals()));
     let mut sink = sink;
-    // Before writing: what LightCraft already has, and what the person
-    // wants done with it. Only reads; nothing is written until answered.
+    // Before writing: originals still in the cloud, what LightCraft
+    // already has or lost, and what the person wants done with it. Only
+    // reads; nothing is written until answered.
     let mut job = job.clone();
     if !scan && progress.answers.is_some() && job.writes_to().is_some() {
-        let found = match sink.as_deref_mut() {
-            Some(sink) => check_existing_with(&job, &prepared, sink, progress),
-            None => check_existing(&job, &prepared, progress),
-        };
-        let question = match found {
-            Ok(existing) => Question { existing },
-            Err(e) => return RunResult::failed(job.apply, e.kind, e.to_string()),
-        };
-        if !question.is_empty() {
-            match progress.ask(question.clone()) {
-                Answer::Go(decisions) => job.existing = decisions,
-                Answer::Abort => {
-                    return RunResult::failed(
-                        job.apply,
-                        ErrorKind::Cancelled,
-                        "Transfer cancelled before anything was written".to_owned(),
-                    );
-                }
+        let cloud_only = prepared.cloud_only_to_import();
+        if cloud_only.0 > 0 {
+            let question = Question {
+                cloud_only,
+                ..Question::default()
+            };
+            if progress.ask(question) == Answer::Abort {
+                return cancelled_before_writing(&job);
             }
         }
-        prepared.set_existing(question.existing);
+        let checked = match sink.as_deref_mut() {
+            Some(sink) => check_library_with(&job, &prepared, sink, progress),
+            None => check_library(&job, &prepared, progress),
+        };
+        let check = match checked {
+            Ok(check) => check,
+            Err(e) => return RunResult::failed(job.apply, e.kind, e.to_string()),
+        };
+        let question = Question {
+            cloud_only: (0, 0),
+            existing: check.existing.clone(),
+            removed: check.removed.clone(),
+        };
+        if !question.is_empty() {
+            match progress.ask(question) {
+                Answer::Go { existing, removed } => {
+                    job.existing = existing;
+                    job.removed = removed;
+                }
+                Answer::Abort => return cancelled_before_writing(&job),
+            }
+        }
+        prepared.set_check(check);
     }
     let job = &job;
     let finished = match sink.as_deref_mut() {
@@ -286,6 +309,14 @@ pub fn execute_as(
         anonymized_text: finished.report_json_as(true),
         error,
     }
+}
+
+fn cancelled_before_writing(job: &Job) -> RunResult {
+    RunResult::failed(
+        job.apply,
+        ErrorKind::Cancelled,
+        "Transfer cancelled before anything was written".to_owned(),
+    )
 }
 
 /// A run on its own thread.

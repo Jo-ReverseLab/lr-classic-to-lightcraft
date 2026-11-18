@@ -32,6 +32,14 @@ The first release is 0.1.0.
 - The run log shows LightCraft's own message for a rejected command at
   the end of the entry's reason (paths replaced by `<path>` with
   `--anonymize`).
+- Window: before writing, one question when needed: originals only in
+  iCloud (asked before the library check), photos the library already has
+  (the four `--existing` choices for all photos or per photo, filter for
+  photos edited in LightCraft, **Show in LightCraft**) and photos deleted
+  in LightCraft (import again or leave). Nothing is written until it is
+  answered; **Cancel transfer** writes nothing. The Transfer screen warns
+  about originals only in iCloud. The Running screen has a **Check
+  LightCraft library** phase. `lr2lc_core::probe::select_photo`.
 - Window: **Stop** keeps what a transfer did so far; **Cancel** takes the
   run back (library records it added removed, fields and members set back,
   mapping file restored; development settings of photos that were already

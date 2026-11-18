@@ -128,6 +128,9 @@ fn explain(label: &str) -> &'static str {
         "Write XMP automatically" => {
             "A LightCraft setting. When it is on, LightCraft writes .xmp files next to your originals for every change, so a transfer would create or change files in your photo folders. lr2lc stops unless you allow it under Advanced."
         }
+        "Originals only in iCloud" => {
+            "Original files that macOS keeps only in iCloud (or another cloud drive): Finder shows a cloud icon. LightCraft has to download each one while importing, which is slow and can fail. Download them first (Finder: right-click the folder, Download Now), then transfer."
+        }
         "Photos without original" => {
             "Photos whose original file is not found at the path Lightroom recorded (after path mapping). lr2lc creates photos as references to their files, so these are skipped and listed in the log. Connect the drive or add a path mapping."
         }
@@ -237,6 +240,20 @@ fn source(app: &mut App, ui: &mut Ui, host: &mut dyn Host, t: &Tokens) {
                     warn,
                     "Photos without original",
                     &format!("{missing} of {total}, will be skipped"),
+                );
+            }
+            if report.cloud_only > 0 {
+                row(
+                    ui,
+                    t,
+                    Icon::Exclamation,
+                    warn,
+                    "Originals only in iCloud",
+                    &format!(
+                        "{} ({}), download them first",
+                        report.cloud_only,
+                        crate::existing::size(report.cloud_only_bytes)
+                    ),
                 );
             }
         }

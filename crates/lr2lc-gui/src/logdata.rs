@@ -206,6 +206,9 @@ pub struct ScanSummary {
     pub stacks: u64,
     pub virtual_copies: u64,
     pub develop: u64,
+    /// Originals only in the cloud (not downloaded) and their size.
+    pub cloud_only: u64,
+    pub cloud_only_bytes: u64,
 }
 
 impl ScanSummary {
@@ -249,6 +252,8 @@ impl ScanSummary {
                     .count() as u64
             }),
             develop: n(&["develop", "photos"]),
+            cloud_only: n(&["photos", "cloud_only"]),
+            cloud_only_bytes: n(&["photos", "cloud_only_bytes"]),
         }
     }
 }

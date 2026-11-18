@@ -757,6 +757,15 @@ fn a_quiet_lightcraft_is_pointed_out() {
     h.get_by_label("Show LightCraft");
 }
 
+/// An answer with `choice` for every existing photo, deleted ones imported
+/// again.
+fn go(choice: lr2lc_core::ExistingChoice) -> Answer {
+    Answer::Go {
+        existing: lr2lc_core::ExistingDecisions::all(choice),
+        removed: lr2lc_core::RemovedDecisions::default(),
+    }
+}
+
 /// Two photos LightCraft already has; the second one edited there.
 fn two_existing() -> Question {
     let photo = |n: i64, edited: bool| lr2lc_core::ExistingPhoto {
@@ -780,12 +789,13 @@ fn two_existing() -> Question {
     };
     Question {
         existing: vec![photo(1, false), photo(2, true)],
+        ..Question::default()
     }
 }
 
 /// Starts a transfer in the scripted window and lets the check find
-/// [`two_existing`].
-fn asked(w: &World) -> Harness<'static, State> {
+/// `question`.
+fn asked_with(w: &World, question: Question) -> Harness<'static, State> {
     let mut h = harness(ready(w), 1280.0);
     h.run_steps(4);
     h.get_by_label("Transfer now").click();
@@ -793,9 +803,16 @@ fn asked(w: &World) -> Harness<'static, State> {
     h.state_mut()
         .host
         .events
-        .push(Event::Question(Box::new(two_existing())));
-    h.run_steps(3);
+        .push(Event::Question(Box::new(question)));
+    // The window sizes itself to its content over a few frames.
+    h.run_steps(8);
     h
+}
+
+/// Starts a transfer in the scripted window and lets the check find
+/// [`two_existing`].
+fn asked(w: &World) -> Harness<'static, State> {
+    asked_with(w, two_existing())
 }
 
 #[test]
@@ -810,9 +827,7 @@ fn photos_already_in_lightcraft_are_asked_about_before_writing() {
     h.run_steps(3);
     assert_eq!(
         h.state().host.answers,
-        vec![Answer::Go(lr2lc_core::ExistingDecisions::all(
-            lr2lc_core::ExistingChoice::DevelopIfEmpty
-        ))]
+        vec![go(lr2lc_core::ExistingChoice::DevelopIfEmpty)]
     );
     assert!(h.state().app.run.as_ref().unwrap().question.is_none());
     assert!(h.query_by_label("Continue transfer").is_none());
@@ -825,9 +840,7 @@ fn photos_already_in_lightcraft_are_asked_about_before_writing() {
     h.run_steps(2);
     assert_eq!(
         h.state().host.answers,
-        vec![Answer::Go(lr2lc_core::ExistingDecisions::all(
-            lr2lc_core::ExistingChoice::Skip
-        ))]
+        vec![go(lr2lc_core::ExistingChoice::Skip)]
     );
 }
 
@@ -863,7 +876,11 @@ fn each_photo_can_be_decided_and_shown_in_lightcraft() {
     h.run_steps(2);
     h.get_by_label("Continue transfer").click();
     h.run_steps(2);
-    let Answer::Go(decisions) = &h.state().host.answers[0] else {
+    let Answer::Go {
+        existing: decisions,
+        ..
+    } = &h.state().host.answers[0]
+    else {
         panic!("{:?}", h.state().host.answers);
     };
     assert_eq!(
@@ -938,9 +955,7 @@ fn transfer_with_answer(answer: Answer) -> (RunResult, Vec<Event>, Vec<serde_jso
 
 #[test]
 fn the_run_waits_for_the_answer_and_applies_it() {
-    let (result, events, _) = transfer_with_answer(Answer::Go(lr2lc_core::ExistingDecisions::all(
-        lr2lc_core::ExistingChoice::Skip,
-    )));
+    let (result, events, _) = transfer_with_answer(go(lr2lc_core::ExistingChoice::Skip));
     assert!(result.error.is_none(), "{:?}", result.error);
     let asked: Vec<&Question> = events
         .iter()
@@ -967,4 +982,80 @@ fn cancelling_before_writing_leaves_the_library_alone() {
     let (kind, _) = result.error.expect("the run reports the cancel");
     assert_eq!(kind, lr2lc_core::ErrorKind::Cancelled);
     assert_eq!(photos, vec![serde_json::json!(7)], "nothing imported");
+}
+
+#[test]
+fn photos_deleted_in_lightcraft_are_imported_again_or_left() {
+    let removed = |n: i64, trashed: bool| lr2lc_core::RemovedInLightCraft {
+        global_id: format!("GID-{n}"),
+        lightroom_id: n,
+        path: PathBuf::from(format!("/Users/example/Pictures/IMG_{n}.CR3")),
+        file_name: format!("IMG_{n}.CR3"),
+        lightcraft_id: serde_json::json!(800 + n),
+        trashed,
+        virtual_copy: false,
+    };
+    let question = || Question {
+        removed: vec![removed(5, false), removed(6, true)],
+        ..Question::default()
+    };
+    let w = world();
+    let mut h = asked_with(&w, question());
+    h.get_by_label("2 photos were deleted in LightCraft");
+    assert!(h.query_by_label("Same for all photos").is_none());
+    h.get_by_label("Continue transfer").click();
+    h.run_steps(2);
+    assert_eq!(
+        h.state().host.answers,
+        vec![go(lr2lc_core::ExistingChoice::DevelopIfEmpty)],
+        "imported again by default"
+    );
+
+    let mut h = asked_with(&w, question());
+    h.get_by_label("Leave them deleted").click();
+    h.run_steps(2);
+    h.get_by_label("Continue transfer").click();
+    h.run_steps(2);
+    let Answer::Go { removed, .. } = &h.state().host.answers[0] else {
+        panic!("{:?}", h.state().host.answers);
+    };
+    assert_eq!(removed.default, lr2lc_core::RemovedChoice::Leave);
+
+    // Both at once: one window, one answer.
+    let mut both = two_existing();
+    both.removed = question().removed;
+    let mut h = asked_with(&w, both);
+    h.get_by_label("2 photos are already in LightCraft");
+    h.get_by_label("2 photos were deleted in LightCraft");
+    h.get_by_label("Continue transfer").click();
+    h.run_steps(2);
+    assert_eq!(h.state().host.answers.len(), 1);
+}
+
+#[test]
+fn originals_only_in_icloud_are_pointed_out_before_the_check() {
+    let w = world();
+    let mut h = asked_with(
+        &w,
+        Question {
+            cloud_only: (3, 75_000_000),
+            ..Question::default()
+        },
+    );
+    h.get_by_label("3 photos are only in iCloud");
+    h.get_by_label("Cancel transfer").click();
+    h.run_steps(2);
+    assert_eq!(h.state().host.answers, vec![Answer::Abort]);
+
+    let mut h = asked_with(
+        &w,
+        Question {
+            cloud_only: (1, 25_000_000),
+            ..Question::default()
+        },
+    );
+    h.get_by_label("1 photo is only in iCloud");
+    h.get_by_label("Transfer anyway").click();
+    h.run_steps(2);
+    assert!(matches!(h.state().host.answers[..], [Answer::Go { .. }]));
 }

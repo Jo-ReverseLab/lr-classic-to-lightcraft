@@ -59,6 +59,10 @@ catalogs from Lightroom Classic 15:
   clone).
 - A second run adds only what is new or changed, never duplicates, and
   reports values changed on both sides as conflicts instead of writing them.
+- Photos the library already has (imported by hand) are found before
+  writing and handled by choice, never duplicated; photos deleted in
+  LightCraft since an earlier run are found and imported again or left.
+  The window asks for both before it writes.
 - Dry run with summary, `report.json` (optionally anonymized) and a
   run log; in the window also Stop and Cancel.
 
@@ -170,16 +174,27 @@ cargo run --release -p lr2lc-gui   # needs Rust 1.95 or later
 
 - **Transfer**: the catalog with its checks (file found, catalog version,
   open in Lightroom, LightCraft writing XMP automatically, photos without
-  original), the target library with LightCraft's connection, path
-  mappings (kept per catalog), the parts to transfer (the same as
+  original, originals only in iCloud), the target library with
+  LightCraft's connection, path mappings (kept per catalog), the parts to transfer (the same as
   [`--skip`](#--skip-areas)), the advanced options (label names, control
   port, continue despite XMP auto-write) and a summary from a read-only
   scan of the catalog. A blocking check disables the buttons and says why.
   Dropping a `.lrcat` file on the window chooses it.
 - **Running**: progress per phase in the order lr2lc works (read the
-  catalog, read the library when needed, keywords, photos with their
-  metadata and develop settings, albums and stacks), counters and the
-  last log entries. **Stop** halts at the next photo and keeps what is
+  catalog, check the library, keywords, photos with their metadata and
+  develop settings, albums and stacks), counters and the last log
+  entries.
+- **Before writing** the transfer asks in one window, only when there is
+  something to decide, and writes nothing until it is answered:
+  originals only in iCloud (before the library is checked: transfer
+  anyway or cancel and download them first); photos the library already
+  has, with the four [`--existing`](#--existing-choice) choices for all
+  photos or per photo (with a filter for photos edited in LightCraft and
+  **Show in LightCraft**, which selects the photo there); and photos an
+  earlier run transferred that were deleted in LightCraft, imported again
+  or left deleted (see [`--removed`](#--removed-choice)). **Cancel
+  transfer** ends the run with nothing written.
+- **Stop and Cancel**: **Stop** halts at the next photo and keeps what is
   transferred; a new run continues without duplicates. **Cancel** (after a
   confirmation) halts and takes the run back: photos, virtual copies,
   albums, keywords and stacks it added are removed from the library again
