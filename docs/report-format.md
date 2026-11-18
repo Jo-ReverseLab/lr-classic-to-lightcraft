@@ -62,7 +62,7 @@ matching skipped list.
 | `photo_counts` | object | always | each photo counted once: `total`, `transferred`, `unchanged`, `skipped`, `conflict`, `error` |
 | `rollback` | object | only after Cancel in the window | counts of what was taken back: `photos_removed`, `albums_removed`, `keywords_removed`, `stacks_ungrouped`, `members_restored`, `quick_removed`, `fields_restored`, `develop_not_reset`, `failed`, `mapping_restored` |
 | `entry_counts` | object | always | entries per status: `adjusted`, `conflict`, `error`, `skipped`, `transferred` |
-| `entries` | array | always | the run log, see the README section “Run log”; each entry has `status`, `area`, `stage`, `item`, `message` and optionally `code`, `reason`, `recommendation`, `source`, `result`, `photo` |
+| `entries` | array | always | the run log, see the README section “Run log”; each entry has `status`, `area`, `stage`, `item`, `message` and optionally `code`, `reason`, `recommendation`, `source`, `result`, `photo`. Besides the skip codes, entries use `existing_adopted` (a photo LightCraft already had, taken over; `reason` names the choice; status `skipped` for `skip`, else `transferred`) and `existing_develop_kept` (its development settings were kept) |
 | `timing` | object | apply | per LightCraft command `{count, ms}`: how often it was sent and the total time waiting for its answers |
 | `not_selected` | array of strings | only with `--skip` | areas left out, in the order `keywords`, `ratings`, `labels`, `flags`, `texts`, `collections`, `stacks`, `virtual-copies`, `develop`; absent when nothing is left out |
 
@@ -160,7 +160,7 @@ rendering value.
 | `develop.unmapped` | array of strings | always | distinct field names that could not be carried over, sorted, at most 20 |
 | `develop.unmapped_count` | integer | always | full number of distinct unmapped names, also above the cap |
 | `develop.unmapped_photos` | object | always | every unmapped field name (sorted, not capped) with the number of converted photos that carry it; names and counts only |
-| `develop.not_applied` | integer | always | known photos whose settings changed in Lightroom and were left alone |
+| `develop.not_applied` | integer | always | known photos whose settings changed in Lightroom and were left alone, and photos LightCraft already had whose own settings were kept (`writer.existing.develop_kept`) |
 | `develop.overwritten` | integer | always | photos rewritten because `--overwrite-develop` was given |
 | `develop.camera_profiles` | object | always, may be `{}` | profile name → number of converted photos, sorted, at most 20 entries; `{}` in an anonymized report |
 | `develop.camera_profiles_count` | integer | always | full number of distinct profile names, also above the cap |
@@ -295,7 +295,8 @@ LightCraft, so the planned section carries none.
 | --- | --- | --- | --- |
 | `writer.keywords_created` | integer | apply | |
 | `writer.photos_imported` | integer | apply | |
-| `writer.photos_existing` | integer | apply | found as duplicates on import |
+| `writer.photos_existing` | integer | apply | photos LightCraft already had (not in the mapping file); taken over instead of imported |
+| `writer.existing` | object | apply | `photos_existing` by choice (`--existing`): `found` (= `photos_existing`), `overwrite`, `develop`, `develop_if_empty`, `skip` (the four add up to `found`), `develop_kept` (`develop-if-empty` photos edited in LightCraft whose settings were kept; also in `develop.not_applied`), `found_while_importing` (part of `found`: reported as duplicates only by the import, not by the check before writing; they got the default choice) |
 | `writer.photos_same_content` | integer | apply | imported photos whose file has the same bytes as another photo of the catalog; each became its own record (a copy linked to its own file). Part of `photos_imported` |
 | `writer.photos_updated` | integer | apply | known photos, at least one update sent |
 | `writer.photos_unchanged` | integer | apply | known photos, no command |
@@ -363,6 +364,7 @@ LightCraft, so the planned section carries none.
 - `collections_renamed`, `collections_moved`, `collections_removed`, `smart_rules_changed` and `smart_no_longer_translatable` are subsets of `*_known` (changed in Lightroom, left as is in LightCraft).
 - `removed_photos`, `moved_photos` and `renamed_keywords` carry only Lightroom ids; no path, file name, keyword name or global id.
 - `members_added`, `members_removed`, `stack_members_removed`, `quick_added` and `quick_removed` count photos.
+- `existing.found == existing.overwrite + existing.develop + existing.develop_if_empty + existing.skip == photos_existing`.
 - For an aborted run the counters reflect what was done up to the stop; a command without a reply counts nowhere; `aborted` is then present.
 
 ## What never appears

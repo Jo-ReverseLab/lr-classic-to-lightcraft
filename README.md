@@ -132,6 +132,10 @@ Development settings (see [Development settings](#development-settings))
   and is refused with exit code 2 before the catalog is opened.
 - A known photo whose development settings changed in Lightroom is left
   alone unless `--overwrite-develop` is given.
+- A photo LightCraft already has (imported by hand or by its own Lightroom
+  import) keeps its development settings when LightCraft shows it as
+  edited, unless `--existing develop` or `--existing overwrite` is given
+  (see [`--existing`](#--existing-choice)).
 - Cancel cannot set back development settings it wrote to photos that were
   already in the library; the log lists them (`develop_not_reset`).
 
@@ -210,6 +214,7 @@ setting.
 | `--port N` | Control port of the running LightCraft app (default 7980) |
 | `--allow-xmp` | Write even if the library writes XMP sidecars next to the originals |
 | `--overwrite-develop` | Also rewrite the development settings of known photos that changed in Lightroom |
+| `--existing CHOICE` | What to do with photos LightCraft already has but lr2lc did not write: `overwrite`, `develop`, `develop-if-empty` (default) or `skip` |
 | `--probe-white-balance` | Read an original file to derive the white-balance scale (not implemented yet: the run stops with exit code 2) |
 | `--map OLD=NEW` | Replace a path prefix, repeatable |
 | `--skip AREAS` | Leave parts of the catalog out (comma-separated, see below) |
@@ -221,7 +226,8 @@ setting.
 Each option is described below.
 
 Every option except `--map` may be given at most once. Repeating one of
-`--library`, `--script`, `--report`, `--port` or `--label-set` ends with
+`--library`, `--script`, `--report`, `--port`, `--label-set`, `--skip` or
+`--existing` ends with
 exit code 2 before anything is read. `--report` and `--script` must not
 name the same file either; if they do, lr2lc stops with exit code 2 so the
 two outputs cannot overwrite each other.
@@ -943,8 +949,9 @@ The summary and `report.json` (`dry_run: false`) show what was written in
 the `writer` section:
 
 - `keywords_created`;
-- `photos_imported`, and `photos_existing` (found in the library as
-  duplicates on import);
+- `photos_imported`, and `photos_existing` (already in the library, taken
+  over instead of imported; by choice in `existing`, see
+  [`--existing`](#--existing-choice));
 - `photos_same_content` (part of `photos_imported`): photos whose file has
   the same bytes as another photo of the catalog, for example the same file
   copied into two folders. LightCraft's import would merge such files into
@@ -1002,6 +1009,42 @@ connection or the pre-flight check failed) and `aborted`, a short reason
 without paths, e.g. `connection lost during library.import; outcome
 unknown`. After a complete run `aborted` is absent.
 
+### `--existing CHOICE`
+
+A photo LightCraft already has, but that lr2lc did not write (imported by
+hand, by LightCraft's own Lightroom import, or by an earlier run whose
+mapping file was lost), is never imported again and never written over
+blindly. With `--apply`, before anything is written, lr2lc asks LightCraft
+which of the files it would import are already in the library
+(`library.importPreview`, which adds nothing) and reads their values. Each
+such photo is taken over (`photos_existing`) and gets what `CHOICE` allows:
+
+| `CHOICE` | Stars, flag, label, texts | Keywords | Development settings |
+| --- | --- | --- | --- |
+| `overwrite` | Lightroom value wherever it differs | added | written |
+| `develop` | only empty fields filled; a field set differently on both sides is a conflict, kept and reported | added | written |
+| `develop-if-empty` (default) | as `develop` | added | written only if LightCraft shows the photo as not edited; otherwise kept and counted as `not_applied` |
+| `skip` | nothing | nothing | nothing |
+
+Album, stack and Quick Collection memberships are added for every choice.
+Keywords are only ever added, never removed. The choice applies to this run
+only: afterwards the photo is in the mapping file and later runs reconcile
+it like any other photo (a skipped photo then gets its empty fields filled,
+as with `develop-if-empty`).
+
+A photo in LightCraft's trash is not asked about: importing its file
+restores it, and it gets the default choice. The same holds for a file
+LightCraft reports as a duplicate only while importing (for example one
+changed after the check): its values are read back first, so nothing
+planned for a fresh import is written over them.
+
+The summary has one line `existing: already in LightCraft N (overwrite N,
+develop N, develop-if-empty N, develop kept N, skip N; found while
+importing N)`; a dry run does not connect and says `existing: checked when
+transferring`. `report.json` carries the counts in `writer.existing`, and
+the run log has one entry per photo with the code `existing_adopted`
+(`existing_develop_kept` when its development settings were kept).
+
 ### Mapping file
 
 lr2lc remembers what it wrote in `<library folder name>.lr2lc.json` next to
@@ -1015,7 +1058,9 @@ not recorded: the next run sends it again (field updates are idempotent; a
 keyword is looked up with `keyword.list` before it is created, so no
 duplicate is made). A second run sends only what changed in Lightroom since
 then and creates no duplicates. If the file is lost, the next run finds the
-photos again as duplicates and the keywords in the library's keyword list.
+photos again as photos LightCraft already has (see
+[`--existing`](#--existing-choice)) and the keywords in the library's
+keyword list.
 
 A photo entry also gains `develop_hash` once its development settings were
 written (see [Development settings](#development-settings)). Files from an

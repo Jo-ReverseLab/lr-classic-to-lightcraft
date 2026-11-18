@@ -9,6 +9,16 @@ The first release is 0.1.0.
 
 ### Added
 
+- `--existing overwrite|develop|develop-if-empty|skip`: with `--apply`,
+  lr2lc first asks LightCraft which photos it already has although lr2lc
+  did not write them, and handles each by the choice (default
+  `develop-if-empty`: fill empty fields, keep LightCraft's development
+  settings of an edited photo). The summary line `existing:` and
+  `writer.existing` in `report.json` count them; the log has one
+  `existing_adopted` entry per photo. Library API: `check_existing`,
+  `check_existing_with`, `Prepared::set_existing`, `Job::existing`,
+  `Phase::CheckingLibrary`.
+
 - Window: **Stop** keeps what a transfer did so far; **Cancel** takes the
   run back (library records it added removed, fields and members set back,
   mapping file restored; development settings of photos that were already
@@ -117,6 +127,13 @@ The first release is 0.1.0.
 
 ### Fixed
 
+- A photo already in the LightCraft library but not in the mapping file
+  (imported by hand or by LightCraft's own Lightroom import) had its
+  stars, texts and development settings silently overwritten with the
+  Lightroom values. It is now found before writing and handled by
+  `--existing`; a duplicate reported only while importing is read back
+  first and gets the default choice. Cancel sets such a photo's fields back
+  to its own values, not to empty ones.
 - Batched imports could give two photos each other's LightCraft id when
   LightCraft listed a file it had only browsed first; ids are now matched
   by file name, and an ambiguous name falls back to a single import.
