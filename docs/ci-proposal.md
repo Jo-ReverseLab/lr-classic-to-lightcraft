@@ -1,5 +1,10 @@
 # CI proposal
 
+> Historical (2026-11-04). The cost figures below assume a private
+> repository. Since the repository is public, standard runners are free and
+> every pull request runs the full matrix; the current workflow is
+> `.github/workflows/ci.yml`.
+
 Status: proposal only. This document does not change anything under `.github/`.
 Every YAML snippet below is a proposal to be applied by the owner or the lead.
 

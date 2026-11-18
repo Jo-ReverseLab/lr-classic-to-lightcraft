@@ -4,7 +4,7 @@ lr2lc converts Adobe Lightroom Classic catalogs (`.lrcat`) into LightCraft libra
 
 ## Status
 
-Version 0.1.0 is released (tag `v0.1.0`; repository still private); 0.2.0 fixes from the first live tests are on `main` (see `ROADMAP.md`). What works: folders, photos (as references to the existing files; videos are skipped), keywords with hierarchy, synonyms and attributes, star ratings, pick/reject flags, colour labels (via a label set), titles, captions, copyright and creator, collections as albums and collection sets as album folders, smart collections (exact star-rating rules only), stacks, the Quick Collection, stable identity via Lightroom's global ids, a safe re-sync, and development settings (sliders, tone curves, crop, white-balance mode, masks and spots). Temperature/tint, camera profiles and a few unconfirmed develop fields are reported, not converted. LightCraft's own Lightroom import also maps development settings, so lr2lc's edge is the safe re-sync, the dry run with a full report, path mapping, stacks, smart albums and stable identity. Only Lightroom Classic 15 catalogs (`Adobe_DBVersion` 1500000) are read.
+Version 0.1.0 is released (tag `v0.1.0`; the repository is public); 0.2.0 fixes from the first live tests are on `main` (see `ROADMAP.md`). What works: folders, photos (as references to the existing files; videos are skipped), keywords with hierarchy, synonyms and attributes, star ratings, pick/reject flags, colour labels (via a label set), titles, captions, copyright and creator, collections as albums and collection sets as album folders, smart collections (exact star-rating rules only), stacks, the Quick Collection, stable identity via Lightroom's global ids, a safe re-sync, and development settings (sliders, tone curves, crop, white-balance mode, masks and spots). Temperature/tint, camera profiles and a few unconfirmed develop fields are reported, not converted. LightCraft's own Lightroom import also maps development settings, so lr2lc's edge is the safe re-sync, the dry run with a full report, path mapping, stacks, smart albums and stable identity. Only Lightroom Classic 15 catalogs (`Adobe_DBVersion` 1500000) are read.
 
 What comes next is in [ROADMAP.md](ROADMAP.md) and in the GitHub issues (milestones `0.2.0`, `0.3.0`, `Later`). User-visible changes go into [CHANGELOG.md](CHANGELOG.md).
 
@@ -49,7 +49,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 scripts/check-links.sh                  # relative links in Markdown
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same on Ubuntu, macOS, Windows and MSRV, with `--locked`. Golden files: `crates/lr2lc/tests/golden/`, `tests/fixtures/golden/`.
+CI (`.github/workflows/ci.yml`) runs the same on Ubuntu, macOS, Windows and MSRV for pull requests, pushes to `main` and manual runs, with `--locked`; the personal-data scan of added lines runs on pull requests only. Golden files: `crates/lr2lc/tests/golden/`, `tests/fixtures/golden/`.
 
 ## Workflow
 

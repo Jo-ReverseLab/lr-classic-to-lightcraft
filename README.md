@@ -38,7 +38,7 @@ bring them over.
 Without `--apply`, lr2lc only reports what it would do. Everything that is
 not converted is listed with a reason in the summary and in `report.json`.
 
-CI runs formatting, lint and tests on Linux, macOS and Windows (pull requests on Linux only).
+CI runs formatting, lint and tests on Linux, macOS and Windows.
 
 ## What works and what does not
 
