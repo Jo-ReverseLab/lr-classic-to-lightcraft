@@ -136,10 +136,6 @@ Development settings (see [Development settings](#development-settings))
   and is refused with exit code 2 before the catalog is opened.
 - A known photo whose development settings changed in Lightroom is left
   alone unless `--overwrite-develop` is given.
-- A photo LightCraft already has (imported by hand or by its own Lightroom
-  import) keeps its development settings when LightCraft shows it as
-  edited, unless `--existing develop` or `--existing overwrite` is given
-  (see [`--existing`](#--existing-choice)).
 - Cancel cannot set back development settings it wrote to photos that were
   already in the library; the log lists them (`develop_not_reset`).
 
