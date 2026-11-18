@@ -66,7 +66,8 @@ with exit code 2. --report and --script must not name the same file.";
 pub enum Command {
     Help,
     Version,
-    Run(RunOptions),
+    /// Boxed: the options are far larger than the other variants.
+    Run(Box<RunOptions>),
 }
 
 /// Options of a conversion run.
@@ -221,7 +222,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
             "--apply needs --library <folder>: the LightCraft library to write".to_string(),
         );
     }
-    Ok(Command::Run(RunOptions {
+    Ok(Command::Run(Box::new(RunOptions {
         catalog,
         mappings: PathMappings::new(rules),
         report,
@@ -237,7 +238,7 @@ pub fn parse_args<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, 
         anonymize,
         existing: existing.unwrap_or_default(),
         removed: removed.unwrap_or_default(),
-    }))
+    })))
 }
 
 /// A port number from 1 to 65535.
@@ -262,7 +263,7 @@ mod tests {
 
     fn run(args: &[&str]) -> RunOptions {
         match parse(args) {
-            Ok(Command::Run(o)) => o,
+            Ok(Command::Run(o)) => *o,
             other => panic!("unexpected: {other:?}"),
         }
     }
