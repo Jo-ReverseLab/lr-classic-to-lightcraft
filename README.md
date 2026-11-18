@@ -20,27 +20,32 @@
 
 lr2lc (short for Lightroom Classic to LightCraft) reads a Lightroom Classic
 catalog (`.lrcat`) **read-only** and writes what it finds into a running
-LightCraft library. Your original photos are never touched, and nothing is
-written until you ask for it: without that, every run is a dry run with a
-full report.
+LightCraft library. Unlike LightCraft's built-in import, it is made for a
+catalog that keeps changing: run it again and it brings over only what
+changed, without overwriting what you did in LightCraft.
 
-## Why lr2lc
+## Why not just LightCraft's own import?
 
-- **Safe to repeat.** A second run adds only what is new or changed. It
-  never duplicates, and values changed on both sides are reported as
-  conflicts instead of overwritten.
-- **Nothing is lost quietly.** The dry run shows up front what will move
-  and what will not, with a reason for each item, in the summary and in
-  `report.json`. In the window a transfer can be stopped, or cancelled and
-  taken back.
-- **It asks before it writes.** Photos the library already has, photos
-  deleted in LightCraft and originals that are only in iCloud are found
-  first; the window asks what to do with them (on the command line:
-  `--existing`, `--removed`).
-- **More than the built-in import.** LightCraft's own Lightroom import also
-  maps development settings. lr2lc adds the re-sync, path mapping for
-  moved photos, stacks, smart albums and stable identity through
-  Lightroom's global ids.
+LightCraft can import a Lightroom catalog itself, with ratings, keywords,
+collections and development settings. lr2lc goes further where a real,
+living catalog needs it:
+
+| | LightCraft's import | lr2lc |
+| --- | --- | --- |
+| **Running it again** | Adds new photos and takes ratings, flags and labels from Lightroom again, also where you changed them in LightCraft | Writes only what changed in Lightroom; a value changed on both sides is reported as a conflict, never overwritten |
+| **Before writing** | Counts, missing originals and warnings | A dry run with a reason for every item left out, in the summary, `report.json` and the run log |
+| **Smart collections** | Plain albums with today's members | Smart albums that keep updating (star-rating rules today) |
+| **Stacks and Quick Collection** | Not imported | Imported |
+| **Keywords** | Hierarchy | Hierarchy plus synonyms and keyword attributes |
+| **Moved photos** | Only paths relative to the catalog | Any path with `--map OLD=NEW`, e.g. another disk or computer |
+| **Photos you imported by hand** | No question asked | Found before writing; you choose per photo: overwrite, development only, only if unedited, or skip |
+
+LightCraft's own import is the better choice if you need any of these:
+missing originals kept as offline photos, videos, prints, books and
+slideshows, or a Lightroom backup `.zip` as the source.
+
+Your original photos are never touched, and nothing is written until you ask
+for it: without that, every run is a dry run.
 
 ## What comes over
 
