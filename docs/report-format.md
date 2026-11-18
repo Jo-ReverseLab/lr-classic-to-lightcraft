@@ -8,7 +8,7 @@ inconsistency found while writing this document is listed under
 
 The file is pretty-printed JSON with a trailing newline. It is written only
 when `--report FILE` is given, after the run, and `FILE` is checked before
-anything is read (see the README section on `--report`).
+anything is read (see [`--report FILE`](usage.md#--report-file)).
 
 ## How the object is built
 
@@ -62,7 +62,7 @@ matching skipped list.
 | `photo_counts` | object | always | each photo counted once: `total`, `transferred`, `unchanged`, `skipped`, `conflict`, `error` |
 | `rollback` | object | only after Cancel in the window | counts of what was taken back: `photos_removed`, `albums_removed`, `keywords_removed`, `stacks_ungrouped`, `members_restored`, `quick_removed`, `fields_restored`, `develop_not_reset`, `photos_trashed_again` (restored from the trash by the run, moved back), `failed`, `mapping_restored` |
 | `entry_counts` | object | always | entries per status: `adjusted`, `conflict`, `error`, `skipped`, `transferred` |
-| `entries` | array | always | the run log, see the README section “Run log”; each entry has `status`, `area`, `stage`, `item`, `message` and optionally `code`, `reason`, `recommendation`, `source`, `result`, `photo`. A `reason` of a command LightCraft rejected ends with `LightCraft said: ` and the app's message; with `--anonymize` every path in it is replaced by `<path>` (the writer's skip lists never hold it). Besides the skip codes, entries use `original_in_cloud` (status `adjusted`, stage `read`: the original is only in the cloud and the run imports it), `removed_in_lightcraft` (a photo deleted in LightCraft, imported again or restored), `existing_adopted` (a photo LightCraft already had, taken over; `reason` names the choice; status `skipped` for `skip`, else `transferred`) and `existing_develop_kept` (its development settings were kept) |
+| `entries` | array | always | the run log, see [Run log](usage.md#run-log); each entry has `status`, `area`, `stage`, `item`, `message` and optionally `code`, `reason`, `recommendation`, `source`, `result`, `photo`. A `reason` of a command LightCraft rejected ends with `LightCraft said: ` and the app's message; with `--anonymize` every path in it is replaced by `<path>` (the writer's skip lists never hold it). Besides the skip codes, entries use `original_in_cloud` (status `adjusted`, stage `read`: the original is only in the cloud and the run imports it), `removed_in_lightcraft` (a photo deleted in LightCraft, imported again or restored), `existing_adopted` (a photo LightCraft already had, taken over; `reason` names the choice; status `skipped` for `skip`, else `transferred`) and `existing_develop_kept` (its development settings were kept) |
 | `timing` | object | apply | per LightCraft command `{count, ms}`: how often it was sent and the total time waiting for its answers |
 | `not_selected` | array of strings | only with `--skip` | areas left out, in the order `keywords`, `ratings`, `labels`, `flags`, `texts`, `collections`, `stacks`, `virtual-copies`, `develop`; absent when nothing is left out |
 

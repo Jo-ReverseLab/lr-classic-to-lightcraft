@@ -93,7 +93,7 @@ So, for the strict reading (exact equivalents only): Lightroom "keywords contain
 |---|---|---|
 | top | `rating` (number) | Rating (`is/≥/≤/>/<`) – direct |
 | top | `flag` (choice pick/reject/none) | Pick flag – direct (`flagged`/`unflagged`/`rejected`) |
-| top | `label` (choice red/yellow/green/blue/purple/none) | Color label – only the five colours (see the colour label sets in the README) |
+| top | `label` (choice red/yellow/green/blue/purple/none) | Color label – only the five colours (see the colour label sets in [`--label-set`](../usage.md#--label-set-set)) |
 | top | `text` (text) | Searchable text – only loosely (different field set) |
 | Source | `album` (album id) | "Collection" criterion – only via id mapping, and the target album must exist first |
 | Source | `virtualCopy` (bool) | Copy status (virtual copy) |

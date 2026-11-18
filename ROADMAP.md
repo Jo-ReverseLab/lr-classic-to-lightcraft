@@ -8,7 +8,7 @@ work is listed in [CHANGELOG.md](CHANGELOG.md).
 ## 0.1.0 – first public release
 
 Released as `v0.1.0`. Everything it converts is described in the
-[README](README.md#status).
+[README](README.md#what-comes-over).
 
 ## 0.2.0 – desktop window and fixes from the first live tests
 

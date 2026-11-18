@@ -57,7 +57,7 @@ CI (`.github/workflows/ci.yml`) runs the same on Ubuntu, macOS, Windows and MSRV
 - Open a pull request; CI must be green before merging. Reference the issue (`Fixes #n`).
 - Tests first: every reader and writer change gets a test against generated fixtures or the fake port.
 - Add an entry under `## [Unreleased]` in `CHANGELOG.md` for every user-visible change.
-- Update `README.md` (user documentation) and `docs/report-format.md` when options, output or the report change.
+- Update the user documentation (`docs/usage.md`, `docs/desktop-window.md`, `docs/limits.md`, the short `README.md`) and `docs/report-format.md` when options, output or the report change.
 - Errors via `thiserror` in libraries, `anyhow` in the binary.
 - New dependencies need the maintainer's approval. Approved so far: serde, serde_json, clap, thiserror, anyhow, rusqlite, flate2, chrono, sha2, walkdir, tempfile (tests only).
 - No code is copied from lrcat-extractor (MPL-2.0). Reading it for understanding is fine.
@@ -72,7 +72,11 @@ CI (`.github/workflows/ci.yml`) runs the same on Ubuntu, macOS, Windows and MSRV
 
 | File | Content |
 | --- | --- |
-| `README.md` | User documentation: options, output, re-sync, known limits, exit codes |
+| `README.md` | Landing page: what lr2lc does, quick start, install, links |
+| `docs/usage.md` | Command line: options, output, re-sync, exit codes |
+| `docs/desktop-window.md` | The desktop window |
+| `docs/limits.md` | What works and every known limit |
+| `docs/images/` | Screenshots, rendered by `render_screens` in `crates/lr2lc-gui/tests/window.rs` |
 | `ROADMAP.md` | Milestones and what is planned |
 | `CHANGELOG.md` | Changes per release |
 | `docs/report-format.md` | Contract of `report.json` |
