@@ -710,6 +710,57 @@ flipped photos); the copy used here leaves every one of them at its default.
 The assumption notes in section 5.1 name the same fields; this subsection
 states which of those names are confirmed and which remain open.
 
+#### F-036 confirmation (2026-11-18)
+
+Method: a copy of the small test catalog, opened in Lightroom Classic 15.0
+with its own copy of the sample images; the owner applied one edit per
+photo, then the copy was read read-only (`mode=ro`) and compared with the
+unedited catalog. Schema version 1500000. Values below are shapes and sample
+values of these test edits only.
+
+Confirmed:
+
+- **Lens blur**: `LensBlur = { Active, BlurAmount (0..100), HighlightsBoost,
+  BokehShape, BokehShapeDetail, BokehAspect, BokehRotation, CatEyeAmount,
+  CatEyeScale, SphericalAberration, FocalRange ("a b c d"), FocalRangeSource,
+  SubjectRange, SampledRange, SampledArea, ImageOrientation, Version }`, plus
+  a top-level `DepthMapInfo` table holding only digests.
+- **Point colour**: `PointColors` is a list, one table per sample: `SrcHue`
+  (radians), `SrcSat`, `SrcLum` (0..1), `HueShift`, `SatScale`, `LumScale`
+  (−1..1), `RangeAmount`, `Variance`, and `HueRange`, `SatRange`, `LumRange`,
+  each `{ LowerNone, LowerFull, UpperFull, UpperNone }`.
+- **Enhance** (AI denoise, Raw Details, Super Resolution): no top-level key.
+  Each is one entry of `FilterList.Filters` with `Name = "Enhance"`, told
+  apart by `Title` (`$$$/CRaw/Filter/Title/Denoise`, `…/RawDetails`,
+  `…/SuperRes`); Lightroom 15 applies them in place, without a new DNG.
+  Applying denoise also removes `ColorNoiseReduction` from the text. The
+  denoise amount is not in `MatrixParamsA/B` (both stay `25/100`) but in
+  `Images[1].BlendParams`; with x = slider / 100, two samples (50 and 80)
+  fit `BlendParams[0] = 7x / (3 + 4x)` and `BlendParams[1] = 3x / (1 + 2x)`
+  exactly (50: 7/10 and 3/4; 80: 28/31 and 12/13), so
+  `amount = 100 · b / (3 − 2b)` with b = `BlendParams[1]`. Raw Details and
+  Super Resolution carry no amount (`BlendType = 0`).
+- **Manual CA**: Lightroom Classic 15's manual chromatic aberration is the
+  Defringe group (`DefringePurpleAmount`, `DefringeGreenAmount` and their hue
+  sliders), already mapped. No `optics.ca_red`/`ca_blue` counterpart
+  appeared.
+- **Mirror**: not stored in the settings text. `Adobe_images.orientation`
+  changes from `AB` to `BA`; `CropAngle`, `CropTop` and `CropBottom` stay in
+  the stored frame. LightCraft's `orientation` is a change on top of the
+  file's EXIF orientation, so carrying a Lightroom rotation or mirror needs
+  the file's EXIF orientation (#10).
+- On a virtual copy: point curve (`ToneCurveName2012 = "Custom"`), subject
+  mask (`Mask/Image`, `MaskSubType = 1`), linear gradient (`Mask/Gradient`)
+  and `RemoveAreas` with and without generative fill
+  (`fill_method = "firefly"`).
+
+Live check (`--apply` into a throwaway LightCraft 0.21.1 library, then
+`photo.inspect`): curve, subject mask, linear gradient and the crop angle
+arrive; the mirror does not (`crop.flip_h` stays `false`).
+
+Still open after F-036: the inner fields of `RedEyeInfo` (the test photos
+contain no eyes Lightroom can detect).
+
 ---
 
 ## 5. What has no counterpart, and how it would be reported
