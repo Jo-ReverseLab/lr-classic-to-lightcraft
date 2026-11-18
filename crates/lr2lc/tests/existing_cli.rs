@@ -167,3 +167,38 @@ fn skip_writes_nothing_to_photos_lightcraft_already_has() {
         .collect();
     assert!(photo_writes.is_empty(), "{photo_writes:?}");
 }
+
+#[test]
+fn photos_deleted_in_lightcraft_are_imported_again_by_default() {
+    let s = setup();
+    let fake = FakeLightCraft::start(Config::new(&s.library));
+    assert_exit(&s.run(fake.port(), &["--apply"]), 0);
+    let o = s.run(1, &["--removed", "leave"]);
+    assert_exit(&o, 0);
+    assert!(
+        String::from_utf8_lossy(&o.stdout)
+            .contains("removed in LightCraft: checked when transferring")
+    );
+    let deleted: Vec<i64> = fake.photos().values().copied().take(2).collect();
+    for id in &deleted {
+        fake.delete_permanently(*id);
+    }
+    let count = fake.photos().len();
+
+    let o = s.run(fake.port(), &["--apply", "--removed", "leave"]);
+    assert_exit(&o, 0);
+    assert!(text(&o).contains("removed in LightCraft: 2 (imported again 0"));
+    assert_eq!(fake.photos().len(), count, "left as they are");
+
+    let o = s.run(fake.port(), &["--apply"]);
+    assert_exit(&o, 0);
+    let w = s.writer();
+    assert_eq!(w["removed_in_lightcraft"]["found"], 2);
+    assert_eq!(w["removed_in_lightcraft"]["reimported"], 2);
+    assert_eq!(fake.photos().len(), count + 2);
+
+    let o = s.run(fake.port(), &["--apply"]);
+    assert_exit(&o, 0);
+    assert_eq!(s.writer()["removed_in_lightcraft"]["found"], 0);
+    assert_eq!(s.writer()["photos_imported"], 0);
+}

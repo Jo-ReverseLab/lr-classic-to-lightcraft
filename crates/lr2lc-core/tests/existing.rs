@@ -1,13 +1,13 @@
 //! The check for photos LightCraft already has, as a front end drives it:
-//! `prepare` → `check_existing` (or `check_existing_with` through a host's
-//! sink) → decide → `Prepared::set_existing` → `finish`; and `finish`
+//! `prepare` → `check_library` (or `check_library_with` through a host's
+//! sink) → decide → `Prepared::set_check` → `finish`; and `finish`
 //! checking by itself when no front end did.
 
 use lc_test_support::fake_lightcraft::{Config, FakeLightCraft, READ_COMMANDS, SeedPhoto};
 use lr2lc_core::labels::LabelMode;
 use lr2lc_core::{
     ExistingChoice, ExistingDecisions, ExistingReason, HostSink, Job, NoProgress, Phase, Progress,
-    Request, check_existing, check_existing_with, finish, finish_with, prepare,
+    Request, check_library, check_library_with, finish, finish_with, prepare,
 };
 use lrcat_fixtures::write_keyword_edge_catalog_with_files;
 use model::PathMappings;
@@ -37,6 +37,7 @@ fn setup() -> Setup {
         areas: lr2lc_core::Areas::ALL,
         anonymize: false,
         existing: ExistingDecisions::default(),
+        removed: Default::default(),
     };
     Setup {
         _photos: photos,
@@ -93,7 +94,9 @@ fn check_then_finish_with_the_chosen_decisions() {
     s.job.port = fake.port();
     let mut prepared = prepare(&s.job, &mut NoProgress).unwrap();
     let mut phases = Phases(Vec::new());
-    let found = check_existing(&s.job, &prepared, &mut phases).unwrap();
+    let check = check_library(&s.job, &prepared, &mut phases).unwrap();
+    assert!(check.removed.is_empty());
+    let found = check.existing.clone();
     assert_eq!(phases.0, [Phase::CheckingLibrary]);
     assert!(fake.write_commands().is_empty(), "{:?}", fake.commands());
     assert_eq!(found.len(), 1);
@@ -104,7 +107,7 @@ fn check_then_finish_with_the_chosen_decisions() {
 
     // The person chose to keep this photo as it is.
     s.job.existing.per_photo.insert(gid, ExistingChoice::Skip);
-    prepared.set_existing(found);
+    prepared.set_check(check);
     let previews_before = preview_count(&fake);
     let done = finish(&s.job, prepared, &mut NoProgress).unwrap();
     done.result().unwrap();
@@ -158,7 +161,9 @@ fn the_check_through_a_host_sink_matches_the_port() {
     let (port_fake, gid) = fake_with_a_copy_of_the_first_photo(&s.job);
     s.job.port = port_fake.port();
     let prepared = prepare(&s.job, &mut NoProgress).unwrap();
-    let by_port = check_existing(&s.job, &prepared, &mut NoProgress).unwrap();
+    let by_port = check_library(&s.job, &prepared, &mut NoProgress)
+        .unwrap()
+        .existing;
 
     let local = setup();
     let (fake, _) = fake_with_a_copy_of_the_first_photo(&local.job);
@@ -167,13 +172,14 @@ fn the_check_through_a_host_sink_matches_the_port() {
         Request::Method(method) => fake.dispatch(method, params, false),
     });
     let mut prepared = prepare(&local.job, &mut NoProgress).unwrap();
-    let found = check_existing_with(&local.job, &prepared, &mut sink, &mut NoProgress).unwrap();
+    let check = check_library_with(&local.job, &prepared, &mut sink, &mut NoProgress).unwrap();
+    let found = &check.existing;
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].global_id, gid);
     assert_eq!(found[0].live, by_port[0].live);
     assert!(fake.write_commands().is_empty());
 
-    prepared.set_existing(found);
+    prepared.set_check(check);
     let done = finish_with(&local.job, prepared, &mut sink, &mut NoProgress).unwrap();
     done.result().unwrap();
     assert_eq!(writer(&done)["existing"]["develop_if_empty"], 1);
@@ -186,8 +192,9 @@ fn a_dry_run_checks_nothing() {
     let prepared = prepare(&s.job, &mut NoProgress).unwrap();
     // No LightCraft is running on port 0: a check would fail.
     assert!(
-        check_existing(&s.job, &prepared, &mut NoProgress)
+        check_library(&s.job, &prepared, &mut NoProgress)
             .unwrap()
+            .existing
             .is_empty()
     );
     let done = finish(&s.job, prepared, &mut NoProgress).unwrap();
@@ -210,7 +217,7 @@ fn a_cancel_during_the_check_writes_nothing() {
             true
         }
     }
-    let Err(error) = check_existing(&s.job, &prepared, &mut Stop) else {
+    let Err(error) = check_library(&s.job, &prepared, &mut Stop) else {
         panic!("expected a cancel");
     };
     assert_eq!(error.kind, lr2lc_core::ErrorKind::Cancelled);
@@ -223,4 +230,75 @@ fn preview_count(fake: &FakeLightCraft) -> usize {
         .iter()
         .filter(|(c, _)| c == "library.importPreview")
         .count()
+}
+
+#[test]
+fn cloud_only_originals_to_import_are_counted_and_logged() {
+    let mut s = setup();
+    s.job.apply = false;
+    let mut prepared = prepare(&s.job, &mut NoProgress).unwrap();
+    assert_eq!(prepared.cloud_only_to_import(), (0, 0));
+    // The dataless flag can only be set by a file provider such as iCloud;
+    // mark the first photo the way the reader would.
+    let first = prepared.input.photos[0].lightroom_id;
+    prepared.outcome.cloud_only.photos.push((first, 30_000_000));
+    assert_eq!(prepared.cloud_only().count(), 1);
+    assert_eq!(prepared.cloud_only_to_import(), (1, 30_000_000));
+    assert!(
+        prepared
+            .catalog_summary(&s.job)
+            .contains("originals only in the cloud (not downloaded): 1 (30.0 MB)")
+    );
+    let done = finish(&s.job, prepared, &mut NoProgress).unwrap();
+    let report: Value = serde_json::from_str(&done.report_json()).unwrap();
+    assert_eq!(report["photos"]["cloud_only"], 1);
+    assert_eq!(report["photos"]["cloud_only_bytes"], 30_000_000);
+    let warned: Vec<&Value> = report["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["code"] == "original_in_cloud")
+        .collect();
+    assert_eq!(warned.len(), 1);
+    assert_eq!(warned[0]["photo"], first);
+    assert!(
+        warned[0]["recommendation"]
+            .as_str()
+            .unwrap()
+            .contains("Download")
+    );
+}
+
+#[test]
+fn check_library_reports_photos_deleted_in_lightcraft() {
+    let mut s = setup();
+    let fake = FakeLightCraft::start(Config::new(s.job.library.as_deref().unwrap()));
+    s.job.port = fake.port();
+    let prepared = prepare(&s.job, &mut NoProgress).unwrap();
+    finish(&s.job, prepared, &mut NoProgress)
+        .unwrap()
+        .result()
+        .unwrap();
+    let state = lc_writer::state::State::load(&lc_writer::state::state_path(
+        s.job.library.as_deref().unwrap(),
+    ))
+    .unwrap();
+    let (gid, entry) = state.photos().find(|(_, e)| e.copy_of.is_none()).unwrap();
+    fake.trash(entry.lightcraft_id.as_i64().unwrap());
+
+    let mut prepared = prepare(&s.job, &mut NoProgress).unwrap();
+    let check = check_library(&s.job, &prepared, &mut NoProgress).unwrap();
+    assert_eq!(check.removed.len(), 1);
+    assert_eq!(check.removed[0].global_id, gid);
+    assert!(check.removed[0].trashed);
+    s.job.removed = lr2lc_core::RemovedDecisions::all(lr2lc_core::RemovedChoice::Leave);
+    prepared.set_check(check);
+    let done = finish(&s.job, prepared, &mut NoProgress).unwrap();
+    done.result().unwrap();
+    let w = writer(&done);
+    assert_eq!(w["removed_in_lightcraft"]["left"], 1);
+    assert_eq!(w["photos_skipped_by_code"]["removed_in_lightcraft"], 1);
+    assert!(done.writer_summary.contains(
+        "removed in LightCraft: 1 (imported again 0, restored from the trash 0, left 1)"
+    ));
 }
