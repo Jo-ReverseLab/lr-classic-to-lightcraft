@@ -26,7 +26,7 @@ These rules decide every design question. Code that breaks one of them is not me
 
 ## Layout
 
-Cargo workspace, edition 2024, MSRV 1.88.0, licence MIT OR Apache-2.0.
+Cargo workspace, edition 2024, MSRV 1.89.0, licence MIT OR Apache-2.0.
 
 | Crate | Role |
 | --- | --- |

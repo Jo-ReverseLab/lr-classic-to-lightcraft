@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
-[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Rust 1.89+](https://img.shields.io/badge/rust-1.89%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![Tested on macOS](https://img.shields.io/badge/tested%20on-macOS-lightgrey?logo=apple)](docs/limits.md)
 
 <picture>
@@ -82,7 +82,7 @@ cd lr-classic-to-lightcraft
 # The desktop window (Rust 1.95 or later)
 cargo run --release -p lr2lc-gui
 
-# Or the command line (Rust 1.88 or later): a dry run first ...
+# Or the command line (Rust 1.89 or later): a dry run first ...
 cargo run --release -p lr2lc -- ~/Pictures/Lightroom/Catalog.lrcat
 
 # ... then the transfer, with LightCraft started with `--control 7980`

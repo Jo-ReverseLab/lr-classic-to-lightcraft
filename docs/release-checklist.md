@@ -17,7 +17,7 @@ account or a decision only the owner can take; section 5 collects them.
 | Item | Value | Evidence |
 | --- | --- | --- |
 | Workspace version | `0.1.0` | `Cargo.toml:6` |
-| Edition, MSRV, licence | `2024`, `1.88.0`, `MIT OR Apache-2.0` | `Cargo.toml:7-9` |
+| Edition, MSRV, licence | `2024`, `1.89.0`, `MIT OR Apache-2.0` | `Cargo.toml:7-9` |
 | Members | six, including two that are never shipped | `Cargo.toml:3` |
 | Lock file, tracked files, tags | `Cargo.lock` tracked, 218 files, no tag | `git ls-files Cargo.lock`, `git ls-files \| wc -l`, `git tag \| wc -l` |
 | Binary | `lr2lc`, prints `lr2lc <version>` | `crates/lr2lc/Cargo.toml:8-10`, `crates/lr2lc/src/main.rs:23-25` |
@@ -121,7 +121,7 @@ Current practice keeps them; they do not block the release.
      Expected: exit 0.
    - `cargo test --workspace --locked` — Expected: exit 0, every suite passes,
      0 failed.
-   - `cargo +1.88.0 check --workspace --all-targets --locked` — Expected:
+   - `cargo +1.89.0 check --workspace --all-targets --locked` — Expected:
      exit 0, if that toolchain is installed; otherwise rely on the MSRV job
      (`ci.yml:68-85`).
 9. Scan the release diff by hand, because CI skips it on a direct push

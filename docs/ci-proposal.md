@@ -591,7 +591,8 @@ dominant cost. If the repository becomes public, standard runners are free
 4. **MSRV.** Decided on 2026-11-05: declare 1.88.0. Edition 2024 sets the floor
    at 1.85.0, but the code uses `slice::as_chunks` and let-chains, both stable
    since 1.88.0. `rust-version` lives in `[workspace.package]` and every crate
-   inherits it, so no crate manifest needs its own value.
+   inherits it, so no crate manifest needs its own value. Raised to 1.89.0
+   on 2026-11-19, because rusqlite 0.43 requires it.
 5. **Advisories.** `cargo audit` or `cargo deny`? Weekly or per push? Block
    the merge or only report? May the action open issues?
 6. **Coverage.** Ever, or not? Weekly or per push? No upload to an external

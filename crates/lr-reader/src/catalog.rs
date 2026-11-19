@@ -4,7 +4,7 @@ use rusqlite::types::{Value, ValueRef};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 /// The only `Adobe_DBVersion` this reader understands (Lightroom Classic 15).
@@ -302,7 +302,15 @@ fn pending_side_file(catalog: &Path) -> Option<PathBuf> {
 pub fn checksum(path: &Path) -> io::Result<[u8; 32]> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
-    io::copy(&mut file, &mut hasher)?;
+    // sha2 0.11 no longer implements `io::Write`, so read in blocks.
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
     Ok(hasher.finalize().into())
 }
 

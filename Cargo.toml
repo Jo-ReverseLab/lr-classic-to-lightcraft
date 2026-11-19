@@ -5,7 +5,7 @@ members = ["tests/fixtures/generator", "crates/lr-reader", "crates/model", "crat
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.88.0"
+rust-version = "1.89.0"
 license = "MIT OR Apache-2.0"
 description = "Convert Adobe Lightroom Classic catalogs into LightCraft libraries"
 repository = "https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft"

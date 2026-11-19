@@ -7,6 +7,13 @@ The first release is 0.1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- Minimum supported Rust version is now 1.89.0 (was 1.88.0), because
+  rusqlite 0.43 requires it. The desktop window still needs 1.95.
+- Dependencies: rusqlite 0.32 → 0.43 (bundled SQLite updated), sha2
+  0.10 → 0.11, rfd 0.17 → 0.18, dirs 6 → 7, flate2 1.1.11.
+
 ## [0.2.0] - 2026-11-18
 
 Desktop window, photos already in or deleted from LightCraft, and the
