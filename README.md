@@ -7,6 +7,8 @@
 **Move your Adobe Lightroom Classic catalog into [LightCraft](https://github.com/storytold/lightcraft),<br>with keywords, albums, ratings and edits. Safe to run again.**
 
 [![CI](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Jo-ReverseLab/lr-classic-to-lightcraft)](https://github.com/Jo-ReverseLab/lr-classic-to-lightcraft/releases)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Jo-ReverseLab/lr-classic-to-lightcraft/badge)](https://scorecard.dev/viewer/?uri=github.com%2FJo-ReverseLab%2Flr-classic-to-lightcraft)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 [![Rust 1.89+](https://img.shields.io/badge/rust-1.89%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![Tested on macOS](https://img.shields.io/badge/tested%20on-macOS-lightgrey?logo=apple)](docs/limits.md)
