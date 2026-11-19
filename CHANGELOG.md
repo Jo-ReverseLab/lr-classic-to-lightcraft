@@ -13,6 +13,10 @@ The first release is 0.1.0.
   rusqlite 0.43 requires it. The desktop window still needs 1.95.
 - Dependencies: rusqlite 0.32 → 0.43 (bundled SQLite updated), sha2
   0.10 → 0.11, rfd 0.17 → 0.18, dirs 6 → 7, flate2 1.1.11.
+- Docs: how Lightroom stores colour labels (the active label set's names,
+  not the interface language) and the default names observed in French,
+  Spanish and Italian Lightroom (`docs/research/label-names.md`). The
+  Spanish names listed before were wrong.
 
 ## [0.2.0] - 2026-11-18
 

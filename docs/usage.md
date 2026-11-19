@@ -128,8 +128,10 @@ to the converted photos.
 
 Colour labels are counted on their own line, for example
 `labels: red 2, yellow 1, green 1, blue 1, purple 1, none 11, custom 0, set en`.
-Lightroom stores a label as text in the language of its interface, so the
-names are mapped with a label set (see `--label-set`). A label that is not
+Lightroom stores a label as text, the name its active colour label set
+gives that colour (the default set's names are in the interface language
+of the time the set was chosen), so the names are mapped with a label set
+(see `--label-set`). A label that is not
 in the set is a custom label: the photo is still converted, without a
 label, and counted as `custom`. The seven counts add up to the converted
 photos. Label names never appear in the output or in the report.
@@ -303,9 +305,9 @@ only). The summary names the detected set (`set auto (detected de)`). If
 the detection is wrong for your catalog, pass `--label-set en` or `de`. A
 missing or invalid file is a command-line error (exit code 2).
 
-French and Spanish standard names are not in `auto` yet: they are pending a
-citable Adobe source for each name. See `docs/research/label-names.md` for
-the candidates, the sources attempted and what is still open. A guard test
+French, Spanish and Italian standard names are not in `auto` yet. They
+have been observed in Lightroom Classic 15.0; see
+`docs/research/label-names.md` for the names and how they were observed. A guard test
 (`no_standard_name_maps_to_two_colors`) keeps any future set from clashing
 with an existing name.
 
