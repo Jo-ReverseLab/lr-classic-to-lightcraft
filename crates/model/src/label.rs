@@ -77,8 +77,8 @@ impl LabelSet {
     /// Every standard set that `auto` recognises, in the order `auto`
     /// consults them. Today these are the English and German sets only.
     ///
-    /// French and Spanish sets are **not** included yet: their names are
-    /// pending a citable Adobe source (see `docs/research/label-names.md`).
+    /// French, Spanish and Italian sets are **not** included yet: their names
+    /// are observed (see `docs/research/label-names.md`) but not added.
     /// When a cited set is added here it is automatically covered by the
     /// `no_standard_name_maps_to_two_colors` collision test, and must be
     /// added to the `auto` chain in `crates/lr2lc-core/src/labels.rs` at the same
